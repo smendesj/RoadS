@@ -31,7 +31,11 @@ export default async function DashboardPage() {
       <NavBar active="dashboard" roleLabel={roleLabel} />
 
       <div className="flex flex-col gap-8 p-10">
-       <DashboardSyncProvider initialColumns={columns} initialSyncedAt={snapshot?.syncedAt ?? null}>
+       <DashboardSyncProvider
+         initialColumns={columns}
+         initialSyncedAt={snapshot?.syncedAt ?? null}
+         canSync={roleLabel !== "Visitante"}
+       >
         <div className="flex items-end justify-between">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-3xl font-extrabold text-rs-text">Dashboard</h1>

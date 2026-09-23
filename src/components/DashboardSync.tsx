@@ -2,13 +2,14 @@
 
 import { createContext, useContext, useState, useTransition, type ReactNode } from "react";
 import { badgeClass } from "@/lib/tones";
-import { syncBoard, type SyncColumn } from "@/lib/actions/sync";
+import { syncBoardAsViewer, type SyncColumn } from "@/lib/actions/sync";
 
 type SyncContextValue = {
   columns: SyncColumn[];
   syncedAt: string | null;
   error: string | null;
   isPending: boolean;
+  canSync: boolean;
   sync: () => void;
 };
 
@@ -23,10 +24,12 @@ function useSync() {
 export function DashboardSyncProvider({
   initialColumns,
   initialSyncedAt = null,
+  canSync,
   children,
 }: {
   initialColumns: SyncColumn[];
   initialSyncedAt?: string | null;
+  canSync: boolean;
   children: ReactNode;
 }) {
   const [columns, setColumns] = useState(initialColumns);
@@ -37,7 +40,7 @@ export function DashboardSyncProvider({
   function sync() {
     setError(null);
     startTransition(async () => {
-      const result = await syncBoard();
+      const result = await syncBoardAsViewer();
       if (result.ok) {
         setColumns(result.columns);
         setSyncedAt(result.syncedAt);
@@ -49,11 +52,25 @@ export function DashboardSyncProvider({
     });
   }
 
-  return <SyncContext.Provider value={{ columns, syncedAt, error, isPending, sync }}>{children}</SyncContext.Provider>;
+  return (
+    <SyncContext.Provider value={{ columns, syncedAt, error, isPending, canSync, sync }}>
+      {children}
+    </SyncContext.Provider>
+  );
 }
 
 export function SyncPill() {
-  const { isPending, error, syncedAt, sync } = useSync();
+  const { isPending, error, syncedAt, canSync, sync } = useSync();
+
+  if (!canSync) {
+    return (
+      <div className="flex items-center gap-2 rounded-full border border-rs-border bg-rs-card px-3.5 py-2">
+        <span className="h-2 w-2 rounded-full bg-green-500" />
+        <span className="text-[13px] text-rs-text-soft">Board sincronizado</span>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col items-end gap-1">
       <button
