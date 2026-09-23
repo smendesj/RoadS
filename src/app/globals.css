@@ -1,26 +1,49 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --rs-bg: #f5f6f8;
+  --rs-card: #ffffff;
+  --rs-border: #e4e6eb;
+  --rs-lane: #edeef1;
+  --rs-text: #14151a;
+  --rs-text-soft: #6b7280;
+  --rs-text-faint: #9ca3af;
+  --rs-brand: #f17223;
+  --rs-brand-text: #b34e17;
+  --rs-brand-soft: #fdeee4;
+}
+
+.dark {
+  --rs-bg: #0b0c0f;
+  --rs-card: #15171c;
+  --rs-border: #22252b;
+  --rs-lane: #1a1c21;
+  --rs-text: #f2f3f5;
+  --rs-text-soft: #9aa0ac;
+  --rs-text-faint: #6b7280;
+  --rs-brand: #f17223;
+  --rs-brand-text: #ffa35c;
+  --rs-brand-soft: #3a2415;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-rs-bg: var(--rs-bg);
+  --color-rs-card: var(--rs-card);
+  --color-rs-border: var(--rs-border);
+  --color-rs-lane: var(--rs-lane);
+  --color-rs-text: var(--rs-text);
+  --color-rs-text-soft: var(--rs-text-soft);
+  --color-rs-text-faint: var(--rs-text-faint);
+  --color-rs-brand: var(--rs-brand);
+  --color-rs-brand-text: var(--rs-brand-text);
+  --color-rs-brand-soft: var(--rs-brand-soft);
+  --font-sans: var(--font-plus-jakarta);
+  --font-mono: var(--font-jetbrains);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--rs-bg);
+  color: var(--rs-text);
 }
