@@ -4,22 +4,9 @@ import { useEffect, useState } from "react";
 import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { ConfigPanel } from "@/components/ConfigPanel";
-import { getLanes, getRoadmapGroups } from "@/lib/mock-data";
+import { createRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { createClient } from "@/lib/supabase/client";
 import type { Effort, Lane, Prioridade, Role, RoadmapGroup, RoadmapItem, ViewAs } from "@/lib/types";
-
-function newItem(): RoadmapItem {
-  return {
-    id: "new-" + Date.now(),
-    title: "Novo item — edite a descrição",
-    produto: "GeoCloud",
-    prioridade: "Medium",
-    effort: "Medium",
-    desc: "Escreva aqui, em linguagem natural, o que precisa ser feito.",
-    url: null,
-    notes: [],
-  };
-}
 
 export default function RoadmapPage() {
   // Real session, real role — null while loading, so we default to the least-privileged view
@@ -43,8 +30,19 @@ export default function RoadmapPage() {
   }, [myRole]);
   const activeView: ViewAs = adminView === "config" ? "scrum_master" : isAdmin ? adminView : ((myRole ?? "dev") as ViewAs);
 
-  const [lanes, setLanes] = useState<Lane[]>(getLanes);
-  const [groups, setGroups] = useState<RoadmapGroup[]>(getRoadmapGroups);
+  const [lanes, setLanes] = useState<Lane[]>([]);
+  const [groups, setGroups] = useState<RoadmapGroup[]>([]);
+  const [boardLoaded, setBoardLoaded] = useState(false);
+
+  function reloadBoard() {
+    getRoadmapBoard().then(({ lanes, groups }) => {
+      setLanes(lanes);
+      setGroups(groups);
+      setBoardLoaded(true);
+    });
+  }
+  useEffect(reloadBoard, []);
+
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
@@ -53,11 +51,12 @@ export default function RoadmapPage() {
 
   function moveToLane(targetLaneId: string) {
     if (!draggingId) return;
+    const itemId = draggingId;
     let found: RoadmapItem | null = null;
 
     const nextLanes = lanes.map((lane) => {
       const items = lane.items.filter((it) => {
-        if (it.id === draggingId) {
+        if (it.id === itemId) {
           found = it;
           return false;
         }
@@ -67,7 +66,7 @@ export default function RoadmapPage() {
     });
     const nextGroups = groups.map((g) => {
       const items = g.items.filter((it) => {
-        if (it.id === draggingId) {
+        if (it.id === itemId) {
           found = it;
           return false;
         }
@@ -80,10 +79,19 @@ export default function RoadmapPage() {
     setLanes(nextLanes.map((lane) => (lane.id === targetLaneId ? { ...lane, items: [...lane.items, found as RoadmapItem] } : lane)));
     setGroups(nextGroups);
     setDraggingId(null);
+
+    moveRoadmapItemLane(itemId, targetLaneId).catch((e) => {
+      console.error("moveRoadmapItemLane failed, reloading board", e);
+      reloadBoard();
+    });
   }
 
   function addItem(laneId: string) {
-    setLanes((prev) => prev.map((lane) => (lane.id === laneId ? { ...lane, items: [...lane.items, newItem()] } : lane)));
+    createRoadmapItem(laneId)
+      .then((item) => {
+        setLanes((prev) => prev.map((lane) => (lane.id === laneId ? { ...lane, items: [...lane.items, item] } : lane)));
+      })
+      .catch((e) => console.error("createRoadmapItem failed", e));
   }
 
   function startEdit(item: RoadmapItem) {
@@ -91,26 +99,13 @@ export default function RoadmapPage() {
     setEditDraft({ prioridade: item.prioridade, effort: item.effort, note: "" });
   }
 
-  function saveEdit(laneId: string, itemId: string) {
+  function saveEdit(itemId: string) {
     if (!editDraft) return;
-    const author: ViewAs = activeView;
-    setLanes((prev) =>
-      prev.map((lane) => {
-        if (lane.id !== laneId) return lane;
-        return {
-          ...lane,
-          items: lane.items.map((it) => {
-            if (it.id !== itemId) return it;
-            const notes = editDraft.note.trim()
-              ? [...it.notes, { id: "n-" + Date.now(), author, when: "agora", text: editDraft.note.trim() }]
-              : it.notes;
-            return { ...it, prioridade: editDraft.prioridade, effort: editDraft.effort, notes };
-          }),
-        };
-      })
-    );
     setEditingId(null);
     setEditDraft(null);
+    saveRoadmapItemEdit(itemId, { ...editDraft, activeView })
+      .then(reloadBoard)
+      .catch((e) => console.error("saveRoadmapItemEdit failed", e));
   }
 
   const roleLabel =
@@ -148,6 +143,8 @@ export default function RoadmapPage() {
 
         {adminView === "config" ? (
           <ConfigPanel />
+        ) : !boardLoaded ? (
+          <p className="text-sm text-rs-text-soft">Carregando...</p>
         ) : (
           <>
             {canEdit && (
@@ -190,7 +187,7 @@ export default function RoadmapPage() {
                       onPrioridadeChange={(v: Prioridade) => setEditDraft((d) => (d ? { ...d, prioridade: v } : d))}
                       onEffortChange={(v: Effort) => setEditDraft((d) => (d ? { ...d, effort: v } : d))}
                       onNoteChange={(v) => setEditDraft((d) => (d ? { ...d, note: v } : d))}
-                      onSaveEdit={() => saveEdit(lane.id, item.id)}
+                      onSaveEdit={() => saveEdit(item.id)}
                     />
                   ))}
 
@@ -223,7 +220,15 @@ export default function RoadmapPage() {
               </div>
               <div className="grid grid-cols-5 items-start gap-4">
                 {groups.map((g) => (
-                  <div key={g.id} className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-lane p-3.5">
+                  <div
+                    key={g.id}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      moveToLane(g.id);
+                    }}
+                    className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-lane p-3.5"
+                  >
                     <span className="text-xs font-extrabold leading-snug text-rs-text-soft">{g.title}</span>
                     {g.items.map((item) => (
                       <ItemCard
