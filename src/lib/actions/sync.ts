@@ -65,7 +65,7 @@ export async function syncBoard(): Promise<SyncResult> {
   try {
     let after: string | null = null;
     for (let page = 0; page < 20; page++) {
-      const res = await fetch("https://api.github.com/graphql", {
+      const res: Response = await fetch("https://api.github.com/graphql", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ query: QUERY, variables: { after } }),
