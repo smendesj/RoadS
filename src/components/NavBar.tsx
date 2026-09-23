@@ -56,12 +56,21 @@ export function NavBar({ active, roleLabel }: { active: "dashboard" | "roadmap";
         >
           <SunMoonIcon theme={theme} />
         </button>
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-rs-brand-soft text-rs-text-soft">
-            <UserIcon />
+        {roleLabel === "Visitante" ? (
+          <Link
+            href="/login"
+            className="rounded-lg bg-rs-brand px-4 py-2 text-sm font-bold text-white"
+          >
+            Entrar
+          </Link>
+        ) : (
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-rs-brand-soft text-rs-text-soft">
+              <UserIcon />
+            </div>
+            <span className="text-sm font-bold text-rs-text">{roleLabel}</span>
           </div>
-          <span className="text-sm font-bold text-rs-text">{roleLabel}</span>
-        </div>
+        )}
       </div>
     </div>
   );

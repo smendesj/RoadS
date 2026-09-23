@@ -62,7 +62,7 @@ export function ItemCard({
 
       {item.notes.map((n) => (
         <div key={n.id} className="rounded-lg bg-rs-lane p-2 text-xs text-rs-text">
-          <b>{n.author === "scrum_master" ? "SCRUM MASTER" : "Dev"}</b>{" "}
+          <b>{n.author === "scrum_master" ? "Scrum Master" : "Dev"}</b>{" "}
           <span className="text-rs-text-faint">· {n.when}</span>
           <div>{n.text}</div>
         </div>

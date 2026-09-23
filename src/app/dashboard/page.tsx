@@ -1,16 +1,29 @@
 import { NavBar } from "@/components/NavBar";
 import { dashboardData } from "@/lib/mock-data";
 import { badgeClass } from "@/lib/tones";
+import { createClient } from "@/lib/supabase/server";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "RoadS — Dashboard" };
 
-export default function DashboardPage() {
+const ROLE_LABEL: Record<string, string> = { admin: "Admin", scrum_master: "Scrum Master", dev: "Dev" };
+
+export default async function DashboardPage() {
   const { branch, kpis, columns, entregas, paralelo, proxima } = dashboardData;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  let roleLabel = "Visitante";
+  if (user) {
+    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+    roleLabel = (profile?.role && ROLE_LABEL[profile.role]) || "Dev";
+  }
 
   return (
     <div className="min-h-screen">
-      <NavBar active="dashboard" roleLabel="Dev" />
+      <NavBar active="dashboard" roleLabel={roleLabel} />
 
       <div className="flex flex-col gap-8 p-10">
         <div className="flex items-end justify-between">
@@ -40,42 +53,9 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        <div className="flex flex-col gap-3.5">
-          <span className="text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Kanban</span>
-          <div className="grid grid-cols-4 gap-5">
-            {columns.map((col) => (
-              <div key={col.key} className="flex flex-col gap-3 rounded-2xl border border-rs-border bg-rs-card p-4.5">
-                <div className="flex items-center justify-between">
-                  <span className={badgeClass(col.tone)}>{col.title}</span>
-                  <span className="text-[13px] font-bold text-rs-text-faint">{col.count}</span>
-                </div>
-                <div className="flex flex-col gap-2">
-                  {col.items.map((it) => (
-                    <a
-                      key={it.ref}
-                      href={it.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded-[10px] bg-rs-lane p-2.5 text-[13px] text-rs-text hover:opacity-80"
-                    >
-                      {it.title}
-                      <div className="mt-0.5 font-mono text-[11px] text-rs-text-faint">{it.ref}</div>
-                    </a>
-                  ))}
-                  {col.items.length === 0 && (
-                    <div className="p-2.5 text-[13px] text-rs-text-faint">Nenhum bloqueio agora.</div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
         <div className="grid grid-cols-[2fr_1fr] items-start gap-5">
           <div className="flex flex-col gap-1 rounded-2xl border border-rs-border bg-rs-card p-7">
-            <span className="mb-2 text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">
-              Esta sprint · comprometido 7,5 dias
-            </span>
+            <span className="mb-2 text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Esta sprint</span>
             {entregas.map((e) => (
               <a
                 key={e.ref}
@@ -108,6 +88,37 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3.5">
+          <span className="text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Kanban completo</span>
+          <div className="grid grid-cols-4 gap-5">
+            {columns.map((col) => (
+              <div key={col.key} className="flex flex-col gap-3 rounded-2xl border border-rs-border bg-rs-card p-4.5">
+                <div className="flex items-center justify-between">
+                  <span className={badgeClass(col.tone)}>{col.title}</span>
+                  <span className="text-[13px] font-bold text-rs-text-faint">{col.count}</span>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {col.items.map((it) => (
+                    <a
+                      key={it.ref}
+                      href={it.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block rounded-[10px] bg-rs-lane p-2.5 text-[13px] text-rs-text hover:opacity-80"
+                    >
+                      {it.title}
+                      <div className="mt-0.5 font-mono text-[11px] text-rs-text-faint">{it.ref}</div>
+                    </a>
+                  ))}
+                  {col.items.length === 0 && (
+                    <div className="p-2.5 text-[13px] text-rs-text-faint">Nenhum bloqueio agora.</div>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 

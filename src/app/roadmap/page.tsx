@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { ConfigPanel } from "@/components/ConfigPanel";
 import { getLanes, getRoadmapGroups } from "@/lib/mock-data";
-import { getAllUsers, getCurrentUser } from "@/lib/current-user";
-import type { Effort, Lane, Prioridade, RoadmapGroup, RoadmapItem, ViewAs } from "@/lib/types";
+import { createClient } from "@/lib/supabase/client";
+import type { Effort, Lane, Prioridade, Role, RoadmapGroup, RoadmapItem, ViewAs } from "@/lib/types";
 
 function newItem(): RoadmapItem {
   return {
@@ -22,12 +22,26 @@ function newItem(): RoadmapItem {
 }
 
 export default function RoadmapPage() {
-  const currentUser = getCurrentUser();
-  const isAdmin = currentUser.role === "admin";
+  // Real session, real role — null while loading, so we default to the least-privileged view
+  // (no toggle, no edit) until we actually know who's asking.
+  const [myRole, setMyRole] = useState<Role | null>(null);
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+      if (profile?.role) setMyRole(profile.role as Role);
+    });
+  }, []);
+
+  const isAdmin = myRole === "admin";
 
   // Non-admins are locked to their own role's view; only admin can flip between them, or open Config.
-  const [adminView, setAdminView] = useState<ViewAs | "config">(isAdmin ? "scrum_master" : currentUser.role === "dev" ? "dev" : "scrum_master");
-  const activeView: ViewAs = adminView === "config" ? "scrum_master" : isAdmin ? adminView : (currentUser.role as ViewAs);
+  const [adminView, setAdminView] = useState<ViewAs | "config">("scrum_master");
+  useEffect(() => {
+    if (myRole && myRole !== "admin") setAdminView(myRole === "dev" ? "dev" : "scrum_master");
+  }, [myRole]);
+  const activeView: ViewAs = adminView === "config" ? "scrum_master" : isAdmin ? adminView : ((myRole ?? "dev") as ViewAs);
 
   const [lanes, setLanes] = useState<Lane[]>(getLanes);
   const [groups, setGroups] = useState<RoadmapGroup[]>(getRoadmapGroups);
@@ -99,7 +113,8 @@ export default function RoadmapPage() {
     setEditDraft(null);
   }
 
-  const roleLabel = adminView === "config" ? "Config" : activeView === "scrum_master" ? "SCRUM MASTER" : "Dev";
+  const roleLabel =
+    myRole === null ? "Visitante" : adminView === "config" ? "Config" : activeView === "scrum_master" ? "Scrum Master" : "Dev";
 
   return (
     <div className="min-h-screen">
@@ -122,7 +137,7 @@ export default function RoadmapPage() {
                     adminView === v ? "bg-zinc-900 text-white" : "text-rs-text-soft"
                   }`}
                 >
-                  {v === "dev" ? "Dev" : v === "scrum_master" ? "SCRUM MASTER" : "Config"}
+                  {v === "dev" ? "Dev" : v === "scrum_master" ? "Scrum Master" : "Config"}
                 </button>
               ))}
             </div>
@@ -130,12 +145,12 @@ export default function RoadmapPage() {
         </div>
 
         {adminView === "config" ? (
-          <ConfigPanel users={getAllUsers()} />
+          <ConfigPanel />
         ) : (
           <>
             {canEdit ? (
               <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
-                Editando como SCRUM MASTER — pode criar, arrastar entre sprints, ajustar prioridade/esforço e comentar.
+                Editando como Scrum Master — pode criar, arrastar entre sprints, ajustar prioridade/esforço e comentar.
               </div>
             ) : (
               <div className="rounded-[10px] bg-rs-lane px-4 py-2.5 text-[13px] font-semibold text-rs-text-soft">
