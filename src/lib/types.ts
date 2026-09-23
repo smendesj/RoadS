@@ -1,11 +1,22 @@
-export type Role = "scrum_master" | "dev";
+export type Role = "admin" | "scrum_master" | "dev";
+/** The two working views a Roadmap card can render as. Admin can look through either one, or Config. */
+export type ViewAs = "dev" | "scrum_master";
+
+export type AppUser = {
+  id: string;
+  name: string;
+  email: string;
+  title: string;
+  role: Role;
+  mustResetPassword: boolean;
+};
 export type Produto = "GeoCloud" | "ELIMS";
 export type Prioridade = "Critical" | "High" | "Medium" | "Low";
 export type Effort = "Low" | "Medium" | "High" | "Very High";
 
 export type Note = {
   id: string;
-  author: Role;
+  author: ViewAs;
   when: string;
   text: string;
 };

@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
+import { ConfigPanel } from "@/components/ConfigPanel";
 import { getLanes, getRoadmapGroups } from "@/lib/mock-data";
-import type { Effort, Lane, Prioridade, RoadmapGroup, RoadmapItem, Role } from "@/lib/types";
+import { getAllUsers, getCurrentUser } from "@/lib/current-user";
+import type { Effort, Lane, Prioridade, RoadmapGroup, RoadmapItem, ViewAs } from "@/lib/types";
 
 function newItem(): RoadmapItem {
   return {
@@ -20,14 +22,20 @@ function newItem(): RoadmapItem {
 }
 
 export default function RoadmapPage() {
-  const [viewAs, setViewAs] = useState<Role>("scrum_master");
+  const currentUser = getCurrentUser();
+  const isAdmin = currentUser.role === "admin";
+
+  // Non-admins are locked to their own role's view; only admin can flip between them, or open Config.
+  const [adminView, setAdminView] = useState<ViewAs | "config">(isAdmin ? "scrum_master" : currentUser.role === "dev" ? "dev" : "scrum_master");
+  const activeView: ViewAs = adminView === "config" ? "scrum_master" : isAdmin ? adminView : (currentUser.role as ViewAs);
+
   const [lanes, setLanes] = useState<Lane[]>(getLanes);
   const [groups, setGroups] = useState<RoadmapGroup[]>(getRoadmapGroups);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
 
-  const canEdit = viewAs === "scrum_master";
+  const canEdit = activeView === "scrum_master";
 
   function moveToLane(targetLaneId: string) {
     if (!draggingId) return;
@@ -71,7 +79,7 @@ export default function RoadmapPage() {
 
   function saveEdit(laneId: string, itemId: string) {
     if (!editDraft) return;
-    const author: Role = viewAs;
+    const author: ViewAs = activeView;
     setLanes((prev) =>
       prev.map((lane) => {
         if (lane.id !== laneId) return lane;
@@ -91,9 +99,11 @@ export default function RoadmapPage() {
     setEditDraft(null);
   }
 
+  const roleLabel = adminView === "config" ? "Config" : activeView === "scrum_master" ? "SCRUM MASTER" : "Dev";
+
   return (
     <div className="min-h-screen">
-      <NavBar active="roadmap" roleLabel={canEdit ? "SCRUM MASTER" : "Dev"} />
+      <NavBar active="roadmap" roleLabel={roleLabel} />
 
       <div className="flex flex-col gap-6 p-10">
         <div className="flex items-end justify-between">
@@ -101,118 +111,126 @@ export default function RoadmapPage() {
             <h1 className="text-3xl font-extrabold text-rs-text">Roadmap</h1>
             <p className="text-[15px] text-rs-text-soft">GeoCloud · defina o que entra e quando — sem SCRUM</p>
           </div>
-          <div className="flex items-center gap-1 rounded-full border border-rs-border bg-rs-card p-1">
-            <button
-              onClick={() => setViewAs("dev")}
-              className={`rounded-full px-4 py-2 text-[13px] font-bold ${!canEdit ? "bg-zinc-900 text-white" : "text-rs-text-soft"}`}
-            >
-              Dev
-            </button>
-            <button
-              onClick={() => setViewAs("scrum_master")}
-              className={`rounded-full px-4 py-2 text-[13px] font-bold ${canEdit ? "bg-zinc-900 text-white" : "text-rs-text-soft"}`}
-            >
-              SCRUM MASTER
-            </button>
-          </div>
-        </div>
 
-        {canEdit ? (
-          <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
-            Editando como SCRUM MASTER — pode criar, arrastar entre sprints, ajustar prioridade/esforço e comentar.
-          </div>
-        ) : (
-          <div className="rounded-[10px] bg-rs-lane px-4 py-2.5 text-[13px] font-semibold text-rs-text-soft">
-            Vendo como Dev — leitura e comentário, sem mover itens.
-          </div>
-        )}
-
-        <div className="grid grid-cols-3 items-start gap-5">
-          {lanes.map((lane) => (
-            <div
-              key={lane.id}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                moveToLane(lane.id);
-              }}
-              className="flex min-h-[240px] flex-col gap-3 rounded-2xl border border-rs-border bg-rs-lane p-4"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-extrabold text-rs-text">{lane.title}</div>
-                  <div className="text-[11px] text-rs-text-faint">{lane.dates}</div>
-                </div>
-                <span className="rounded-full border border-rs-border bg-rs-card px-2.5 py-0.5 text-xs font-bold text-rs-text-faint">
-                  {lane.items.length}
-                </span>
-              </div>
-
-              {lane.items.map((item) => (
-                <ItemCard
-                  key={item.id}
-                  item={item}
-                  canDrag={canEdit}
-                  isEditing={editingId === item.id}
-                  editDraft={editingId === item.id ? editDraft : null}
-                  onDragStart={() => setDraggingId(item.id)}
-                  onDragEnd={() => setDraggingId(null)}
-                  onStartEdit={() => startEdit(item)}
-                  onPrioridadeChange={(v: Prioridade) => setEditDraft((d) => (d ? { ...d, prioridade: v } : d))}
-                  onEffortChange={(v: Effort) => setEditDraft((d) => (d ? { ...d, effort: v } : d))}
-                  onNoteChange={(v) => setEditDraft((d) => (d ? { ...d, note: v } : d))}
-                  onSaveEdit={() => saveEdit(lane.id, item.id)}
-                />
-              ))}
-
-              {canEdit && (
+          {isAdmin && (
+            <div className="flex items-center gap-1 rounded-full border border-rs-border bg-rs-card p-1">
+              {(["dev", "scrum_master", "config"] as const).map((v) => (
                 <button
-                  onClick={() => addItem(lane.id)}
-                  className="rounded-[10px] border border-dashed border-rs-border bg-rs-card p-2.5 text-[13px] font-bold text-rs-text-soft"
+                  key={v}
+                  onClick={() => setAdminView(v)}
+                  className={`rounded-full px-4 py-2 text-[13px] font-bold ${
+                    adminView === v ? "bg-zinc-900 text-white" : "text-rs-text-soft"
+                  }`}
                 >
-                  + Novo item
+                  {v === "dev" ? "Dev" : v === "scrum_master" ? "SCRUM MASTER" : "Config"}
                 </button>
-              )}
+              ))}
             </div>
-          ))}
+          )}
         </div>
 
-        <div className="text-center text-xs text-rs-text-faint">
-          Arraste um item entre sprints pra reagendar, ou puxe do Roadmap completo abaixo · alimenta o ROADMAP e os SPRINT.md semanais
-        </div>
+        {adminView === "config" ? (
+          <ConfigPanel users={getAllUsers()} />
+        ) : (
+          <>
+            {canEdit ? (
+              <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
+                Editando como SCRUM MASTER — pode criar, arrastar entre sprints, ajustar prioridade/esforço e comentar.
+              </div>
+            ) : (
+              <div className="rounded-[10px] bg-rs-lane px-4 py-2.5 text-[13px] font-semibold text-rs-text-soft">
+                Vendo como Dev — leitura e comentário, sem mover itens.
+              </div>
+            )}
 
-        <div className="mt-3 flex flex-col gap-3.5 border-t border-rs-border pt-6">
-          <div>
-            <div className="text-xl font-extrabold text-rs-text">Roadmap completo</div>
-            <div className="text-[13px] text-rs-text-soft">
-              Tudo que ainda não entrou em uma sprint — arraste pra uma das três colunas acima quando priorizar
+            <div className="grid grid-cols-3 items-start gap-5">
+              {lanes.map((lane) => (
+                <div
+                  key={lane.id}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    moveToLane(lane.id);
+                  }}
+                  className="flex min-h-[240px] flex-col gap-3 rounded-2xl border border-rs-border bg-rs-lane p-4"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-extrabold text-rs-text">{lane.title}</div>
+                      <div className="text-[11px] text-rs-text-faint">{lane.dates}</div>
+                    </div>
+                    <span className="rounded-full border border-rs-border bg-rs-card px-2.5 py-0.5 text-xs font-bold text-rs-text-faint">
+                      {lane.items.length}
+                    </span>
+                  </div>
+
+                  {lane.items.map((item) => (
+                    <ItemCard
+                      key={item.id}
+                      item={item}
+                      canDrag={canEdit}
+                      isEditing={editingId === item.id}
+                      editDraft={editingId === item.id ? editDraft : null}
+                      onDragStart={() => setDraggingId(item.id)}
+                      onDragEnd={() => setDraggingId(null)}
+                      onStartEdit={() => startEdit(item)}
+                      onPrioridadeChange={(v: Prioridade) => setEditDraft((d) => (d ? { ...d, prioridade: v } : d))}
+                      onEffortChange={(v: Effort) => setEditDraft((d) => (d ? { ...d, effort: v } : d))}
+                      onNoteChange={(v) => setEditDraft((d) => (d ? { ...d, note: v } : d))}
+                      onSaveEdit={() => saveEdit(lane.id, item.id)}
+                    />
+                  ))}
+
+                  {canEdit && (
+                    <button
+                      onClick={() => addItem(lane.id)}
+                      className="rounded-[10px] border border-dashed border-rs-border bg-rs-card p-2.5 text-[13px] font-bold text-rs-text-soft"
+                    >
+                      + Novo item
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
-          </div>
-          <div className="grid grid-cols-5 items-start gap-4">
-            {groups.map((g) => (
-              <div key={g.id} className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-lane p-3.5">
-                <span className="text-xs font-extrabold leading-snug text-rs-text-soft">{g.title}</span>
-                {g.items.map((item) => (
-                  <ItemCard
-                    key={item.id}
-                    item={item}
-                    compact
-                    canDrag={canEdit}
-                    isEditing={false}
-                    editDraft={null}
-                    onDragStart={() => setDraggingId(item.id)}
-                    onDragEnd={() => setDraggingId(null)}
-                    onStartEdit={() => {}}
-                    onPrioridadeChange={() => {}}
-                    onEffortChange={() => {}}
-                    onNoteChange={() => {}}
-                    onSaveEdit={() => {}}
-                  />
+
+            <div className="text-center text-xs text-rs-text-faint">
+              Arraste um item entre sprints pra reagendar, ou puxe do Roadmap completo abaixo · alimenta o ROADMAP e os SPRINT.md semanais
+            </div>
+
+            <div className="mt-3 flex flex-col gap-3.5 border-t border-rs-border pt-6">
+              <div>
+                <div className="text-xl font-extrabold text-rs-text">Roadmap completo</div>
+                <div className="text-[13px] text-rs-text-soft">
+                  Tudo que ainda não entrou em uma sprint — arraste pra uma das três colunas acima quando priorizar
+                </div>
+              </div>
+              <div className="grid grid-cols-5 items-start gap-4">
+                {groups.map((g) => (
+                  <div key={g.id} className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-lane p-3.5">
+                    <span className="text-xs font-extrabold leading-snug text-rs-text-soft">{g.title}</span>
+                    {g.items.map((item) => (
+                      <ItemCard
+                        key={item.id}
+                        item={item}
+                        compact
+                        canDrag={canEdit}
+                        isEditing={false}
+                        editDraft={null}
+                        onDragStart={() => setDraggingId(item.id)}
+                        onDragEnd={() => setDraggingId(null)}
+                        onStartEdit={() => {}}
+                        onPrioridadeChange={() => {}}
+                        onEffortChange={() => {}}
+                        onNoteChange={() => {}}
+                        onSaveEdit={() => {}}
+                      />
+                    ))}
+                  </div>
                 ))}
               </div>
-            ))}
-          </div>
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
