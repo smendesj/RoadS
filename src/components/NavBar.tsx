@@ -35,7 +35,13 @@ export function NavBar({ active, roleLabel }: { active: "dashboard" | "roadmap";
   return (
     <div className="flex h-[72px] items-center justify-between border-b border-rs-border bg-rs-card px-10">
       <div className="flex items-center gap-2.5">
-        <div className="h-3.5 w-3.5 rounded-[4px] bg-rs-brand" />
+        <div className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+          <div className="absolute h-[10px] w-[10px] rotate-[45deg] rounded-[3px] bg-linear-to-br from-rs-brand to-rs-brand-text" />
+          <svg width="9" height="7" viewBox="0 0 20 16" fill="none" className="relative">
+            <path d="M1 2 L8 8 L1 14" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            <path d="M10 2 L17 8 L10 14" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+          </svg>
+        </div>
         <span className="text-xl font-extrabold tracking-tight text-rs-text">RoadS</span>
       </div>
 

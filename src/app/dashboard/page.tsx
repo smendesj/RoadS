@@ -1,4 +1,6 @@
 import { NavBar } from "@/components/NavBar";
+import { DashboardSyncProvider, KanbanColumns, SyncPill } from "@/components/DashboardSync";
+import { getLatestBoardSnapshot } from "@/lib/actions/sync";
 import { dashboardData } from "@/lib/mock-data";
 import { badgeClass } from "@/lib/tones";
 import { createClient } from "@/lib/supabase/server";
@@ -9,7 +11,7 @@ export const metadata: Metadata = { title: "RoadS — Dashboard" };
 const ROLE_LABEL: Record<string, string> = { admin: "Admin", scrum_master: "Scrum Master", dev: "Dev" };
 
 export default async function DashboardPage() {
-  const { branch, kpis, columns, entregas, paralelo, proxima } = dashboardData;
+  const { branch, kpis, entregas, paralelo, proxima } = dashboardData;
 
   const supabase = await createClient();
   const {
@@ -21,11 +23,15 @@ export default async function DashboardPage() {
     roleLabel = (profile?.role && ROLE_LABEL[profile.role]) || "Dev";
   }
 
+  const snapshot = await getLatestBoardSnapshot();
+  const columns = snapshot?.columns ?? dashboardData.columns;
+
   return (
     <div className="min-h-screen">
       <NavBar active="dashboard" roleLabel={roleLabel} />
 
       <div className="flex flex-col gap-8 p-10">
+       <DashboardSyncProvider initialColumns={columns} initialSyncedAt={snapshot?.syncedAt ?? null}>
         <div className="flex items-end justify-between">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-3xl font-extrabold text-rs-text">Dashboard</h1>
@@ -33,13 +39,10 @@ export default async function DashboardPage() {
               GeoCloud · <span className="font-mono">{branch}</span>
             </p>
           </div>
-          <div className="flex items-center gap-2 rounded-full border border-rs-border bg-rs-card px-3.5 py-2">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
-            <span className="text-[13px] text-rs-text-soft">Board sincronizado</span>
-          </div>
+          <SyncPill />
         </div>
 
-        <div className="grid grid-cols-4 gap-5">
+        <div className="grid grid-cols-3 gap-5">
           {kpis.map((kpi) => (
             <a
               key={kpi.label}
@@ -92,35 +95,10 @@ export default async function DashboardPage() {
         </div>
 
         <div className="flex flex-col gap-3.5">
-          <span className="text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Kanban completo</span>
-          <div className="grid grid-cols-4 gap-5">
-            {columns.map((col) => (
-              <div key={col.key} className="flex flex-col gap-3 rounded-2xl border border-rs-border bg-rs-card p-4.5">
-                <div className="flex items-center justify-between">
-                  <span className={badgeClass(col.tone)}>{col.title}</span>
-                  <span className="text-[13px] font-bold text-rs-text-faint">{col.count}</span>
-                </div>
-                <div className="flex flex-col gap-2">
-                  {col.items.map((it) => (
-                    <a
-                      key={it.ref}
-                      href={it.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block rounded-[10px] bg-rs-lane p-2.5 text-[13px] text-rs-text hover:opacity-80"
-                    >
-                      {it.title}
-                      <div className="mt-0.5 font-mono text-[11px] text-rs-text-faint">{it.ref}</div>
-                    </a>
-                  ))}
-                  {col.items.length === 0 && (
-                    <div className="p-2.5 text-[13px] text-rs-text-faint">Nenhum bloqueio agora.</div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+          <span className="text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Kanban</span>
+          <KanbanColumns />
         </div>
+       </DashboardSyncProvider>
 
         <div className="py-3 text-center text-xs text-rs-text-faint">
           RoadS · dados reais do GitHub Projects, Essencis-Labs #7 · substitui a apresentação semanal

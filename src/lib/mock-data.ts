@@ -141,9 +141,8 @@ export function getRoadmapGroups(): RoadmapGroup[] {
 export const dashboardData = {
   branch: "SPRINT-21_09-25_09",
   kpis: [
-    { label: "Itens ativos", value: "3", hint: "Sprint atual · 21–25/09", tone: "neutral" as const },
+    { label: "Development", value: "3", hint: "Sprint atual · 21–25/09", tone: "neutral" as const },
     { label: "Concluídas na sprint", value: "0 de 3", hint: "Comprometidas esta semana", tone: "green" as const },
-    { label: "Em andamento", value: "3", hint: "Todos em desenvolvimento", tone: "brand" as const },
     { label: "Bloqueios", value: "0", hint: "Nenhum agora", tone: "green" as const },
   ],
   columns: [

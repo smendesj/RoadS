@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/sync-board",
+      "schedule": "0 11-23 * * *"
+    }
+  ]
+}

@@ -124,7 +124,9 @@ export default function RoadmapPage() {
         <div className="flex items-end justify-between">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-3xl font-extrabold text-rs-text">Roadmap</h1>
-            <p className="text-[15px] text-rs-text-soft">GeoCloud · defina o que entra e quando — sem SCRUM</p>
+            {adminView !== "config" && activeView === "scrum_master" && (
+              <p className="text-[15px] text-rs-text-soft">GeoCloud · defina o que entra e quando</p>
+            )}
           </div>
 
           {isAdmin && (
@@ -148,13 +150,9 @@ export default function RoadmapPage() {
           <ConfigPanel />
         ) : (
           <>
-            {canEdit ? (
+            {canEdit && (
               <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
                 Editando como Scrum Master — pode criar, arrastar entre sprints, ajustar prioridade/esforço e comentar.
-              </div>
-            ) : (
-              <div className="rounded-[10px] bg-rs-lane px-4 py-2.5 text-[13px] font-semibold text-rs-text-soft">
-                Vendo como Dev — leitura e comentário, sem mover itens.
               </div>
             )}
 
@@ -208,16 +206,20 @@ export default function RoadmapPage() {
               ))}
             </div>
 
-            <div className="text-center text-xs text-rs-text-faint">
-              Arraste um item entre sprints pra reagendar, ou puxe do Roadmap completo abaixo · alimenta o ROADMAP e os SPRINT.md semanais
-            </div>
+            {canEdit && (
+              <div className="text-center text-xs text-rs-text-faint">
+                Arraste um item entre sprints pra reagendar, ou puxe do Roadmap abaixo · alimenta o ROADMAP e os SPRINT.md semanais
+              </div>
+            )}
 
             <div className="mt-3 flex flex-col gap-3.5 border-t border-rs-border pt-6">
               <div>
-                <div className="text-xl font-extrabold text-rs-text">Roadmap completo</div>
-                <div className="text-[13px] text-rs-text-soft">
-                  Tudo que ainda não entrou em uma sprint — arraste pra uma das três colunas acima quando priorizar
-                </div>
+                <div className="text-xl font-extrabold text-rs-text">Roadmap</div>
+                {canEdit && (
+                  <div className="text-[13px] text-rs-text-soft">
+                    Tudo que ainda não entrou em uma sprint — arraste pra uma das três colunas acima quando priorizar
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-5 items-start gap-4">
                 {groups.map((g) => (
