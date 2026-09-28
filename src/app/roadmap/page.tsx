@@ -3,19 +3,20 @@
 import { useEffect, useState } from "react";
 import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
-import { ConfigPanel } from "@/components/ConfigPanel";
-import { createRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
+import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { createClient } from "@/lib/supabase/client";
-import type { Effort, Lane, Prioridade, Role, RoadmapGroup, RoadmapItem, ViewAs } from "@/lib/types";
+import type { Lane, Role, RoadmapGroup, RoadmapItem, ViewAs } from "@/lib/types";
 
 export default function RoadmapPage() {
   // Real session, real role — null while loading, so we default to the least-privileged view
   // (no toggle, no edit) until we actually know who's asking.
   const [myRole, setMyRole] = useState<Role | null>(null);
+  const [myId, setMyId] = useState<string | null>(null);
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return;
+      setMyId(user.id);
       const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
       if (profile?.role) setMyRole(profile.role as Role);
     });
@@ -23,12 +24,13 @@ export default function RoadmapPage() {
 
   const isAdmin = myRole === "admin";
 
-  // Non-admins are locked to their own role's view; only admin can flip between them, or open Config.
-  const [adminView, setAdminView] = useState<ViewAs | "config">("scrum_master");
+  // Non-admins are locked to their own role's view; only admin can flip between them.
+  // (Config is its own admin-only tab in the NavBar, not part of this toggle.)
+  const [adminView, setAdminView] = useState<ViewAs>("scrum_master");
   useEffect(() => {
     if (myRole && myRole !== "admin") setAdminView(myRole === "dev" ? "dev" : "scrum_master");
   }, [myRole]);
-  const activeView: ViewAs = adminView === "config" ? "scrum_master" : isAdmin ? adminView : ((myRole ?? "dev") as ViewAs);
+  const activeView: ViewAs = isAdmin ? adminView : ((myRole ?? "dev") as ViewAs);
 
   const [lanes, setLanes] = useState<Lane[]>([]);
   const [groups, setGroups] = useState<RoadmapGroup[]>([]);
@@ -96,7 +98,34 @@ export default function RoadmapPage() {
 
   function startEdit(item: RoadmapItem) {
     setEditingId(item.id);
-    setEditDraft({ prioridade: item.prioridade, effort: item.effort, note: "" });
+    setEditDraft({
+      prioridade: item.prioridade,
+      effort: item.effort,
+      note: "",
+      content: canEditContent(item) ? { title: item.title, description: item.desc, produto: item.produto } : undefined,
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditDraft(null);
+  }
+
+  // Admin has full control. A scrum_master fully edits and deletes only their own items, can
+  // still adjust prioridade/effort/nota/lane on the seeded ones (no creator), and can't touch
+  // items another user created. Mirrors getItemAccess in roadmap.ts.
+  const isOwn = (item: RoadmapItem) => !!myId && item.createdBy === myId;
+  const canModifyItem = (item: RoadmapItem) => canEdit && (isAdmin || isOwn(item) || !item.createdBy);
+  const canEditContent = (item: RoadmapItem) => isAdmin || isOwn(item);
+  const canDeleteItem = (item: RoadmapItem) => canEdit && (isAdmin || isOwn(item));
+
+  function removeItem(itemId: string) {
+    setLanes((prev) => prev.map((lane) => ({ ...lane, items: lane.items.filter((it) => it.id !== itemId) })));
+    setGroups((prev) => prev.map((g) => ({ ...g, items: g.items.filter((it) => it.id !== itemId) })));
+    deleteRoadmapItem(itemId).catch((e) => {
+      console.error("deleteRoadmapItem failed, reloading board", e);
+      reloadBoard();
+    });
   }
 
   function saveEdit(itemId: string) {
@@ -108,25 +137,24 @@ export default function RoadmapPage() {
       .catch((e) => console.error("saveRoadmapItemEdit failed", e));
   }
 
-  const roleLabel =
-    myRole === null ? "Visitante" : adminView === "config" ? "Config" : activeView === "scrum_master" ? "Scrum Master" : "Dev";
+  const roleLabel = myRole === null ? "Visitante" : activeView === "scrum_master" ? "Scrum Master" : "Dev";
 
   return (
     <div className="min-h-screen">
-      <NavBar active="roadmap" roleLabel={roleLabel} />
+      <NavBar active="roadmap" roleLabel={roleLabel} showConfig={isAdmin} />
 
       <div className="flex flex-col gap-6 p-10">
         <div className="flex items-end justify-between">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-3xl font-extrabold text-rs-text">Roadmap</h1>
-            {adminView !== "config" && activeView === "scrum_master" && (
+            {activeView === "scrum_master" && (
               <p className="text-[15px] text-rs-text-soft">GeoCloud · defina o que entra e quando</p>
             )}
           </div>
 
           {isAdmin && (
             <div className="flex items-center gap-1 rounded-full border border-rs-border bg-rs-card p-1">
-              {(["dev", "scrum_master", "config"] as const).map((v) => (
+              {(["dev", "scrum_master"] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => setAdminView(v)}
@@ -134,22 +162,20 @@ export default function RoadmapPage() {
                     adminView === v ? "bg-zinc-900 text-white" : "text-rs-text-soft"
                   }`}
                 >
-                  {v === "dev" ? "Dev" : v === "scrum_master" ? "Scrum Master" : "Config"}
+                  {v === "dev" ? "Dev" : "Scrum Master"}
                 </button>
               ))}
             </div>
           )}
         </div>
 
-        {adminView === "config" ? (
-          <ConfigPanel />
-        ) : !boardLoaded ? (
+        {!boardLoaded ? (
           <p className="text-sm text-rs-text-soft">Carregando...</p>
         ) : (
           <>
             {canEdit && (
               <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
-                Editando como Scrum Master — pode criar, arrastar entre sprints, ajustar prioridade/esforço e comentar.
+                Editando como Scrum Master — pode criar, arrastar entre sprints, ajustar prioridade/esforço e comentar. {isAdmin ? "Como admin, você edita e exclui qualquer item." : "Itens que você criou podem ser editados por completo e excluídos; itens de outros usuários ficam só para leitura."}
               </div>
             )}
 
@@ -178,16 +204,18 @@ export default function RoadmapPage() {
                     <ItemCard
                       key={item.id}
                       item={item}
-                      canDrag={canEdit}
+                      canDrag={canModifyItem(item)}
                       isEditing={editingId === item.id}
                       editDraft={editingId === item.id ? editDraft : null}
                       onDragStart={() => setDraggingId(item.id)}
                       onDragEnd={() => setDraggingId(null)}
+                      canDelete={canDeleteItem(item)}
+                      canEditContent={canEditContent(item)}
                       onStartEdit={() => startEdit(item)}
-                      onPrioridadeChange={(v: Prioridade) => setEditDraft((d) => (d ? { ...d, prioridade: v } : d))}
-                      onEffortChange={(v: Effort) => setEditDraft((d) => (d ? { ...d, effort: v } : d))}
-                      onNoteChange={(v) => setEditDraft((d) => (d ? { ...d, note: v } : d))}
+                      onDraftChange={setEditDraft}
                       onSaveEdit={() => saveEdit(item.id)}
+                      onCancelEdit={cancelEdit}
+                      onDelete={() => removeItem(item.id)}
                     />
                   ))}
 
@@ -235,16 +263,17 @@ export default function RoadmapPage() {
                         key={item.id}
                         item={item}
                         compact
-                        canDrag={canEdit}
+                        canDrag={canModifyItem(item)}
                         isEditing={false}
                         editDraft={null}
                         onDragStart={() => setDraggingId(item.id)}
                         onDragEnd={() => setDraggingId(null)}
+                        canDelete={canDeleteItem(item)}
                         onStartEdit={() => {}}
-                        onPrioridadeChange={() => {}}
-                        onEffortChange={() => {}}
-                        onNoteChange={() => {}}
+                        onDraftChange={() => {}}
                         onSaveEdit={() => {}}
+                        onCancelEdit={() => {}}
+                        onDelete={() => removeItem(item.id)}
                       />
                     ))}
                   </div>

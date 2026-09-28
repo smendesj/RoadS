@@ -104,7 +104,8 @@ export function KanbanColumns() {
             <span className={badgeClass(col.tone)}>{col.title}</span>
             <span className="text-[13px] font-bold text-rs-text-faint">{col.count}</span>
           </div>
-          <div className="flex flex-col gap-2">
+          {/* Every issue in the column; the list caps at ~5 cards tall and scrolls for the rest. */}
+          <div className="-mr-2 flex max-h-[440px] flex-col gap-2 overflow-y-auto pr-2">
             {col.items.map((it) => (
               <a
                 key={it.ref}

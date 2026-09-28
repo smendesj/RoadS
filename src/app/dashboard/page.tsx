@@ -18,9 +18,11 @@ export default async function DashboardPage() {
     data: { user },
   } = await supabase.auth.getUser();
   let roleLabel = "Visitante";
+  let isAdmin = false;
   if (user) {
     const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
     roleLabel = (profile?.role && ROLE_LABEL[profile.role]) || "Dev";
+    isAdmin = profile?.role === "admin";
   }
 
   const snapshot = await getLatestBoardSnapshot();
@@ -28,7 +30,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="min-h-screen">
-      <NavBar active="dashboard" roleLabel={roleLabel} />
+      <NavBar active="dashboard" roleLabel={roleLabel} showConfig={isAdmin} />
 
       <div className="flex flex-col gap-8 p-10">
        <DashboardSyncProvider

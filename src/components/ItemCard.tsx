@@ -1,12 +1,19 @@
 "use client";
 
-import type { Effort, Prioridade, RoadmapItem } from "@/lib/types";
+import type { Effort, Prioridade, Produto, RoadmapItem } from "@/lib/types";
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
 
 const PRIORIDADES: Prioridade[] = ["Critical", "High", "Medium", "Low"];
 const EFFORTS: Effort[] = ["Very High", "High", "Medium", "Low"];
+const PRODUTOS: Produto[] = ["GeoCloud", "ELIMS"];
 
-export type EditDraft = { prioridade: Prioridade; effort: Effort; note: string };
+/** content is only present when the viewer may edit title/description/produto (admin, or RoadS-created items). */
+export type EditDraft = {
+  prioridade: Prioridade;
+  effort: Effort;
+  note: string;
+  content?: { title: string; description: string; produto: Produto };
+};
 
 export function ItemCard({
   item,
@@ -14,30 +21,39 @@ export function ItemCard({
   isEditing,
   editDraft,
   compact = false,
+  canDelete = false,
+  canEditContent = false,
   onDragStart,
   onDragEnd,
   onStartEdit,
-  onPrioridadeChange,
-  onEffortChange,
-  onNoteChange,
+  onDraftChange,
   onSaveEdit,
+  onCancelEdit,
+  onDelete,
 }: {
   item: RoadmapItem;
   canDrag: boolean;
   isEditing: boolean;
   editDraft: EditDraft | null;
   compact?: boolean;
+  canDelete?: boolean;
+  canEditContent?: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
   onStartEdit: () => void;
-  onPrioridadeChange: (v: Prioridade) => void;
-  onEffortChange: (v: Effort) => void;
-  onNoteChange: (v: string) => void;
+  onDraftChange: (draft: EditDraft) => void;
   onSaveEdit: () => void;
+  onCancelEdit: () => void;
+  onDelete: () => void;
 }) {
+  const content = editDraft?.content;
+  const setContent = (patch: Partial<NonNullable<EditDraft["content"]>>) => {
+    if (editDraft && content) onDraftChange({ ...editDraft, content: { ...content, ...patch } });
+  };
+
   return (
     <div
-      draggable={canDrag}
+      draggable={canDrag && !isEditing}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       className={`flex cursor-move flex-col gap-2.5 rounded-xl border border-rs-border bg-rs-card ${
@@ -70,12 +86,47 @@ export function ItemCard({
 
       {isEditing && editDraft && !compact && (
         <div className="flex flex-col gap-2 rounded-lg bg-rs-lane p-2.5">
+          {content && (
+            <>
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Título</span>
+                <input
+                  value={content.title}
+                  onChange={(e) => setContent({ title: e.target.value })}
+                  className="rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-xs font-bold text-rs-text"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Descrição</span>
+                <textarea
+                  value={content.description}
+                  onChange={(e) => setContent({ description: e.target.value })}
+                  rows={3}
+                  className="resize-y rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-xs text-rs-text"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Produto</span>
+                <select
+                  value={content.produto}
+                  onChange={(e) => setContent({ produto: e.target.value as Produto })}
+                  className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-xs font-bold text-rs-text"
+                >
+                  {PRODUTOS.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
           <div className="flex gap-2">
             <label className="flex flex-1 flex-col gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Prioridade</span>
               <select
                 value={editDraft.prioridade}
-                onChange={(e) => onPrioridadeChange(e.target.value as Prioridade)}
+                onChange={(e) => onDraftChange({ ...editDraft, prioridade: e.target.value as Prioridade })}
                 className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-xs font-bold text-rs-text"
               >
                 {PRIORIDADES.map((p) => (
@@ -89,7 +140,7 @@ export function ItemCard({
               <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Effort</span>
               <select
                 value={editDraft.effort}
-                onChange={(e) => onEffortChange(e.target.value as Effort)}
+                onChange={(e) => onDraftChange({ ...editDraft, effort: e.target.value as Effort })}
                 className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-xs font-bold text-rs-text"
               >
                 {EFFORTS.map((ef) => (
@@ -103,21 +154,42 @@ export function ItemCard({
           <div className="flex gap-1.5">
             <input
               value={editDraft.note}
-              onChange={(e) => onNoteChange(e.target.value)}
+              onChange={(e) => onDraftChange({ ...editDraft, note: e.target.value })}
               placeholder="Escrever nota (opcional)..."
-              className="flex-grow rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-xs text-rs-text"
+              className="min-w-0 flex-grow rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-xs text-rs-text"
             />
-            <button onClick={onSaveEdit} className="rounded-lg bg-rs-brand px-3 py-2 text-xs font-bold text-white">
+            <button
+              onClick={onSaveEdit}
+              disabled={!!content && !content.title.trim()}
+              className="rounded-lg bg-rs-brand px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+            >
               Salvar
+            </button>
+            <button onClick={onCancelEdit} className="rounded-lg px-2 py-2 text-xs font-bold text-rs-text-soft">
+              Cancelar
             </button>
           </div>
         </div>
       )}
 
-      {canDrag && !compact && !isEditing && (
-        <button onClick={onStartEdit} className="self-start text-xs font-bold text-rs-brand-text">
-          + nota
-        </button>
+      {canDrag && !isEditing && (!compact || canDelete) && (
+        <div className="flex items-center gap-2">
+          {!compact && (
+            <button onClick={onStartEdit} className="text-xs font-bold text-rs-brand-text">
+              {canEditContent ? "Editar" : "+ nota"}
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={() => {
+                if (window.confirm(`Excluir "${item.title}"? Não dá pra desfazer.`)) onDelete();
+              }}
+              className="ml-auto text-xs font-bold text-red-600 dark:text-red-400"
+            >
+              Excluir
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

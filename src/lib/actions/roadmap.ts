@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
-import type { Effort, Lane, Prioridade, RoadmapGroup, RoadmapItem, ViewAs } from "@/lib/types";
+import type { Effort, Lane, Prioridade, Produto, RoadmapGroup, RoadmapItem, ViewAs } from "@/lib/types";
 
 function formatDateRange(start: string, end: string): string {
   const [, sm, sd] = start.split("-");
@@ -18,6 +18,7 @@ type ItemRow = {
   prioridade: Prioridade;
   effort: Effort;
   github_issue_url: string | null;
+  created_by: string | null;
   notes: { id: string; author_role: string; created_at: string; body: string }[];
 };
 
@@ -30,6 +31,7 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
     effort: row.effort,
     desc: row.description,
     url: row.github_issue_url,
+    createdBy: row.created_by,
     notes: row.notes
       .slice()
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -53,7 +55,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
 
   const { data: items, error: itemsError } = await supabase
     .from("roadmap_items")
-    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, notes:item_notes(id, author_role, created_at, body)")
+    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, created_by, notes:item_notes(id, author_role, created_at, body)")
     .order("sort_order");
   if (itemsError) throw itemsError;
 
@@ -116,7 +118,7 @@ export async function createRoadmapItem(laneId: string): Promise<RoadmapItem> {
       effort: "Medium",
       created_by: userId,
     })
-    .select("id, lane_id, title, description, produto, prioridade, effort, github_issue_url")
+    .select("id, lane_id, title, description, produto, prioridade, effort, github_issue_url, created_by")
     .single();
   if (error) throw error;
 
@@ -125,21 +127,72 @@ export async function createRoadmapItem(laneId: string): Promise<RoadmapItem> {
   return toRoadmapItem({ ...data, notes: [] });
 }
 
+// Who may change what on an item:
+//   * admin — anything;
+//   * scrum_master on their own item (created_by = them) — everything, delete included;
+//   * scrum_master on a seeded item (created_by null) — prioridade/effort/nota/lane only;
+//   * scrum_master on another user's item — nothing.
+// RLS + triggers in 0007 enforce the same rules in the DB.
+type ItemAccess = { canModify: boolean; canEditContent: boolean; canDelete: boolean };
+
+async function getItemAccess(
+  itemId: string,
+  actor: { userId: string; realRole: "scrum_master" | "admin" }
+): Promise<ItemAccess & { item: { lane_id: string; title: string } }> {
+  const supabase = await createServerSupabase();
+  const { data: item, error } = await supabase
+    .from("roadmap_items")
+    .select("lane_id, title, created_by")
+    .eq("id", itemId)
+    .single();
+  if (error) throw error;
+
+  const isAdmin = actor.realRole === "admin";
+  const isOwn = item.created_by === actor.userId;
+  return {
+    item,
+    canModify: isAdmin || isOwn || item.created_by === null,
+    canEditContent: isAdmin || isOwn,
+    canDelete: isAdmin || isOwn,
+  };
+}
+
 export async function saveRoadmapItemEdit(
   itemId: string,
-  input: { prioridade: Prioridade; effort: Effort; note: string; activeView: ViewAs }
+  input: {
+    prioridade: Prioridade;
+    effort: Effort;
+    note: string;
+    activeView: ViewAs;
+    content?: { title: string; description: string; produto: Produto };
+  }
 ): Promise<void> {
-  const { userId, realRole } = await requireScrumMasterActor();
+  const actor = await requireScrumMasterActor();
+  const { userId, realRole } = actor;
   const supabase = await createServerSupabase();
+
+  const access = await getItemAccess(itemId, actor);
+  if (!access.canModify || (input.content && !access.canEditContent)) throw new Error("forbidden");
 
   // An admin can legitimately post as either hat; a real scrum_master's note is pinned to
   // scrum_master regardless of what the client claims, so it can't be spoofed as a dev note.
   const authorRole = realRole === "admin" ? input.activeView : "scrum_master";
 
-  const { error: updateError } = await supabase
-    .from("roadmap_items")
-    .update({ prioridade: input.prioridade, effort: input.effort, updated_at: new Date().toISOString() })
-    .eq("id", itemId);
+  const update: Record<string, unknown> = {
+    prioridade: input.prioridade,
+    effort: input.effort,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (input.content) {
+    const title = input.content.title.trim();
+    if (!title) throw new Error("title_required");
+    update.title = title;
+    update.description = input.content.description.trim();
+    update.produto = input.content.produto;
+  }
+
+  const { error: updateError } = await supabase.from("roadmap_items").update(update).eq("id", itemId);
   if (updateError) throw updateError;
 
   if (input.note.trim()) {
@@ -149,18 +202,44 @@ export async function saveRoadmapItemEdit(
     if (noteError) throw noteError;
   }
 
-  await queueChange(itemId, "modify", { prioridade: input.prioridade, effort: input.effort, note: input.note.trim() || null });
+  await queueChange(itemId, "modify", {
+    prioridade: input.prioridade,
+    effort: input.effort,
+    note: input.note.trim() || null,
+    ...(input.content ? { title: update.title, description: update.description, produto: update.produto } : {}),
+  });
+}
+
+export async function deleteRoadmapItem(itemId: string): Promise<void> {
+  const actor = await requireScrumMasterActor();
+  const supabase = await createServerSupabase();
+
+  const access = await getItemAccess(itemId, actor);
+  if (!access.canDelete) throw new Error("forbidden");
+
+  // Queued before the delete so the row still exists for the FK; item_id then goes null via
+  // "on delete set null" and the payload keeps the id for GuardianS.
+  await queueChange(itemId, "remove", { item_id: itemId, lane_id: access.item.lane_id, title: access.item.title });
+
+  const { data: deleted, error } = await supabase.from("roadmap_items").delete().eq("id", itemId).select("id");
+  if (error) throw error;
+  if (!deleted?.length) throw new Error("forbidden");
 }
 
 export async function moveRoadmapItemLane(itemId: string, targetLaneId: string): Promise<void> {
-  await requireScrumMasterActor();
+  const actor = await requireScrumMasterActor();
   const supabase = await createServerSupabase();
 
-  const { error } = await supabase
+  const access = await getItemAccess(itemId, actor);
+  if (!access.canModify) throw new Error("forbidden");
+
+  const { data: moved, error } = await supabase
     .from("roadmap_items")
     .update({ lane_id: targetLaneId, updated_at: new Date().toISOString() })
-    .eq("id", itemId);
+    .eq("id", itemId)
+    .select("id");
   if (error) throw error;
+  if (!moved?.length) throw new Error("forbidden");
 
   await queueChange(itemId, "move_lane", { lane_id: targetLaneId });
 }

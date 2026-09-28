@@ -24,10 +24,13 @@ function UserIcon() {
   );
 }
 
-export function NavBar({ active, roleLabel }: { active: "dashboard" | "roadmap"; roleLabel: string }) {
+type Tab = "dashboard" | "roadmap" | "config";
+
+// showConfig is only ever true for admin — the Config tab doesn't render for anyone else.
+export function NavBar({ active, roleLabel, showConfig = false }: { active: Tab; roleLabel: string; showConfig?: boolean }) {
   const { theme, toggle } = useTheme();
 
-  const tabClass = (tab: "dashboard" | "roadmap") =>
+  const tabClass = (tab: Tab) =>
     `rounded-lg px-4 py-2 text-sm font-bold ${
       active === tab ? "bg-rs-brand text-white" : "text-rs-text-soft"
     }`;
@@ -35,9 +38,9 @@ export function NavBar({ active, roleLabel }: { active: "dashboard" | "roadmap";
   return (
     <div className="flex h-[72px] items-center justify-between border-b border-rs-border bg-rs-card px-10">
       <div className="flex items-center gap-2.5">
-        <div className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-          <div className="absolute h-[10px] w-[10px] rotate-[45deg] rounded-[3px] bg-linear-to-br from-rs-brand to-rs-brand-text" />
-          <svg width="9" height="7" viewBox="0 0 20 16" fill="none" className="relative">
+        <div className="relative flex h-[42px] w-[42px] shrink-0 items-center justify-center">
+          <div className="absolute h-[30px] w-[30px] rotate-[45deg] rounded-[9px] bg-linear-to-br from-rs-brand to-rs-brand-text" />
+          <svg width="27" height="21" viewBox="0 0 20 16" fill="none" className="relative">
             <path d="M1 2 L8 8 L1 14" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
             <path d="M10 2 L17 8 L10 14" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </svg>
@@ -52,6 +55,11 @@ export function NavBar({ active, roleLabel }: { active: "dashboard" | "roadmap";
         <Link href="/roadmap" className={tabClass("roadmap")}>
           Roadmap
         </Link>
+        {showConfig && (
+          <Link href="/config" className={tabClass("config")}>
+            Config
+          </Link>
+        )}
       </div>
 
       <div className="flex items-center gap-3.5">

@@ -60,7 +60,7 @@ export async function syncBoard(): Promise<SyncResult> {
   if (!token) return { ok: false, reason: "not_configured" };
 
   const counts = new Map<string, number>();
-  const samples = new Map<string, { title: string; ref: string; url: string }[]>();
+  const itemsByStatus = new Map<string, { title: string; ref: string; url: string }[]>();
 
   try {
     let after: string | null = null;
@@ -90,11 +90,9 @@ export async function syncBoard(): Promise<SyncResult> {
         const statusName: string | undefined = node.fieldValueByName?.name;
         if (!statusName || !STATUS_META[statusName] || !node.content?.number) continue;
         counts.set(statusName, (counts.get(statusName) ?? 0) + 1);
-        const list = samples.get(statusName) ?? [];
-        if (list.length < 3) {
-          list.push({ title: node.content.title, ref: `#${node.content.number}`, url: node.content.url });
-          samples.set(statusName, list);
-        }
+        const list = itemsByStatus.get(statusName) ?? [];
+        list.push({ title: node.content.title, ref: `#${node.content.number}`, url: node.content.url });
+        itemsByStatus.set(statusName, list);
       }
 
       if (!items.pageInfo.hasNextPage) break;
@@ -106,7 +104,7 @@ export async function syncBoard(): Promise<SyncResult> {
       title,
       tone: meta.tone,
       count: counts.get(title) ?? 0,
-      items: samples.get(title) ?? [],
+      items: itemsByStatus.get(title) ?? [],
     }));
     const syncedAt = new Date().toISOString();
 

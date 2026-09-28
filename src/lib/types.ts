@@ -29,6 +29,8 @@ export type RoadmapItem = {
   effort: Effort;
   desc: string;
   url: string | null;
+  /** Profile that created the item from RoadS; null for the seeded/GitHub-backed items. */
+  createdBy?: string | null;
   notes: Note[];
 };
 
