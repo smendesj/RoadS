@@ -287,7 +287,9 @@ export default function RoadmapPage() {
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {/* Masonry: each group sits right under the one above it in its column, whatever the
+                  heights, so no row leaves a gap below a short group. */}
+              <div className="columns-1 gap-4 sm:columns-2 lg:columns-3">
                 {groups.map((g) => (
                   <div
                     key={g.id}
@@ -296,30 +298,36 @@ export default function RoadmapPage() {
                       e.preventDefault();
                       moveToLane(g.id);
                     }}
-                    className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-lane p-3.5"
+                    className="mb-4 flex break-inside-avoid flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-lane p-3.5"
                   >
-                    <span className="text-xs font-extrabold leading-snug text-rs-text-soft">{g.title}</span>
-                    {g.items.map((item) => (
-                      <ItemCard
-                        key={item.id}
-                        item={item}
-                        compact
-                        canDrag={canModifyItem(item)}
-                        laneId={g.id}
-                        moveTargets={moveTargets}
-                        onMoveTo={(target) => moveToLane(target, item.id)}
-                        isEditing={false}
-                        editDraft={null}
-                        onDragStart={() => setDraggingId(item.id)}
-                        onDragEnd={() => setDraggingId(null)}
-                        canDelete={canDeleteItem(item)}
-                        onStartEdit={() => {}}
-                        onDraftChange={() => {}}
-                        onSaveEdit={() => {}}
-                        onCancelEdit={() => {}}
-                        onDelete={() => removeItem(item.id)}
-                      />
-                    ))}
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-xs font-extrabold leading-snug text-rs-text-soft">{g.title}</span>
+                      <span className="text-[11px] font-bold text-rs-text-faint">{g.items.length}</span>
+                    </div>
+                    {/* A long group scrolls inside its box instead of stretching the whole column. */}
+                    <div className="-mr-1.5 flex max-h-[560px] flex-col gap-2.5 overflow-y-auto pr-1.5">
+                      {g.items.map((item) => (
+                        <ItemCard
+                          key={item.id}
+                          item={item}
+                          compact
+                          canDrag={canModifyItem(item)}
+                          laneId={g.id}
+                          moveTargets={moveTargets}
+                          onMoveTo={(target) => moveToLane(target, item.id)}
+                          isEditing={false}
+                          editDraft={null}
+                          onDragStart={() => setDraggingId(item.id)}
+                          onDragEnd={() => setDraggingId(null)}
+                          canDelete={canDeleteItem(item)}
+                          onStartEdit={() => {}}
+                          onDraftChange={() => {}}
+                          onSaveEdit={() => {}}
+                          onCancelEdit={() => {}}
+                          onDelete={() => removeItem(item.id)}
+                        />
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
