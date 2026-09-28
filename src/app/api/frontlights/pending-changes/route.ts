@@ -32,10 +32,14 @@ export async function GET(request: Request) {
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const changes = (data ?? []).map((row) => {
+  const rows = data ?? [];
+  const changes = rows.flatMap((row) => {
     const item = Array.isArray(row.roadmap_items) ? row.roadmap_items[0] : row.roadmap_items;
+    // An add/modify/move_lane whose item was deleted since has nothing left to write (the FK
+    // set item_id to null); only a "remove" still carries meaning. Skip the rest.
+    if (!item && row.action !== "remove") return [];
     const lane = item ? (Array.isArray(item.lanes) ? item.lanes[0] : item.lanes) : null;
-    return {
+    return [{
       id: row.id,
       itemId: row.item_id,
       action: row.action,
@@ -53,12 +57,13 @@ export async function GET(request: Request) {
             laneId: item.lane_id,
           }
         : null,
-    };
+    }];
   });
 
-  // asOf is the createdAt of the newest change returned — never "now" — so an ack with it can't
-  // swallow a change queued between this fetch and the ack. null when nothing is pending.
-  const asOf = changes.length ? changes[changes.length - 1].createdAt : null;
+  // asOf is the createdAt of the newest pending row — never "now" — so an ack with it can't
+  // swallow a change queued between this fetch and the ack, and it also consumes the skipped
+  // orphans. null when nothing is pending.
+  const asOf = rows.length ? rows[rows.length - 1].created_at : null;
 
   return NextResponse.json({ asOf, changes });
 }
