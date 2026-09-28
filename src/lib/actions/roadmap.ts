@@ -103,16 +103,19 @@ async function queueChange(itemId: string | null, action: "add" | "modify" | "re
   await supabase.from("roadmap_sync_queue").insert({ item_id: itemId, action, payload });
 }
 
-// Sprint lanes cap at MAX_ITEMS_PER_SPRINT (groups don't); migration 0008 enforces it in the DB too.
-async function assertLaneHasRoom(laneId: string, movingItemId?: string) {
+// New items can't be created in a sprint that already has MAX_ITEMS_PER_SPRINT (groups have no
+// limit); migration 0011 enforces it in the DB too. Moves into a full sprint are allowed — the
+// board shows the overflow and asks for it to be moved out.
+async function assertLaneHasRoom(laneId: string) {
   const supabase = await createServerSupabase();
   const { data: lane, error } = await supabase.from("lanes").select("kind").eq("id", laneId).single();
   if (error) throw error;
   if (lane.kind !== "sprint") return;
 
-  let query = supabase.from("roadmap_items").select("id", { count: "exact", head: true }).eq("lane_id", laneId);
-  if (movingItemId) query = query.neq("id", movingItemId);
-  const { count, error: countError } = await query;
+  const { count, error: countError } = await supabase
+    .from("roadmap_items")
+    .select("id", { count: "exact", head: true })
+    .eq("lane_id", laneId);
   if (countError) throw countError;
   if ((count ?? 0) >= MAX_ITEMS_PER_SPRINT) throw new Error("sprint_full");
 }
@@ -247,7 +250,6 @@ export async function moveRoadmapItemLane(itemId: string, targetLaneId: string):
 
   const access = await getItemAccess(itemId, actor);
   if (!access.canModify) throw new Error("forbidden");
-  await assertLaneHasRoom(targetLaneId, itemId);
 
   const { data: moved, error } = await supabase
     .from("roadmap_items")

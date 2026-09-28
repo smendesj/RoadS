@@ -50,13 +50,8 @@ export default function RoadmapPage() {
   function moveToLane(targetLaneId: string) {
     if (!draggingId) return;
     const itemId = draggingId;
-    // Sprints hold at most MAX_ITEMS_PER_SPRINT; dropping onto a full sprint is a no-op (moving
-    // within the same sprint doesn't count against it). Groups have no limit.
-    const target = lanes.find((l) => l.id === targetLaneId);
-    if (target && !target.items.some((it) => it.id === itemId) && target.items.length >= MAX_ITEMS_PER_SPRINT) {
-      setDraggingId(null);
-      return;
-    }
+    // Moving into a full sprint is allowed on purpose: the sprint shows n/4 and a warning until
+    // the overflow is moved out.
     let found: RoadmapItem | null = null;
 
     const nextLanes = lanes.map((lane) => {
@@ -183,7 +178,13 @@ export default function RoadmapPage() {
                       <div className="text-sm font-extrabold text-rs-text">{lane.title}</div>
                       <div className="text-[11px] text-rs-text-faint">{lane.dates}</div>
                     </div>
-                    <span className="rounded-full border border-rs-border bg-rs-card px-2.5 py-0.5 text-xs font-bold text-rs-text-faint">
+                    <span
+                      className={
+                        lane.items.length > MAX_ITEMS_PER_SPRINT
+                          ? "rounded-full border border-rs-brand bg-rs-brand-soft px-2.5 py-0.5 text-xs font-bold text-rs-brand-text"
+                          : "rounded-full border border-rs-border bg-rs-card px-2.5 py-0.5 text-xs font-bold text-rs-text-faint"
+                      }
+                    >
                       {lane.items.length}/{MAX_ITEMS_PER_SPRINT}
                     </span>
                   </div>
@@ -214,6 +215,13 @@ export default function RoadmapPage() {
                     >
                       + Novo item
                     </button>
+                  )}
+
+                  {lane.items.length > MAX_ITEMS_PER_SPRINT && (
+                    <div className="rounded-[10px] border border-rs-brand bg-rs-brand-soft px-3 py-2 text-[12px] font-semibold text-rs-brand-text">
+                      ⚠️ Esta sprint tem {lane.items.length} itens, e o limite é {MAX_ITEMS_PER_SPRINT} issues por sprint. Mova{" "}
+                      {lane.items.length - MAX_ITEMS_PER_SPRINT} item(ns) para outra sprint ou de volta ao Roadmap.
+                    </div>
                   )}
                 </div>
               ))}
