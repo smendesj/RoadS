@@ -113,7 +113,10 @@ export async function getDashboard(fallbackColumns: SyncColumn[]): Promise<Dashb
 // error is reported alongside.
 export async function syncDashboard(): Promise<{ model: DashboardModel; error: string | null }> {
   const result = await syncBoardAsViewer();
-  if (result.ok) return { model: await buildDashboard(result.columns, result.syncedAt), error: null };
+  if (result.ok) {
+    const error = result.roadmap.error ? `Kanban atualizado, mas o Roadmap não: ${result.roadmap.error}` : null;
+    return { model: await buildDashboard(result.columns, result.syncedAt), error };
+  }
 
   const snapshot = await getLatestBoardSnapshot();
   const error =

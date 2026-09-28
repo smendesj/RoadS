@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
+import { syncBoardAsViewer } from "@/lib/actions/sync";
 import { createClient } from "@/lib/supabase/client";
 import { MAX_ITEMS_PER_SPRINT, type Lane, type Role, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 
@@ -40,6 +41,23 @@ export default function RoadmapPage() {
     });
   }
   useEffect(reloadBoard, []);
+
+  // Pulls GitHub again: open issues the Roadmap lacks come in, closed ones leave the groups.
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [isSyncing, startSync] = useTransition();
+  function syncIssues() {
+    setSyncMessage(null);
+    startSync(async () => {
+      const result = await syncBoardAsViewer();
+      if (!result.ok) {
+        setSyncMessage(result.message ?? "Erro ao sincronizar.");
+        return;
+      }
+      const { added, removed, error } = result.roadmap;
+      setSyncMessage(error ?? `${added} issue(s) adicionada(s), ${removed} encerrada(s) removida(s).`);
+      reloadBoard();
+    });
+  }
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -154,7 +172,7 @@ export default function RoadmapPage() {
       <NavBar active="roadmap" roleLabel={roleLabel} showConfig={isAdmin} />
 
       <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-10">
-        <div className="flex items-end justify-between">
+        <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">Roadmap</h1>
             {myRole !== null && (
@@ -163,6 +181,18 @@ export default function RoadmapPage() {
               </p>
             )}
           </div>
+          {canEdit && (
+            <div className="flex flex-col items-end gap-1">
+              <button
+                onClick={syncIssues}
+                disabled={isSyncing}
+                className="rounded-full border border-rs-border bg-rs-card px-3.5 py-2 text-[13px] font-bold text-rs-text-soft transition-colors hover:border-rs-brand hover:text-rs-brand-text disabled:opacity-70"
+              >
+                {isSyncing ? "Sincronizando..." : "Sincronizar issues"}
+              </button>
+              {syncMessage && <span className="max-w-[260px] text-right text-[11px] text-rs-text-faint">{syncMessage}</span>}
+            </div>
+          )}
         </div>
 
         {!boardLoaded ? (
@@ -249,7 +279,7 @@ export default function RoadmapPage() {
                 <div className="text-xl font-extrabold text-rs-text">Roadmap</div>
                 {canEdit && (
                   <div className="text-[13px] text-rs-text-soft">
-                    Tudo que ainda não entrou em uma sprint — arraste pra uma das três colunas acima quando priorizar
+                    Toda issue aberta que ainda não entrou em uma sprint — arraste pra uma das três colunas acima quando priorizar
                   </div>
                 )}
               </div>
