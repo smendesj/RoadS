@@ -17,6 +17,7 @@
 // sync instead of always falling back to mock data.
 
 import { createGeoCloudIssue, GEOCLOUD_REPO } from "@/lib/github";
+import { boardCard } from "@/lib/board";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NEW_ITEM_TITLE } from "@/lib/types";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
@@ -49,7 +50,7 @@ const QUERY = `
         items(first: 100, after: $after) {
           pageInfo { hasNextPage endCursor }
           nodes {
-            content { ... on Issue { number title url } }
+            content { ... on Issue { number title url repository { nameWithOwner } } }
             fieldValueByName(name: "Status") {
               ... on ProjectV2ItemFieldSingleSelectValue { name }
             }
@@ -92,12 +93,12 @@ export async function syncBoard(): Promise<SyncResult> {
 
       const items = project.items;
       for (const node of items.nodes) {
-        const statusName: string | undefined = node.fieldValueByName?.name;
-        if (!statusName || !STATUS_META[statusName] || !node.content?.number) continue;
-        counts.set(statusName, (counts.get(statusName) ?? 0) + 1);
-        const list = itemsByStatus.get(statusName) ?? [];
-        list.push({ title: node.content.title, ref: `#${node.content.number}`, url: node.content.url });
-        itemsByStatus.set(statusName, list);
+        const entry = boardCard(node);
+        if (!entry) continue;
+        counts.set(entry.status, (counts.get(entry.status) ?? 0) + 1);
+        const list = itemsByStatus.get(entry.status) ?? [];
+        list.push(entry.card);
+        itemsByStatus.set(entry.status, list);
       }
 
       if (!items.pageInfo.hasNextPage) break;
