@@ -3,6 +3,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 
 // GET /api/frontlights/pending-changes?since=<ISO timestamp, optional>
+// -> { asOf: string | null, changes: [...] }. A "remove" arrives with item and itemId null
+// (the row is gone and the queue's FK is "on delete set null"); its payload carries
+// item_id, lane_id and title. Every id is a uuid string.
 // Returns every un-acked roadmap_sync_queue row (optionally only those created
 // after `since`), each with enough of the current roadmap_items/lanes state that
 // the caller can write ROADMAP.md/SPRINT.md without a second round trip. Uses the
@@ -53,5 +56,9 @@ export async function GET(request: Request) {
     };
   });
 
-  return NextResponse.json({ changes });
+  // asOf is the createdAt of the newest change returned — never "now" — so an ack with it can't
+  // swallow a change queued between this fetch and the ack. null when nothing is pending.
+  const asOf = changes.length ? changes[changes.length - 1].createdAt : null;
+
+  return NextResponse.json({ asOf, changes });
 }
