@@ -47,11 +47,16 @@ export default function RoadmapPage() {
 
   const canEdit = activeView === "scrum_master";
 
-  function moveToLane(targetLaneId: string) {
-    if (!draggingId) return;
-    const itemId = draggingId;
-    // Moving into a full sprint is allowed on purpose: the sprint shows n/4 and a warning until
-    // the overflow is moved out.
+  // Drop targets call this with the dragged item; the "Mover para" select on each card (touch
+  // screens have no HTML drag and drop) passes its item directly. Moving into a full sprint is
+  // allowed on purpose: the sprint shows n/4 and a warning until the overflow is moved out.
+  function moveToLane(targetLaneId: string, itemId: string | null = draggingId) {
+    if (!itemId) return;
+    const target = [...lanes, ...groups].find((l) => l.id === targetLaneId);
+    if (target?.items.some((it) => it.id === itemId)) {
+      setDraggingId(null);
+      return;
+    }
     let found: RoadmapItem | null = null;
 
     const nextLanes = lanes.map((lane) => {
@@ -86,10 +91,12 @@ export default function RoadmapPage() {
     });
   }
 
-  const laneIsFull = (laneId: string) => (lanes.find((l) => l.id === laneId)?.items.length ?? 0) >= MAX_ITEMS_PER_SPRINT;
+  const moveTargets = [
+    ...lanes.map((l) => ({ id: l.id, label: `${l.title} (${l.items.length}/${MAX_ITEMS_PER_SPRINT})` })),
+    ...groups.map((g) => ({ id: g.id, label: `Roadmap · ${g.title}` })),
+  ];
 
   function addItem(laneId: string) {
-    if (laneIsFull(laneId)) return;
     createRoadmapItem(laneId)
       .then((item) => {
         setLanes((prev) => prev.map((lane) => (lane.id === laneId ? { ...lane, items: [...lane.items, item] } : lane)));
@@ -146,10 +153,10 @@ export default function RoadmapPage() {
     <div className="min-h-screen">
       <NavBar active="roadmap" roleLabel={roleLabel} showConfig={isAdmin} />
 
-      <div className="flex flex-col gap-6 p-10">
+      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-10">
         <div className="flex items-end justify-between">
           <div className="flex flex-col gap-1.5">
-            <h1 className="text-3xl font-extrabold text-rs-text">Roadmap</h1>
+            <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">Roadmap</h1>
             {myRole !== null && (
               <p className="text-[15px] text-rs-text-soft">
                 {activeView === "scrum_master" ? "GeoCloud · defina o que entra e quando" : "GeoCloud"}
@@ -162,7 +169,8 @@ export default function RoadmapPage() {
           <p className="text-sm text-rs-text-soft">Carregando...</p>
         ) : (
           <>
-            <div className="grid grid-cols-3 items-start gap-5">
+            {/* Below lg the three sprints sit in a swipeable row, each close to one screen wide. */}
+            <div className="-mx-4 flex snap-x snap-mandatory items-start gap-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:grid lg:grid-cols-3 lg:gap-5 lg:overflow-visible lg:px-0 lg:pb-0">
               {lanes.map((lane) => (
                 <div
                   key={lane.id}
@@ -171,7 +179,7 @@ export default function RoadmapPage() {
                     e.preventDefault();
                     moveToLane(lane.id);
                   }}
-                  className="flex min-h-[240px] flex-col gap-3 rounded-2xl border border-rs-border bg-rs-lane p-4"
+                  className="flex min-h-[240px] w-[85%] max-w-[380px] shrink-0 snap-start flex-col gap-3 rounded-2xl border border-rs-border bg-rs-lane p-4 lg:w-auto lg:max-w-none"
                 >
                   <div className="flex items-center justify-between">
                     <div>
@@ -194,6 +202,9 @@ export default function RoadmapPage() {
                       key={item.id}
                       item={item}
                       canDrag={canModifyItem(item)}
+                      laneId={lane.id}
+                      moveTargets={moveTargets}
+                      onMoveTo={(target) => moveToLane(target, item.id)}
                       isEditing={editingId === item.id}
                       editDraft={editingId === item.id ? editDraft : null}
                       onDragStart={() => setDraggingId(item.id)}
@@ -208,7 +219,7 @@ export default function RoadmapPage() {
                     />
                   ))}
 
-                  {canEdit && !laneIsFull(lane.id) && (
+                  {canEdit && (
                     <button
                       onClick={() => addItem(lane.id)}
                       className="rounded-[10px] border border-dashed border-rs-border bg-rs-card p-2.5 text-[13px] font-bold text-rs-text-soft"
@@ -229,7 +240,7 @@ export default function RoadmapPage() {
 
             {canEdit && (
               <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
-                Você pode criar novos itens, arrastar itens existentes entre as Sprints ou Roadmap para atualizar a ordem.
+                Você pode criar novos itens e arrastar itens entre as Sprints e o Roadmap. No celular, use &quot;Mover para…&quot; no card.
               </div>
             )}
 
@@ -242,7 +253,7 @@ export default function RoadmapPage() {
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-3 items-start gap-4">
+              <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {groups.map((g) => (
                   <div
                     key={g.id}
@@ -260,6 +271,9 @@ export default function RoadmapPage() {
                         item={item}
                         compact
                         canDrag={canModifyItem(item)}
+                        laneId={g.id}
+                        moveTargets={moveTargets}
+                        onMoveTo={(target) => moveToLane(target, item.id)}
                         isEditing={false}
                         editDraft={null}
                         onDragStart={() => setDraggingId(item.id)}

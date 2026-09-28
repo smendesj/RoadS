@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
-import { MAX_ITEMS_PER_SPRINT, type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
+import { type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 
 function formatDateRange(start: string, end: string): string {
   const [, sm, sd] = start.split("-");
@@ -103,27 +103,9 @@ async function queueChange(itemId: string | null, action: "add" | "modify" | "re
   await supabase.from("roadmap_sync_queue").insert({ item_id: itemId, action, payload });
 }
 
-// New items can't be created in a sprint that already has MAX_ITEMS_PER_SPRINT (groups have no
-// limit); migration 0011 enforces it in the DB too. Moves into a full sprint are allowed — the
-// board shows the overflow and asks for it to be moved out.
-async function assertLaneHasRoom(laneId: string) {
-  const supabase = await createServerSupabase();
-  const { data: lane, error } = await supabase.from("lanes").select("kind").eq("id", laneId).single();
-  if (error) throw error;
-  if (lane.kind !== "sprint") return;
-
-  const { count, error: countError } = await supabase
-    .from("roadmap_items")
-    .select("id", { count: "exact", head: true })
-    .eq("lane_id", laneId);
-  if (countError) throw countError;
-  if ((count ?? 0) >= MAX_ITEMS_PER_SPRINT) throw new Error("sprint_full");
-}
-
 export async function createRoadmapItem(laneId: string): Promise<RoadmapItem> {
   const { userId } = await requireScrumMasterActor();
   const supabase = await createServerSupabase();
-  await assertLaneHasRoom(laneId);
 
   const { data, error } = await supabase
     .from("roadmap_items")

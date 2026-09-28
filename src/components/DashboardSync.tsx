@@ -98,15 +98,15 @@ export function SyncPill() {
 export function KpiCards() {
   const { model } = useSync();
   return (
-    <div className="grid grid-cols-3 gap-5">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-5">
       {model.kpis.map((kpi) => (
         <a
           key={kpi.label}
           href="/roadmap"
-          className="flex flex-col gap-2 rounded-2xl border border-rs-border bg-rs-card p-6 transition-shadow hover:shadow-lg"
+          className="flex flex-col gap-2 rounded-2xl border border-rs-border bg-rs-card p-4 transition-shadow hover:shadow-lg sm:p-6"
         >
           <span className={badgeClass(kpi.tone) + " w-fit uppercase tracking-wide"}>{kpi.label}</span>
-          <span className="text-4xl font-extrabold text-rs-text">{kpi.value}</span>
+          <span className="text-3xl font-extrabold text-rs-text sm:text-4xl">{kpi.value}</span>
           <span className="text-[13px] text-rs-text-faint">{kpi.hint}</span>
         </a>
       ))}
@@ -117,24 +117,24 @@ export function KpiCards() {
 export function SprintPanels() {
   const { model } = useSync();
   return (
-    <div className="grid grid-cols-[2fr_1fr] items-start gap-5">
-      <div className="flex flex-col gap-1 rounded-2xl border border-rs-border bg-rs-card p-7">
+    <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[2fr_1fr]">
+      <div className="flex flex-col gap-1 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-7">
         <span className="mb-2 text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Esta sprint</span>
         {model.entregas.map((e) => {
           const row = (
             <>
               <span className={badgeClass(e.tone) + " rounded-full whitespace-nowrap"}>{e.status}</span>
-              <span className="flex-grow text-[15px] font-semibold text-rs-text">{e.title}</span>
+              <span className="order-first basis-full text-[15px] font-semibold text-rs-text sm:order-none sm:basis-0 sm:flex-grow">{e.title}</span>
               <span className="text-[13px] text-rs-text-faint">{e.effort}</span>
               <span className="font-mono text-[13px] text-rs-brand-text">{e.ref}</span>
             </>
           );
           return e.url ? (
-            <a key={e.title} href={e.url} target="_blank" rel="noreferrer" className="flex items-center gap-3.5 border-t border-rs-bg py-3.5">
+            <a key={e.title} href={e.url} target="_blank" rel="noreferrer" className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-bg py-3.5 sm:flex-nowrap">
               {row}
             </a>
           ) : (
-            <div key={e.title} className="flex items-center gap-3.5 border-t border-rs-bg py-3.5">
+            <div key={e.title} className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-bg py-3.5 sm:flex-nowrap">
               {row}
             </div>
           );
@@ -144,7 +144,7 @@ export function SprintPanels() {
         )}
       </div>
       <div className="flex flex-col gap-5">
-        <div className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-card p-6">
+        <div className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-6">
           <span className="text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Em paralelo</span>
           {model.paralelo.map((p) => (
             <a key={p.url} href={p.url} target="_blank" rel="noreferrer" className="border-t border-rs-bg py-2 text-sm text-rs-text">
@@ -155,7 +155,7 @@ export function SprintPanels() {
             <div className="border-t border-rs-bg py-2 text-sm text-rs-text-faint">Nada em andamento fora da sprint.</div>
           )}
         </div>
-        <div className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-card p-6">
+        <div className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-6">
           <span className="text-[13px] font-bold uppercase tracking-wide text-rs-brand-text">Próxima semana</span>
           {model.proxima.map((p) => (
             <div key={p.title} className="border-t border-rs-bg py-2 text-sm text-rs-text">
@@ -174,7 +174,7 @@ export function SprintPanels() {
 export function KanbanColumns() {
   const { model } = useSync();
   return (
-    <div className="grid grid-cols-4 gap-5">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
       {model.columns.map((col) => (
         <div key={col.key} className="flex flex-col gap-3 rounded-2xl border border-rs-border bg-rs-card p-4.5">
           <div className="flex items-center justify-between">
@@ -182,7 +182,7 @@ export function KanbanColumns() {
             <span className="text-[13px] font-bold text-rs-text-faint">{col.count}</span>
           </div>
           {/* Every issue in the column; the list caps at ~5 cards tall and scrolls for the rest. */}
-          <div className="-mr-2 flex max-h-[440px] flex-col gap-2 overflow-y-auto pr-2">
+          <div className="-mr-2 flex max-h-[320px] flex-col sm:max-h-[440px] gap-2 overflow-y-auto pr-2">
             {col.items.map((it) => (
               <a
                 key={it.url}

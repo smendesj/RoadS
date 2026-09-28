@@ -43,8 +43,8 @@ export function ConfigPanel() {
         </span>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-rs-border bg-rs-card">
-        <table className="w-full text-left text-sm">
+      <div className="overflow-x-auto rounded-2xl border border-rs-border bg-rs-card">
+        <table className="w-full min-w-[600px] text-left text-sm">
           <thead>
             <tr className="border-b border-rs-border text-[11px] font-bold uppercase tracking-wide text-rs-text-faint">
               <th className="px-5 py-3">Nome / e-mail</th>

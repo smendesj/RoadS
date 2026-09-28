@@ -23,6 +23,9 @@ export function ItemCard({
   compact = false,
   canDelete = false,
   canEditContent = false,
+  laneId,
+  moveTargets = [],
+  onMoveTo,
   onDragStart,
   onDragEnd,
   onStartEdit,
@@ -38,6 +41,10 @@ export function ItemCard({
   compact?: boolean;
   canDelete?: boolean;
   canEditContent?: boolean;
+  /** The lane the card is in and every lane it can go to — drive the "Mover para" select. */
+  laneId?: string;
+  moveTargets?: { id: string; label: string }[];
+  onMoveTo?: (laneId: string) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
   onStartEdit: () => void;
@@ -56,7 +63,7 @@ export function ItemCard({
       draggable={canDrag && !isEditing}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      className={`flex cursor-move flex-col gap-2.5 rounded-xl border border-rs-border bg-rs-card ${
+      className={`flex ${canDrag ? "cursor-move" : ""} flex-col gap-2.5 rounded-xl border border-rs-border bg-rs-card ${
         compact ? "p-2.5" : "p-3.5"
       }`}
     >
@@ -93,7 +100,7 @@ export function ItemCard({
                 <input
                   value={content.title}
                   onChange={(e) => setContent({ title: e.target.value })}
-                  className="rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-xs font-bold text-rs-text"
+                  className="rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-base font-bold text-rs-text sm:text-xs"
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -102,7 +109,7 @@ export function ItemCard({
                   value={content.description}
                   onChange={(e) => setContent({ description: e.target.value })}
                   rows={3}
-                  className="resize-y rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-xs text-rs-text"
+                  className="resize-y rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-base text-rs-text sm:text-xs"
                 />
               </label>
               <label className="flex flex-col gap-1">
@@ -110,7 +117,7 @@ export function ItemCard({
                 <select
                   value={content.produto}
                   onChange={(e) => setContent({ produto: e.target.value as Produto })}
-                  className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-xs font-bold text-rs-text"
+                  className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-base font-bold text-rs-text sm:text-xs"
                 >
                   {PRODUTOS.map((p) => (
                     <option key={p} value={p}>
@@ -127,7 +134,7 @@ export function ItemCard({
               <select
                 value={editDraft.prioridade}
                 onChange={(e) => onDraftChange({ ...editDraft, prioridade: e.target.value as Prioridade })}
-                className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-xs font-bold text-rs-text"
+                className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-base font-bold text-rs-text sm:text-xs"
               >
                 {PRIORIDADES.map((p) => (
                   <option key={p} value={p}>
@@ -141,7 +148,7 @@ export function ItemCard({
               <select
                 value={editDraft.effort}
                 onChange={(e) => onDraftChange({ ...editDraft, effort: e.target.value as Effort })}
-                className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-xs font-bold text-rs-text"
+                className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-base font-bold text-rs-text sm:text-xs"
               >
                 {EFFORTS.map((ef) => (
                   <option key={ef} value={ef}>
@@ -151,12 +158,12 @@ export function ItemCard({
               </select>
             </label>
           </div>
-          <div className="flex gap-1.5">
+          <div className="flex flex-wrap gap-1.5 sm:flex-nowrap">
             <input
               value={editDraft.note}
               onChange={(e) => onDraftChange({ ...editDraft, note: e.target.value })}
               placeholder="Escrever nota (opcional)..."
-              className="min-w-0 flex-grow rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-xs text-rs-text"
+              className="w-full min-w-0 flex-grow rounded-lg sm:w-auto border border-rs-border bg-rs-card px-2.5 py-2 text-base text-rs-text sm:text-xs"
             />
             <button
               onClick={onSaveEdit}
@@ -172,10 +179,10 @@ export function ItemCard({
         </div>
       )}
 
-      {canDrag && !isEditing && (!compact || canDelete) && (
-        <div className="flex items-center gap-2">
+      {canDrag && !isEditing && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {!compact && (
-            <button onClick={onStartEdit} className="text-xs font-bold text-rs-brand-text">
+            <button onClick={onStartEdit} className="py-1 text-xs font-bold text-rs-brand-text">
               {canEditContent ? "Editar" : "+ nota"}
             </button>
           )}
@@ -184,10 +191,28 @@ export function ItemCard({
               onClick={() => {
                 if (window.confirm(`Excluir "${item.title}"? Não dá pra desfazer.`)) onDelete();
               }}
-              className="ml-auto text-xs font-bold text-red-600 dark:text-red-400"
+              className="py-1 text-xs font-bold text-red-600 dark:text-red-400"
             >
               Excluir
             </button>
+          )}
+          {/* Touch screens have no HTML drag and drop, so below lg a select moves the card. */}
+          {onMoveTo && moveTargets.length > 0 && (
+            <select
+              value=""
+              onChange={(e) => e.target.value && onMoveTo(e.target.value)}
+              aria-label="Mover para"
+              className="ml-auto min-w-0 max-w-[65%] rounded-lg border border-rs-border bg-rs-card px-2 py-1 text-base font-bold text-rs-text-soft sm:text-xs lg:hidden"
+            >
+              <option value="">Mover para…</option>
+              {moveTargets
+                .filter((t) => t.id !== laneId)
+                .map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+            </select>
           )}
         </div>
       )}

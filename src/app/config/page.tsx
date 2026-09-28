@@ -22,8 +22,8 @@ export default async function ConfigPage() {
     <div className="min-h-screen">
       <NavBar active="config" roleLabel="Admin" showConfig />
 
-      <div className="flex flex-col gap-6 p-10">
-        <h1 className="text-3xl font-extrabold text-rs-text">Config</h1>
+      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-10">
+        <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">Config</h1>
         <ConfigPanel />
       </div>
     </div>

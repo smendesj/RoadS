@@ -30,11 +30,11 @@ export default async function DashboardPage() {
     <div className="min-h-screen">
       <NavBar active="dashboard" roleLabel={roleLabel} showConfig={isAdmin} />
 
-      <div className="flex flex-col gap-8 p-10">
+      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:gap-8 lg:p-10">
         <DashboardSyncProvider initialModel={model} canSync={roleLabel !== "Visitante"}>
-          <div className="flex items-end justify-between">
+          <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="flex flex-col gap-1.5">
-              <h1 className="text-3xl font-extrabold text-rs-text">Dashboard</h1>
+              <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">Dashboard</h1>
               <p className="text-[15px] text-rs-text-soft">
                 GeoCloud · <DashboardBranch />
               </p>
