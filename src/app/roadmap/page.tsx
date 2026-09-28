@@ -1,12 +1,25 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
 import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { syncBoardAsViewer } from "@/lib/actions/sync";
 import { createClient } from "@/lib/supabase/client";
 import { MAX_ITEMS_PER_SPRINT, type Lane, type Role, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
+
+// Roadmap group columns for the current width: 3 from lg, 2 from sm, else 1 (the server renders 3).
+function subscribeToWidth(onChange: () => void) {
+  window.addEventListener("resize", onChange);
+  return () => window.removeEventListener("resize", onChange);
+}
+function useGroupColumns(): number {
+  return useSyncExternalStore(
+    subscribeToWidth,
+    () => (window.innerWidth >= 1024 ? 3 : window.innerWidth >= 640 ? 2 : 1),
+    () => 3
+  );
+}
 
 export default function RoadmapPage() {
   // Real session, real role — null while loading, so we default to the least-privileged view
@@ -68,6 +81,11 @@ export default function RoadmapPage() {
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
 
   const canEdit = activeView === "scrum_master";
+
+  // Groups are dealt left to right (1-2-3, 4-5-6, 7...) into columns that each stack tightly, so
+  // rows stay full in reading order and no short group leaves a gap under it.
+  const groupColumnCount = useGroupColumns();
+  const groupColumns = Array.from({ length: groupColumnCount }, (_, c) => groups.filter((_, i) => i % groupColumnCount === c));
 
   // Drop targets call this with the dragged item; the "Mover para" select on each card (touch
   // screens have no HTML drag and drop) passes its item directly. Moving into a full sprint is
@@ -287,47 +305,49 @@ export default function RoadmapPage() {
                   </div>
                 )}
               </div>
-              {/* Masonry: each group sits right under the one above it in its column, whatever the
-                  heights, so no row leaves a gap below a short group. */}
-              <div className="columns-1 gap-4 sm:columns-2 lg:columns-3">
-                {groups.map((g) => (
-                  <div
-                    key={g.id}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      moveToLane(g.id);
-                    }}
-                    className="mb-4 flex break-inside-avoid flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-lane p-3.5"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-xs font-extrabold leading-snug text-rs-text-soft">{g.title}</span>
-                      <span className="text-[11px] font-bold text-rs-text-faint">{g.items.length}</span>
-                    </div>
-                    {/* A long group scrolls inside its box instead of stretching the whole column. */}
-                    <div className="-mr-1.5 flex max-h-[560px] flex-col gap-2.5 overflow-y-auto pr-1.5">
-                      {g.items.map((item) => (
-                        <ItemCard
-                          key={item.id}
-                          item={item}
-                          compact
-                          canDrag={canModifyItem(item)}
-                          laneId={g.id}
-                          moveTargets={moveTargets}
-                          onMoveTo={(target) => moveToLane(target, item.id)}
-                          isEditing={false}
-                          editDraft={null}
-                          onDragStart={() => setDraggingId(item.id)}
-                          onDragEnd={() => setDraggingId(null)}
-                          canDelete={canDeleteItem(item)}
-                          onStartEdit={() => {}}
-                          onDraftChange={() => {}}
-                          onSaveEdit={() => {}}
-                          onCancelEdit={() => {}}
-                          onDelete={() => removeItem(item.id)}
-                        />
-                      ))}
-                    </div>
+              <div className="flex items-start gap-4">
+                {groupColumns.map((column, c) => (
+                  <div key={c} className="flex min-w-0 flex-1 flex-col gap-4">
+                    {column.map((g) => (
+                      <div
+                        key={g.id}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          moveToLane(g.id);
+                        }}
+                        className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-lane p-3.5"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-xs font-extrabold leading-snug text-rs-text-soft">{g.title}</span>
+                          <span className="text-[11px] font-bold text-rs-text-faint">{g.items.length}</span>
+                        </div>
+                        {/* A long group scrolls inside its box instead of stretching the whole column. */}
+                        <div className="-mr-1.5 flex max-h-[560px] flex-col gap-2.5 overflow-y-auto pr-1.5">
+                          {g.items.map((item) => (
+                            <ItemCard
+                              key={item.id}
+                              item={item}
+                              compact
+                              canDrag={canModifyItem(item)}
+                              laneId={g.id}
+                              moveTargets={moveTargets}
+                              onMoveTo={(target) => moveToLane(target, item.id)}
+                              isEditing={false}
+                              editDraft={null}
+                              onDragStart={() => setDraggingId(item.id)}
+                              onDragEnd={() => setDraggingId(null)}
+                              canDelete={canDeleteItem(item)}
+                              onStartEdit={() => {}}
+                              onDraftChange={() => {}}
+                              onSaveEdit={() => {}}
+                              onCancelEdit={() => {}}
+                              onDelete={() => removeItem(item.id)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
