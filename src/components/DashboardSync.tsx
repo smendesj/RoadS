@@ -2,11 +2,10 @@
 
 import { createContext, useContext, useState, useTransition, type ReactNode } from "react";
 import { badgeClass } from "@/lib/tones";
-import { syncBoardAsViewer, type SyncColumn } from "@/lib/actions/sync";
+import { syncDashboard, type DashboardModel } from "@/lib/actions/dashboard";
 
 type SyncContextValue = {
-  columns: SyncColumn[];
-  syncedAt: string | null;
+  model: DashboardModel;
   error: string | null;
   isPending: boolean;
   canSync: boolean;
@@ -21,84 +20,162 @@ function useSync() {
   return ctx;
 }
 
+// Holds the whole Dashboard. "Sincronizar" pulls GitHub Project #7 and re-reads the Roadmap
+// (sprints + roadmap), so every block below — not only the Kanban — reflects the latest state.
 export function DashboardSyncProvider({
-  initialColumns,
-  initialSyncedAt = null,
+  initialModel,
   canSync,
   children,
 }: {
-  initialColumns: SyncColumn[];
-  initialSyncedAt?: string | null;
+  initialModel: DashboardModel;
   canSync: boolean;
   children: ReactNode;
 }) {
-  const [columns, setColumns] = useState(initialColumns);
-  const [syncedAt, setSyncedAt] = useState<string | null>(initialSyncedAt);
+  const [model, setModel] = useState(initialModel);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function sync() {
     setError(null);
     startTransition(async () => {
-      const result = await syncBoardAsViewer();
-      if (result.ok) {
-        setColumns(result.columns);
-        setSyncedAt(result.syncedAt);
-      } else if (result.reason === "not_configured") {
-        setError("Sincronização ainda não configurada (falta GITHUB_TOKEN no servidor).");
-      } else {
-        setError(result.message ?? "Erro ao sincronizar.");
+      try {
+        const result = await syncDashboard();
+        setModel(result.model);
+        setError(result.error);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Erro ao sincronizar.");
       }
     });
   }
 
   return (
-    <SyncContext.Provider value={{ columns, syncedAt, error, isPending, canSync, sync }}>
-      {children}
-    </SyncContext.Provider>
+    <SyncContext.Provider value={{ model, error, isPending, canSync, sync }}>{children}</SyncContext.Provider>
   );
 }
 
-export function SyncPill() {
-  const { isPending, error, syncedAt, canSync, sync } = useSync();
+export function DashboardBranch() {
+  const { model } = useSync();
+  return <span className="font-mono">{model.branch}</span>;
+}
 
-  if (!canSync) {
-    return (
-      <div className="flex items-center gap-2 rounded-full border border-rs-border bg-rs-card px-3.5 py-2">
-        <span className="h-2 w-2 rounded-full bg-green-500" />
-        <span className="text-[13px] text-rs-text-soft">Board sincronizado</span>
-      </div>
-    );
-  }
+export function SyncPill() {
+  const { isPending, error, model, canSync, sync } = useSync();
+  const lastSync = model.syncedAt && (
+    <span className="text-[11px] text-rs-text-faint">
+      Última sincronização: {new Date(model.syncedAt).toLocaleTimeString("pt-BR")}
+    </span>
+  );
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <button
-        onClick={sync}
-        disabled={isPending}
-        className="flex items-center gap-2 rounded-full border border-rs-border bg-rs-card px-3.5 py-2 disabled:opacity-70"
-      >
-        <span className={`h-2 w-2 rounded-full bg-green-500 ${isPending ? "animate-pulse" : ""}`} />
-        <span className="text-[13px] text-rs-text-soft">{isPending ? "Sincronizando..." : "Board sincronizado"}</span>
-      </button>
-      {error ? (
-        <span className="max-w-[260px] text-right text-[11px] text-red-500">{error}</span>
-      ) : (
-        syncedAt && (
-          <span className="text-[11px] text-rs-text-faint">
-            Última sincronização: {new Date(syncedAt).toLocaleTimeString("pt-BR")}
-          </span>
-        )
+      {canSync && (
+        <button
+          onClick={sync}
+          disabled={isPending}
+          className="flex items-center gap-2 rounded-full border border-rs-border bg-rs-card px-3.5 py-2 text-[13px] font-bold text-rs-text-soft transition-colors hover:border-rs-brand hover:text-rs-brand-text disabled:opacity-70"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={isPending ? "animate-spin" : ""}
+          >
+            <path d="M21 12a9 9 0 11-2.64-6.36M21 3v6h-6" />
+          </svg>
+          {isPending ? "Sincronizando..." : "Sincronizar"}
+        </button>
       )}
+      {error ? <span className="max-w-[260px] text-right text-[11px] text-red-500">{error}</span> : lastSync}
+    </div>
+  );
+}
+
+export function KpiCards() {
+  const { model } = useSync();
+  return (
+    <div className="grid grid-cols-3 gap-5">
+      {model.kpis.map((kpi) => (
+        <a
+          key={kpi.label}
+          href="/roadmap"
+          className="flex flex-col gap-2 rounded-2xl border border-rs-border bg-rs-card p-6 transition-shadow hover:shadow-lg"
+        >
+          <span className={badgeClass(kpi.tone) + " w-fit uppercase tracking-wide"}>{kpi.label}</span>
+          <span className="text-4xl font-extrabold text-rs-text">{kpi.value}</span>
+          <span className="text-[13px] text-rs-text-faint">{kpi.hint}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
+
+export function SprintPanels() {
+  const { model } = useSync();
+  return (
+    <div className="grid grid-cols-[2fr_1fr] items-start gap-5">
+      <div className="flex flex-col gap-1 rounded-2xl border border-rs-border bg-rs-card p-7">
+        <span className="mb-2 text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Esta sprint</span>
+        {model.entregas.map((e) => {
+          const row = (
+            <>
+              <span className={badgeClass(e.tone) + " rounded-full whitespace-nowrap"}>{e.status}</span>
+              <span className="flex-grow text-[15px] font-semibold text-rs-text">{e.title}</span>
+              <span className="text-[13px] text-rs-text-faint">{e.effort}</span>
+              <span className="font-mono text-[13px] text-rs-brand-text">{e.ref}</span>
+            </>
+          );
+          return e.url ? (
+            <a key={e.title} href={e.url} target="_blank" rel="noreferrer" className="flex items-center gap-3.5 border-t border-rs-bg py-3.5">
+              {row}
+            </a>
+          ) : (
+            <div key={e.title} className="flex items-center gap-3.5 border-t border-rs-bg py-3.5">
+              {row}
+            </div>
+          );
+        })}
+        {model.entregas.length === 0 && (
+          <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">Nenhum item na sprint atual.</div>
+        )}
+      </div>
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-card p-6">
+          <span className="text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Em paralelo</span>
+          {model.paralelo.map((p) => (
+            <a key={p.url} href={p.url} target="_blank" rel="noreferrer" className="border-t border-rs-bg py-2 text-sm text-rs-text">
+              {p.title} <span className="font-mono text-[12px] text-rs-text-faint">{p.ref}</span>
+            </a>
+          ))}
+          {model.paralelo.length === 0 && (
+            <div className="border-t border-rs-bg py-2 text-sm text-rs-text-faint">Nada em andamento fora da sprint.</div>
+          )}
+        </div>
+        <div className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-card p-6">
+          <span className="text-[13px] font-bold uppercase tracking-wide text-rs-brand-text">Próxima semana</span>
+          {model.proxima.map((p) => (
+            <div key={p.title} className="border-t border-rs-bg py-2 text-sm text-rs-text">
+              {p.title} · {p.effort}
+            </div>
+          ))}
+          {model.proxima.length === 0 && (
+            <div className="border-t border-rs-bg py-2 text-sm text-rs-text-faint">Nada planejado ainda.</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
 export function KanbanColumns() {
-  const { columns } = useSync();
+  const { model } = useSync();
   return (
     <div className="grid grid-cols-4 gap-5">
-      {columns.map((col) => (
+      {model.columns.map((col) => (
         <div key={col.key} className="flex flex-col gap-3 rounded-2xl border border-rs-border bg-rs-card p-4.5">
           <div className="flex items-center justify-between">
             <span className={badgeClass(col.tone)}>{col.title}</span>
@@ -108,7 +185,7 @@ export function KanbanColumns() {
           <div className="-mr-2 flex max-h-[440px] flex-col gap-2 overflow-y-auto pr-2">
             {col.items.map((it) => (
               <a
-                key={it.ref}
+                key={it.url}
                 href={it.url}
                 target="_blank"
                 rel="noreferrer"
@@ -119,7 +196,9 @@ export function KanbanColumns() {
               </a>
             ))}
             {col.items.length === 0 && (
-              <div className="p-2.5 text-[13px] text-rs-text-faint">Nenhum bloqueio agora.</div>
+              <div className="p-2.5 text-[13px] text-rs-text-faint">
+                {col.key === "blocker" ? "Nenhum bloqueio agora." : "Nenhuma issue aqui."}
+              </div>
             )}
           </div>
         </div>
