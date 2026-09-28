@@ -5,11 +5,11 @@ import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { createClient } from "@/lib/supabase/client";
-import type { Lane, Role, RoadmapGroup, RoadmapItem, ViewAs } from "@/lib/types";
+import { MAX_ITEMS_PER_SPRINT, type Lane, type Role, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 
 export default function RoadmapPage() {
   // Real session, real role — null while loading, so we default to the least-privileged view
-  // (no toggle, no edit) until we actually know who's asking.
+  // (no edit) until we actually know who's asking.
   const [myRole, setMyRole] = useState<Role | null>(null);
   const [myId, setMyId] = useState<string | null>(null);
   useEffect(() => {
@@ -24,13 +24,9 @@ export default function RoadmapPage() {
 
   const isAdmin = myRole === "admin";
 
-  // Non-admins are locked to their own role's view; only admin can flip between them.
-  // (Config is its own admin-only tab in the NavBar, not part of this toggle.)
-  const [adminView, setAdminView] = useState<ViewAs>("scrum_master");
-  useEffect(() => {
-    if (myRole && myRole !== "admin") setAdminView(myRole === "dev" ? "dev" : "scrum_master");
-  }, [myRole]);
-  const activeView: ViewAs = isAdmin ? adminView : ((myRole ?? "dev") as ViewAs);
+  // The view follows the real role, with no toggle: dev always sees the dev view; scrum_master
+  // and admin (full, unrestricted access) always see the scrum_master view.
+  const activeView: ViewAs = myRole === "scrum_master" || myRole === "admin" ? "scrum_master" : "dev";
 
   const [lanes, setLanes] = useState<Lane[]>([]);
   const [groups, setGroups] = useState<RoadmapGroup[]>([]);
@@ -54,6 +50,13 @@ export default function RoadmapPage() {
   function moveToLane(targetLaneId: string) {
     if (!draggingId) return;
     const itemId = draggingId;
+    // Sprints hold at most MAX_ITEMS_PER_SPRINT; dropping onto a full sprint is a no-op (moving
+    // within the same sprint doesn't count against it). Groups have no limit.
+    const target = lanes.find((l) => l.id === targetLaneId);
+    if (target && !target.items.some((it) => it.id === itemId) && target.items.length >= MAX_ITEMS_PER_SPRINT) {
+      setDraggingId(null);
+      return;
+    }
     let found: RoadmapItem | null = null;
 
     const nextLanes = lanes.map((lane) => {
@@ -88,10 +91,15 @@ export default function RoadmapPage() {
     });
   }
 
+  const laneIsFull = (laneId: string) => (lanes.find((l) => l.id === laneId)?.items.length ?? 0) >= MAX_ITEMS_PER_SPRINT;
+
   function addItem(laneId: string) {
+    if (laneIsFull(laneId)) return;
     createRoadmapItem(laneId)
       .then((item) => {
         setLanes((prev) => prev.map((lane) => (lane.id === laneId ? { ...lane, items: [...lane.items, item] } : lane)));
+        // A new item opens straight into edit mode — no extra click on "Editar".
+        startEdit(item);
       })
       .catch((e) => console.error("createRoadmapItem failed", e));
   }
@@ -137,7 +145,7 @@ export default function RoadmapPage() {
       .catch((e) => console.error("saveRoadmapItemEdit failed", e));
   }
 
-  const roleLabel = myRole === null ? "Visitante" : activeView === "scrum_master" ? "Scrum Master" : "Dev";
+  const roleLabel = myRole === null ? "Visitante" : isAdmin ? "Admin" : activeView === "scrum_master" ? "Scrum Master" : "Dev";
 
   return (
     <div className="min-h-screen">
@@ -147,38 +155,18 @@ export default function RoadmapPage() {
         <div className="flex items-end justify-between">
           <div className="flex flex-col gap-1.5">
             <h1 className="text-3xl font-extrabold text-rs-text">Roadmap</h1>
-            {activeView === "scrum_master" && (
-              <p className="text-[15px] text-rs-text-soft">GeoCloud · defina o que entra e quando</p>
+            {myRole !== null && (
+              <p className="text-[15px] text-rs-text-soft">
+                {activeView === "scrum_master" ? "GeoCloud · defina o que entra e quando" : "GeoCloud"}
+              </p>
             )}
           </div>
-
-          {isAdmin && (
-            <div className="flex items-center gap-1 rounded-full border border-rs-border bg-rs-card p-1">
-              {(["dev", "scrum_master"] as const).map((v) => (
-                <button
-                  key={v}
-                  onClick={() => setAdminView(v)}
-                  className={`rounded-full px-4 py-2 text-[13px] font-bold ${
-                    adminView === v ? "bg-zinc-900 text-white" : "text-rs-text-soft"
-                  }`}
-                >
-                  {v === "dev" ? "Dev" : "Scrum Master"}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
         {!boardLoaded ? (
           <p className="text-sm text-rs-text-soft">Carregando...</p>
         ) : (
           <>
-            {canEdit && (
-              <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
-                Editando como Scrum Master — pode criar, arrastar entre sprints, ajustar prioridade/esforço e comentar. {isAdmin ? "Como admin, você edita e exclui qualquer item." : "Itens que você criou podem ser editados por completo e excluídos; itens de outros usuários ficam só para leitura."}
-              </div>
-            )}
-
             <div className="grid grid-cols-3 items-start gap-5">
               {lanes.map((lane) => (
                 <div
@@ -196,7 +184,7 @@ export default function RoadmapPage() {
                       <div className="text-[11px] text-rs-text-faint">{lane.dates}</div>
                     </div>
                     <span className="rounded-full border border-rs-border bg-rs-card px-2.5 py-0.5 text-xs font-bold text-rs-text-faint">
-                      {lane.items.length}
+                      {lane.items.length}/{MAX_ITEMS_PER_SPRINT}
                     </span>
                   </div>
 
@@ -219,7 +207,7 @@ export default function RoadmapPage() {
                     />
                   ))}
 
-                  {canEdit && (
+                  {canEdit && !laneIsFull(lane.id) && (
                     <button
                       onClick={() => addItem(lane.id)}
                       className="rounded-[10px] border border-dashed border-rs-border bg-rs-card p-2.5 text-[13px] font-bold text-rs-text-soft"
@@ -232,8 +220,8 @@ export default function RoadmapPage() {
             </div>
 
             {canEdit && (
-              <div className="text-center text-xs text-rs-text-faint">
-                Arraste um item entre sprints pra reagendar, ou puxe do Roadmap abaixo · alimenta o ROADMAP e os SPRINT.md semanais
+              <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
+                Você pode criar novos itens, arrastar itens existentes entre as Sprints ou Roadmap para atualizar a ordem.
               </div>
             )}
 

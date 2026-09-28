@@ -107,7 +107,7 @@ export default async function DashboardPage() {
        </DashboardSyncProvider>
 
         <div className="py-3 text-center text-xs text-rs-text-faint">
-          RoadS · dados reais do GitHub Projects, Essencis-Labs #7 · substitui a apresentação semanal
+          RoadS · dados reais do GitHub Projects, Essencis-Labs #7
         </div>
       </div>
     </div>

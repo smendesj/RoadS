@@ -1,4 +1,8 @@
 export type Role = "admin" | "scrum_master" | "dev";
+
+/** Sprint lanes hold at most this many items (the Roadmap groups below have no limit). Also
+ *  enforced server-side in roadmap.ts and in the DB by migration 0008. */
+export const MAX_ITEMS_PER_SPRINT = 4;
 /** The two working views a Roadmap card can render as. Admin can look through either one, or Config. */
 export type ViewAs = "dev" | "scrum_master";
 

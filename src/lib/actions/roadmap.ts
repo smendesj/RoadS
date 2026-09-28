@@ -1,7 +1,7 @@
 "use server";
 
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
-import type { Effort, Lane, Prioridade, Produto, RoadmapGroup, RoadmapItem, ViewAs } from "@/lib/types";
+import { MAX_ITEMS_PER_SPRINT, type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 
 function formatDateRange(start: string, end: string): string {
   const [, sm, sd] = start.split("-");
@@ -103,9 +103,24 @@ async function queueChange(itemId: string | null, action: "add" | "modify" | "re
   await supabase.from("guardians_sync_queue").insert({ item_id: itemId, action, payload });
 }
 
+// Sprint lanes cap at MAX_ITEMS_PER_SPRINT (groups don't); migration 0008 enforces it in the DB too.
+async function assertLaneHasRoom(laneId: string, movingItemId?: string) {
+  const supabase = await createServerSupabase();
+  const { data: lane, error } = await supabase.from("lanes").select("kind").eq("id", laneId).single();
+  if (error) throw error;
+  if (lane.kind !== "sprint") return;
+
+  let query = supabase.from("roadmap_items").select("id", { count: "exact", head: true }).eq("lane_id", laneId);
+  if (movingItemId) query = query.neq("id", movingItemId);
+  const { count, error: countError } = await query;
+  if (countError) throw countError;
+  if ((count ?? 0) >= MAX_ITEMS_PER_SPRINT) throw new Error("sprint_full");
+}
+
 export async function createRoadmapItem(laneId: string): Promise<RoadmapItem> {
   const { userId } = await requireScrumMasterActor();
   const supabase = await createServerSupabase();
+  await assertLaneHasRoom(laneId);
 
   const { data, error } = await supabase
     .from("roadmap_items")
@@ -232,6 +247,7 @@ export async function moveRoadmapItemLane(itemId: string, targetLaneId: string):
 
   const access = await getItemAccess(itemId, actor);
   if (!access.canModify) throw new Error("forbidden");
+  await assertLaneHasRoom(targetLaneId, itemId);
 
   const { data: moved, error } = await supabase
     .from("roadmap_items")
