@@ -3,6 +3,8 @@ export type Role = "admin" | "scrum_master" | "dev";
 /** Sprint lanes should hold at most this many items (the Roadmap groups below have no limit).
  *  Not enforced: a sprint over it shows n/4 and a warning asking for the overflow to move out. */
 export const MAX_ITEMS_PER_SPRINT = 4;
+/** Title a "+ Novo item" card starts with; it gets no GitHub issue until someone writes a real one. */
+export const NEW_ITEM_TITLE = "Novo item — edite a descrição";
 /** The two working views a Roadmap card can render as. Admin can look through either one, or Config. */
 export type ViewAs = "dev" | "scrum_master";
 

@@ -16,7 +16,9 @@
 // reload — or a visitor who never clicks the button — still sees the last real
 // sync instead of always falling back to mock data.
 
+import { createGeoCloudIssue, GEOCLOUD_REPO } from "@/lib/github";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { NEW_ITEM_TITLE } from "@/lib/types";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 
 const STATUS_META: Record<string, { key: string; tone: "neutral" | "brand" | "red" | "green" }> = {
@@ -34,7 +36,7 @@ export type SyncColumn = {
   items: { title: string; ref: string; url: string }[];
 };
 
-export type RoadmapReconcile = { added: number; removed: number; error?: string };
+export type RoadmapReconcile = { added: number; removed: number; issuesCreated: number; error?: string };
 
 export type SyncResult =
   | { ok: true; columns: SyncColumn[]; syncedAt: string; roadmap: RoadmapReconcile }
@@ -121,7 +123,7 @@ export async function syncBoard(): Promise<SyncResult> {
     // The Roadmap follows the repo's open issues; a failure here doesn't fail the board sync.
     const roadmap = await reconcileRoadmapWithIssues(token).catch((e) => {
       console.error("syncBoard: roadmap reconcile failed", e);
-      return { added: 0, removed: 0, error: e instanceof Error ? e.message : "Erro ao atualizar o Roadmap." };
+      return { added: 0, removed: 0, issuesCreated: 0, error: e instanceof Error ? e.message : "Erro ao atualizar o Roadmap." };
     });
 
     return { ok: true, columns, syncedAt, roadmap };
@@ -130,12 +132,13 @@ export async function syncBoard(): Promise<SyncResult> {
   }
 }
 
-// Every open issue of the GeoCloud repo is on the Roadmap, ready to be dragged into a sprint:
-// one the Roadmap doesn't have yet lands in the TRIAGE_LANE group. A Roadmap item whose issue is
+// Every Roadmap item is a GitHub issue, and every open GeoCloud issue is on the Roadmap, ready to
+// be dragged into a sprint. A GeoCloud item without an issue (its creation on save failed) gets
+// one now, Open on Project #7. An open issue
+// the Roadmap doesn't have yet lands in the TRIAGE_LANE group. A Roadmap item whose issue is
 // no longer open leaves the Roadmap, but only from the groups: an item already in a sprint stays
 // there as delivered. Items without an issue, or with an issue from another repo, are left alone.
 // Each add/remove is queued in roadmap_sync_queue so FrontlightS writes it into ROADMAP.md.
-const ISSUES_REPO = "Essencis-Labs/GeoCloudAI";
 const TRIAGE_LANE = "triagem";
 const ISSUE_URL = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
 
@@ -144,7 +147,7 @@ type OpenIssue = { number: number; title: string; url: string; body: string };
 async function fetchOpenIssues(token: string): Promise<OpenIssue[]> {
   const issues: OpenIssue[] = [];
   for (let page = 1; page <= 30; page++) {
-    const res = await fetch(`https://api.github.com/repos/${ISSUES_REPO}/issues?state=open&per_page=100&page=${page}`, {
+    const res = await fetch(`https://api.github.com/repos/${GEOCLOUD_REPO}/issues?state=open&per_page=100&page=${page}`, {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
       cache: "no-store",
     });
@@ -176,7 +179,7 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
   const admin = createAdminClient();
   const [{ data: lanes, error: lanesError }, { data: items, error: itemsError }] = await Promise.all([
     admin.from("lanes").select("id, kind"),
-    admin.from("roadmap_items").select("id, lane_id, title, github_issue_url"),
+    admin.from("roadmap_items").select("id, lane_id, title, description, produto, github_issue_url"),
   ]);
   if (lanesError) throw lanesError;
   if (itemsError) throw itemsError;
@@ -184,7 +187,26 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
 
   const onRoadmap = new Set<number>();
   const closed: { id: string; lane_id: string; title: string; github_issue_url: string }[] = [];
+  let issuesCreated = 0;
   for (const item of items ?? []) {
+    if (!item.github_issue_url && item.produto === "GeoCloud" && item.title !== NEW_ITEM_TITLE) {
+      const issue = await createGeoCloudIssue(token, item.title, item.description);
+      const { error } = await admin
+        .from("roadmap_items")
+        .update({ github_issue_url: issue.url, github_issue_number: issue.number })
+        .eq("id", item.id);
+      if (error) throw error;
+      await admin.from("roadmap_sync_queue").insert({
+        item_id: item.id,
+        action: "modify",
+        payload: { github_issue_url: issue.url, title: item.title, reason: "issue linked" },
+      });
+      issuesCreated++;
+      // Just opened, so it's open: count it as on the Roadmap, never as closed.
+      onRoadmap.add(issue.number);
+      openNumbers.add(issue.number);
+      continue;
+    }
     const n = Number(item.github_issue_url?.match(ISSUE_URL)?.[1]);
     if (!n) continue;
     onRoadmap.add(n);
@@ -236,7 +258,7 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
     );
   }
 
-  return { added: missing.length, removed: closed.length };
+  return { added: missing.length, removed: closed.length, issuesCreated };
 }
 
 // Client entry point for the manual "Board sincronizado" button — dev, scrum_master

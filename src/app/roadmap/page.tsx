@@ -53,8 +53,12 @@ export default function RoadmapPage() {
         setSyncMessage(result.message ?? "Erro ao sincronizar.");
         return;
       }
-      const { added, removed, error } = result.roadmap;
-      setSyncMessage(error ?? `${added} issue(s) adicionada(s), ${removed} encerrada(s) removida(s).`);
+      const { added, removed, issuesCreated, error } = result.roadmap;
+      setSyncMessage(
+        error ??
+          `${added} issue(s) adicionada(s), ${removed} encerrada(s) removida(s)` +
+            (issuesCreated ? `, ${issuesCreated} issue(s) criada(s) para itens sem issue.` : ".")
+      );
       reloadBoard();
     });
   }

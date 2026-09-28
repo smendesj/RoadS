@@ -1,7 +1,9 @@
 "use server";
 
+import { createGeoCloudIssue } from "@/lib/github";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
-import { type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
+import { NEW_ITEM_TITLE, type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 
 function formatDateRange(start: string, end: string): string {
   const [, sm, sd] = start.split("-");
@@ -111,7 +113,7 @@ export async function createRoadmapItem(laneId: string): Promise<RoadmapItem> {
     .from("roadmap_items")
     .insert({
       lane_id: laneId,
-      title: "Novo item — edite a descrição",
+      title: NEW_ITEM_TITLE,
       description: "Escreva aqui, em linguagem natural, o que precisa ser feito.",
       produto: "GeoCloud",
       prioridade: "Medium",
@@ -138,11 +140,13 @@ type ItemAccess = { canModify: boolean; canEditContent: boolean; canDelete: bool
 async function getItemAccess(
   itemId: string,
   actor: { userId: string; realRole: "scrum_master" | "admin" }
-): Promise<ItemAccess & { item: { lane_id: string; title: string } }> {
+): Promise<
+  ItemAccess & { item: { lane_id: string; title: string; produto: Produto; description: string; github_issue_url: string | null } }
+> {
   const supabase = await createServerSupabase();
   const { data: item, error } = await supabase
     .from("roadmap_items")
-    .select("lane_id, title, created_by")
+    .select("lane_id, title, produto, description, github_issue_url, created_by")
     .eq("id", itemId)
     .single();
   if (error) throw error;
@@ -202,12 +206,45 @@ export async function saveRoadmapItemEdit(
     if (noteError) throw noteError;
   }
 
+  const issue = await ensureIssue(itemId, {
+    title: input.content ? (update.title as string) : access.item.title,
+    description: input.content ? (update.description as string) : access.item.description,
+    produto: input.content ? input.content.produto : access.item.produto,
+    github_issue_url: access.item.github_issue_url,
+  });
+
   await queueChange(itemId, "modify", {
     prioridade: input.prioridade,
     effort: input.effort,
     note: input.note.trim() || null,
     ...(input.content ? { title: update.title, description: update.description, produto: update.produto } : {}),
+    ...(issue ? { github_issue_url: issue.url } : {}),
   });
+}
+
+// Every Roadmap item is a GitHub issue. A GeoCloud item saved without one (a "+ Novo item" once it
+// has a real title) gets its issue here, Open on Project #7. A failure doesn't fail the save: the
+// next board sync retries it. ELIMS has no issue destination configured yet, so it waits.
+async function ensureIssue(
+  itemId: string,
+  item: { title: string; description: string; produto: Produto; github_issue_url: string | null }
+): Promise<{ url: string; number: number } | null> {
+  const token = process.env.GITHUB_TOKEN;
+  if (item.github_issue_url || item.produto !== "GeoCloud" || item.title === NEW_ITEM_TITLE || !token) return null;
+  try {
+    const issue = await createGeoCloudIssue(token, item.title, item.description);
+    // Linking is bookkeeping, not a content edit, so it goes through the admin client: the
+    // actor was already authorized above, and the 0007 triggers limit what their own session may set.
+    const { error } = await createAdminClient()
+      .from("roadmap_items")
+      .update({ github_issue_url: issue.url, github_issue_number: issue.number })
+      .eq("id", itemId);
+    if (error) throw error;
+    return issue;
+  } catch (e) {
+    console.error("ensureIssue failed; the next sync retries", e);
+    return null;
+  }
 }
 
 export async function deleteRoadmapItem(itemId: string): Promise<void> {
