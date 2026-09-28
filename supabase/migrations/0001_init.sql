@@ -89,9 +89,9 @@ alter table public.item_notes enable row level security;
 create policy "item_notes: read all authenticated" on public.item_notes for select using (auth.role() = 'authenticated');
 create policy "item_notes: authenticated insert own" on public.item_notes for insert with check (auth.uid() = author_id);
 
--- Queue consumed by GuardianS's /update-roads: every roadmap_items change a SCRUM MASTER makes gets
--- appended here; GuardianS reads what's pending, writes ROADMAP.md/SPRINT.md, then calls ack.
-create table public.guardians_sync_queue (
+-- Queue consumed by FrontlightS's /update-roads: every roadmap_items change a SCRUM MASTER makes gets
+-- appended here; FrontlightS reads what's pending, writes ROADMAP.md/SPRINT.md, then calls ack.
+create table public.roadmap_sync_queue (
   id uuid primary key default gen_random_uuid(),
   item_id uuid references public.roadmap_items (id) on delete set null,
   action text not null check (action in ('add', 'modify', 'remove', 'move_lane')),
@@ -100,8 +100,8 @@ create table public.guardians_sync_queue (
   acked_at timestamptz
 );
 
-alter table public.guardians_sync_queue enable row level security;
-create policy "sync_queue: scrum_master and service role only" on public.guardians_sync_queue for all using (
+alter table public.roadmap_sync_queue enable row level security;
+create policy "sync_queue: scrum_master and service role only" on public.roadmap_sync_queue for all using (
   exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'scrum_master')
 );
 

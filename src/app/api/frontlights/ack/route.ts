@@ -1,12 +1,12 @@
-import { checkGuardiansAuth } from "@/lib/guardians-auth";
+import { checkFrontlightsAuth } from "@/lib/frontlights-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 
-// POST /api/guardians/ack { "asOf": "<ISO timestamp>" }
-// Marks every guardians_sync_queue row created at or before asOf as acked, so the
+// POST /api/frontlights/ack { "asOf": "<ISO timestamp>" }
+// Marks every roadmap_sync_queue row created at or before asOf as acked, so the
 // next /pending-changes call (with ?since=asOf) doesn't return them again.
 export async function POST(request: Request) {
-  if (!checkGuardiansAuth(request)) {
+  if (!checkFrontlightsAuth(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
 
   const admin = createAdminClient();
   const { data, error } = await admin
-    .from("guardians_sync_queue")
+    .from("roadmap_sync_queue")
     .update({ acked_at: new Date().toISOString() })
     .is("acked_at", null)
     .lte("created_at", asOf)

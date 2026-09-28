@@ -100,7 +100,7 @@ async function requireScrumMasterActor(): Promise<{ userId: string; realRole: "s
 
 async function queueChange(itemId: string | null, action: "add" | "modify" | "remove" | "move_lane", payload: Record<string, unknown>) {
   const supabase = await createServerSupabase();
-  await supabase.from("guardians_sync_queue").insert({ item_id: itemId, action, payload });
+  await supabase.from("roadmap_sync_queue").insert({ item_id: itemId, action, payload });
 }
 
 // Sprint lanes cap at MAX_ITEMS_PER_SPRINT (groups don't); migration 0008 enforces it in the DB too.
@@ -233,7 +233,7 @@ export async function deleteRoadmapItem(itemId: string): Promise<void> {
   if (!access.canDelete) throw new Error("forbidden");
 
   // Queued before the delete so the row still exists for the FK; item_id then goes null via
-  // "on delete set null" and the payload keeps the id for GuardianS.
+  // "on delete set null" and the payload keeps the id for FrontlightS.
   await queueChange(itemId, "remove", { item_id: itemId, lane_id: access.item.lane_id, title: access.item.title });
 
   const { data: deleted, error } = await supabase.from("roadmap_items").delete().eq("id", itemId).select("id");

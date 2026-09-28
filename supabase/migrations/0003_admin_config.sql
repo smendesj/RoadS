@@ -50,8 +50,8 @@ create policy "roadmap_items: scrum_master writes" on public.roadmap_items
     exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('scrum_master', 'admin'))
   );
 
-drop policy if exists "sync_queue: scrum_master and service role only" on public.guardians_sync_queue;
-create policy "sync_queue: scrum_master and service role only" on public.guardians_sync_queue
+drop policy if exists "sync_queue: scrum_master and service role only" on public.roadmap_sync_queue;
+create policy "sync_queue: scrum_master and service role only" on public.roadmap_sync_queue
   for all using (
     exists (select 1 from public.profiles p where p.id = auth.uid() and p.role in ('scrum_master', 'admin'))
   );

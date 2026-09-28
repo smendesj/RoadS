@@ -2,7 +2,7 @@
 
 Dashboard e roadmap colaborativo da Essencis Labs — substitui o SCRUM síncrono por um board em tempo
 real e priorização assíncrona, sincronizada com `ROADMAP.md`/`SPRINT.md` via IA (`/update-roads` no
-GuardianS).
+FrontlightS, que lê `/api/frontlights/pending-changes` e confirma em `/api/frontlights/ack`).
 
 Protótipo interativo (referência de design, dados reais do board): https://claude.ai/artifact/HKN2kCFBESPSJibARZ56Jn
 
@@ -29,7 +29,8 @@ npm run dev
 ```
 
 Precisa de um `.env.local` (veja `NEXT_STEPS.md` — não é gerado automaticamente por design: o
-hook de segurança do GuardianS bloqueia gravação de arquivos `.env*` por um agente).
+hook de segurança do agente bloqueia gravação de arquivos `.env*`). A variável que autentica o
+`/update-roads` do FrontlightS é `FRONTLIGHTS_API_SECRET`.
 
 ## Setup do banco
 

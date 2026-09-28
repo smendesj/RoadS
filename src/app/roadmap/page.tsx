@@ -234,7 +234,7 @@ export default function RoadmapPage() {
                   </div>
                 )}
               </div>
-              <div className="grid grid-cols-5 items-start gap-4">
+              <div className="grid grid-cols-3 items-start gap-4">
                 {groups.map((g) => (
                   <div
                     key={g.id}

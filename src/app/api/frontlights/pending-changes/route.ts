@@ -1,15 +1,15 @@
-import { checkGuardiansAuth } from "@/lib/guardians-auth";
+import { checkFrontlightsAuth } from "@/lib/frontlights-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NextResponse } from "next/server";
 
-// GET /api/guardians/pending-changes?since=<ISO timestamp, optional>
-// Returns every un-acked guardians_sync_queue row (optionally only those created
+// GET /api/frontlights/pending-changes?since=<ISO timestamp, optional>
+// Returns every un-acked roadmap_sync_queue row (optionally only those created
 // after `since`), each with enough of the current roadmap_items/lanes state that
 // the caller can write ROADMAP.md/SPRINT.md without a second round trip. Uses the
 // admin client since this is a service-to-service call, not a user session — RLS
-// on guardians_sync_queue only allows scrum_master/admin through the anon key.
+// on roadmap_sync_queue only allows scrum_master/admin through the anon key.
 export async function GET(request: Request) {
-  if (!checkGuardiansAuth(request)) {
+  if (!checkFrontlightsAuth(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
   const admin = createAdminClient();
   let query = admin
-    .from("guardians_sync_queue")
+    .from("roadmap_sync_queue")
     .select(
       "id, item_id, action, payload, created_at, roadmap_items(title, description, produto, prioridade, effort, github_issue_url, lane_id, lanes(title))"
     )
