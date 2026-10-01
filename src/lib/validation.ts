@@ -1,8 +1,9 @@
-const ALLOWED_DOMAINS = ["essencislabs.com", "essencistech.com.br"];
+export const ALLOWED_DOMAINS = ["essencislabs.com", "essencistech.com.br"];
 
+// Exactly one "@": taking whatever follows the first one would let "ana@essencislabs.com@evil.com" in.
 export function isAllowedEmail(email: string): boolean {
-  const domain = email.trim().toLowerCase().split("@")[1];
-  return !!domain && ALLOWED_DOMAINS.includes(domain);
+  const parts = email.trim().toLowerCase().split("@");
+  return parts.length === 2 && !!parts[0] && ALLOWED_DOMAINS.includes(parts[1]);
 }
 
 export function emailDomainHint(): string {

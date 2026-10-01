@@ -8,11 +8,17 @@ Protótipo interativo (referência de design, dados reais do board): https://cla
 
 ## Papéis
 
-Dois papéis, sem nome amarrado a eles — escolhido no primeiro login:
+Três papéis. Todo cadastro começa como **Dev**; o admin promove a Scrum Master na tela Config.
 
-- **SCRUM MASTER** — CEO ou Coordenador Dev Senior. Cria, arrasta entre sprints, ajusta
-  prioridade/esforço, comenta.
-- **Dev** — lê e comenta, não move nem cria.
+- **Admin** — só o fundador (e a conta de teste, veja Testes). Controle total: edita e apaga qualquer
+  item, gerencia usuários na Config. O papel admin não é concedido nem retirado pelo app.
+- **Scrum Master** — cria itens, edita e apaga só os que criou, ajusta prioridade/esforço/sprint e
+  comenta nos itens vindos do GitHub (que não pode renomear nem apagar). Não mexe nos itens de outras
+  pessoas.
+- **Dev** — só lê. Não cria, não move, não comenta.
+
+Só e-mails `@essencislabs.com` e `@essencistech.com.br` têm conta (a página de cadastro avisa, e o banco
+recusa os demais).
 
 ## Stack
 
@@ -37,7 +43,26 @@ hook de segurança do agente bloqueia gravação de arquivos `.env*`). A variáv
 ```bash
 npx supabase login          # abre o navegador, pede o seu token de acesso pessoal
 npx supabase link --project-ref ctovfklkdmqrvpukrliv
-npx supabase db push        # aplica supabase/migrations/0001_init.sql
+npx supabase db push        # aplica tudo em supabase/migrations/
 ```
 
 Veja `NEXT_STEPS.md` para o que falta e o que cada passo precisa.
+
+## Testes
+
+```bash
+npm test                # unitários (lógica pura, sem rede)
+npm run audit:rls       # auditoria de permissões no banco, com um usuário de cada papel
+```
+
+`audit:rls` chama a API pública do Supabase como anônimo, Dev, Scrum Master e admin e confere cada
+tabela contra o modelo de permissões acima, além da regra de domínio no cadastro. Roda no projeto de
+`.env.local` (o real), com lanes `zz-test-*` e usuários `roads-audit-*` descartáveis, apagados no fim,
+e sai com código 1 se achar qualquer furo. Rode depois de toda migração que mexa em políticas.
+
+Precisa de `.env.test-account` (ignorado pelo git) com as três contas de teste:
+`ROADS_TEST_*` (admin, `sergio.mendes+roads-test@essencislabs.com`), `ROADS_TEST_SM_*` (Scrum Master) e
+`ROADS_TEST_DEV_*` (Dev), cada uma com `_EMAIL` e `_PASSWORD`. A conta admin de teste existe por uma
+exceção única no trigger de admin reservado (migração 0015); para testes de interface com escrita,
+suba o servidor local com `GITHUB_TOKEN=` vazio, para que salvar item ou sincronizar nunca crie issue
+no GitHub de verdade.
