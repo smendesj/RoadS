@@ -103,8 +103,8 @@ const fresh = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.e
     const rp = await recipient.newPage();
     const rpProblems = [];
     rp.on("pageerror", (e) => rpProblems.push(String(e).slice(0, 120)));
-    // Supabase now sends this link to the production site (localhost is not an allowed redirect), so take the tokens it
-    // issues and open them on the local page: same link, same tokens, this build's page under test.
+    // Take the tokens Supabase issues and open them on the local page: same link, same tokens, this build's page under
+    // test, whichever redirects the project allows (the link itself would follow the Site URL / allow-list).
     const hop = await fetch(linkData.properties.action_link, { redirect: "manual" });
     const tokens = new URL(hop.headers.get("location")).hash;
     await rp.goto(`${BASE}/redefinir-senha${tokens}`, { waitUntil: "load" });
