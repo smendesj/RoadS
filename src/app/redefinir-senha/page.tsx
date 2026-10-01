@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { SessionGuard } from "@/components/SessionGuard";
 import { createClient } from "@/lib/supabase/client";
 import { useLogout } from "@/lib/use-logout";
 import { isValidPassword, PASSWORD_HINT } from "@/lib/validation";
@@ -44,6 +45,7 @@ export default function RedefinirSenhaPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-rs-bg p-6">
+      <SessionGuard />
       <div className="flex w-full max-w-sm flex-col gap-6 rounded-2xl border border-rs-border bg-rs-card p-8">
         <div className="flex items-center gap-2.5">
           <div className="h-3.5 w-3.5 rounded-[4px] bg-rs-brand" />

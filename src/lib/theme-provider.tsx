@@ -11,8 +11,10 @@ const themeStore = createThemeStore(() => window.localStorage);
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const theme = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot, themeStore.getServerSnapshot);
 
+  // Reads the store rather than `theme`: while hydrating, `theme` is the server's "light", and
+  // acting on it would strip the dark class the head script already put on the page.
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
+    document.documentElement.classList.toggle("dark", themeStore.getSnapshot() === "dark");
   }, [theme]);
 
   return (

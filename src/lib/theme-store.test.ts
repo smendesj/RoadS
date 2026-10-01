@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createThemeStore } from "./theme-store.ts";
+import { createThemeStore, THEME_INIT_SCRIPT } from "./theme-store.ts";
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const data = { ...initial };
@@ -71,4 +71,34 @@ test("with storage blocked, the theme still toggles for the session", () => {
   assert.equal(store.getSnapshot(), "light");
   store.toggle();
   assert.equal(store.getSnapshot(), "dark");
+});
+
+// The head script runs before first paint, so a stored dark theme never flashes light.
+function runHeadScript(stored: string | null | "blocked") {
+  const added: string[] = [];
+  const win = {
+    localStorage: {
+      getItem: () => {
+        if (stored === "blocked") throw new Error("blocked");
+        return stored;
+      },
+    },
+  };
+  const doc = { documentElement: { classList: { add: (name: string) => added.push(name) } } };
+  new Function("window", "document", THEME_INIT_SCRIPT)(win, doc);
+  return added;
+}
+
+test("the head script paints dark straight away when dark is stored", () => {
+  assert.deepEqual(runHeadScript("dark"), ["dark"]);
+});
+
+test("the head script leaves light, missing and garbage values alone", () => {
+  assert.deepEqual(runHeadScript("light"), []);
+  assert.deepEqual(runHeadScript(null), []);
+  assert.deepEqual(runHeadScript("purple"), []);
+});
+
+test("the head script never throws when storage is blocked", () => {
+  assert.deepEqual(runHeadScript("blocked"), []);
 });

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { SessionGuard } from "@/components/SessionGuard";
 import { UserMenu } from "@/components/UserMenu";
 import { useTheme } from "@/lib/theme-provider";
 
@@ -19,7 +20,17 @@ function SunMoonIcon({ theme }: { theme: "light" | "dark" }) {
 type Tab = "dashboard" | "roadmap" | "config";
 
 // showConfig is only ever true for admin — the Config tab doesn't render for anyone else.
-export function NavBar({ active, roleLabel, showConfig = false }: { active: Tab; roleLabel: string; showConfig?: boolean }) {
+export function NavBar({
+  active,
+  roleLabel,
+  avatar = null,
+  showConfig = false,
+}: {
+  active: Tab;
+  roleLabel: string;
+  avatar?: string | null;
+  showConfig?: boolean;
+}) {
   const { theme, toggle } = useTheme();
 
   const tabClass = (tab: Tab) =>
@@ -70,7 +81,10 @@ export function NavBar({ active, roleLabel, showConfig = false }: { active: Tab;
             Entrar
           </Link>
         ) : (
-          <UserMenu roleLabel={roleLabel} />
+          <>
+            <SessionGuard />
+            <UserMenu roleLabel={roleLabel} avatar={avatar} />
+          </>
         )}
       </div>
     </div>

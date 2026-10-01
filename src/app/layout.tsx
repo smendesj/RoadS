@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
+import { THEME_INIT_SCRIPT } from "@/lib/theme-store";
 import { ThemeProvider } from "@/lib/theme-provider";
 import "./globals.css";
 
@@ -24,6 +25,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="pt-BR" className={`${plusJakarta.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+      {/* A plain inline script in <head> runs while the page is parsed, before anything paints;
+          next/script's beforeInteractive only queues inline code for Next's bootstrap, after the JS loads. */}
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="font-sans min-h-screen bg-rs-bg text-rs-text antialiased">
         <ThemeProvider>{children}</ThemeProvider>
       </body>

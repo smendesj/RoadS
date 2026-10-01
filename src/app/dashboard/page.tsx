@@ -1,26 +1,17 @@
 import { NavBar } from "@/components/NavBar";
 import { DashboardBranch, DashboardSyncProvider, KanbanColumns, KpiCards, SprintPanels, SyncPill } from "@/components/DashboardSync";
 import { getDashboard } from "@/lib/actions/dashboard";
+import { getViewer } from "@/lib/get-viewer";
 import { dashboardData } from "@/lib/mock-data";
-import { createClient } from "@/lib/supabase/server";
+import { roleLabel as labelFor } from "@/lib/viewer";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "RoadS — Dashboard" };
 
-const ROLE_LABEL: Record<string, string> = { admin: "Admin", scrum_master: "Scrum Master", dev: "Dev" };
-
 export default async function DashboardPage() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  let roleLabel = "Visitante";
-  let isAdmin = false;
-  if (user) {
-    const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-    roleLabel = (profile?.role && ROLE_LABEL[profile.role]) || "Dev";
-    isAdmin = profile?.role === "admin";
-  }
+  const viewer = await getViewer();
+  const roleLabel = labelFor(viewer?.role ?? null);
+  const isAdmin = viewer?.role === "admin";
 
   // Everything comes from the Roadmap + the last GitHub sync; the mock columns only fill in
   // before the very first sync ever ran.
@@ -28,7 +19,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="min-h-screen">
-      <NavBar active="dashboard" roleLabel={roleLabel} showConfig={isAdmin} />
+      <NavBar active="dashboard" roleLabel={roleLabel} avatar={viewer?.avatar ?? null} showConfig={isAdmin} />
 
       <div className="flex flex-col gap-6 p-4 sm:p-6 lg:gap-8 lg:p-10">
         <DashboardSyncProvider initialModel={model} canSync={roleLabel !== "Visitante"}>

@@ -4,6 +4,10 @@ type ThemeStorage = Pick<Storage, "getItem" | "setItem">;
 
 const STORAGE_KEY = "roads-theme";
 
+// Runs in <head> before the first paint, so a stored dark theme is on screen from the start
+// instead of flashing light until React hydrates.
+export const THEME_INIT_SCRIPT = `try{if(window.localStorage.getItem("${STORAGE_KEY}")==="dark")document.documentElement.classList.add("dark")}catch(e){}`;
+
 // The chosen theme lives in localStorage, an external system, so React reads it through
 // useSyncExternalStore: the server render and hydration start on "light", then switch to the
 // stored choice. A choice made this session is also kept in memory, so toggling still works when
