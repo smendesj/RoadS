@@ -13,6 +13,7 @@ import {
   renderVisualPng,
   tileValueSize,
   visualAlt,
+  visualProducts,
   visualModel,
   visualSize,
   visualTitle,
@@ -344,13 +345,30 @@ test("a window longer than two weeks shows the latest fourteen days and stays a 
   assert.ok(visualSize(sampleContent(20)).height < 2000);
 });
 
+test("project names keep their letters and only odd whitespace is collapsed", () => {
+  assert.deepEqual(visualProducts(["Sistemas Alfa", "Beta  Soluções Ltda", "Gamma"]), ["Sistemas Alfa", "Beta Soluções Ltda", "Gamma"]);
+  assert.deepEqual(visualProducts(["Frontlights", "Roads"]), ["Frontlights", "Roads"]);
+});
+
+test("the picture shows only messages and the two token tiles, in a single row", () => {
+  const content = sampleContent(2);
+  const shown = texts(buildVisual(content).tree);
+  for (const gone of ["Sessões", "Dias ativos", "Horário de pico"]) assert.ok(!shown.includes(gone), `${gone} should not be drawn`);
+  for (const kept of ["Mensagens", "Tokens de entrada", "Tokens de saída"]) assert.ok(shown.includes(kept), `${kept} should be drawn`);
+  // The e-mail still reads sessions and messages from the model, so the model keeps all of its numbers.
+  assert.ok(visualModel(content).tiles.some((t) => t.label === "Sessões"));
+  // One tile row less than before: the picture gets shorter.
+  const oneRow = buildVisual(content).height;
+  assert.ok(oneRow < 1004, `height ${oneRow}`);
+});
+
 test("the alt text says the numbers in plain Portuguese", () => {
   const usage = usageFor(2);
   usage.totals = { ...usage.totals, sessions: 12, messages: 1234 };
   const alt = visualAlt(sampleContent(2, { usage }));
   assert.match(alt, /2 concluídas, 1 em validação, 1 em andamento/);
-  assert.match(alt, /12 sessões, 1.234 mensagens/);
-  assert.match(alt, /2 de 2 dias ativos/);
+  assert.match(alt, /1.234 mensagens/);
+  assert.doesNotMatch(alt, /sessões|dias ativos|horário de pico/i);
   assert.equal(buildVisual(sampleContent(2, { usage })).alt, alt);
 });
 

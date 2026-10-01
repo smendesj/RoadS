@@ -16,7 +16,7 @@ const STATUS_TONE: Record<EntryStatus, Tone> = {
 const shell = "flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-6";
 const title = "text-[13px] font-bold uppercase tracking-wide text-rs-text-soft";
 
-// The Dashboard's "Resumo para a diretoria" card, drawn on the server (it reads the report with the viewer's
+// The Dashboard's "Resumo" card, drawn on the server (it reads the report with the viewer's
 // own session). Only the Dashboard page asks for it, and only for the admin, who reviews the drafts.
 export async function ProgressReportCard() {
   const { row, failed } = await loadCardReport();
@@ -25,7 +25,7 @@ export async function ProgressReportCard() {
   if (failed) {
     return (
       <section aria-labelledby="resumo-card" data-report-card className={shell}>
-        <h2 id="resumo-card" className={title}>Resumo para a diretoria</h2>
+        <h2 id="resumo-card" className={title}>Resumo</h2>
         <p className="border-t border-rs-bg py-2 text-sm text-rs-text-faint">Não foi possível carregar o resumo agora.</p>
       </section>
     );
@@ -34,7 +34,7 @@ export async function ProgressReportCard() {
   if (!row) {
     return (
       <section aria-labelledby="resumo-card" data-report-card className={shell}>
-        <h2 id="resumo-card" className={title}>Resumo para a diretoria</h2>
+        <h2 id="resumo-card" className={title}>Resumo</h2>
         <p className="border-t border-rs-bg py-2 text-sm text-rs-text-faint">{EMPTY_REPORT_TEXT}</p>
       </section>
     );
@@ -48,7 +48,7 @@ export async function ProgressReportCard() {
   return (
     <section aria-labelledby="resumo-card" data-report-card className={shell}>
       <div className="flex items-center justify-between gap-3">
-        <h2 id="resumo-card" className={title}>Resumo para a diretoria</h2>
+        <h2 id="resumo-card" className={title}>Resumo</h2>
         <span className={badgeClass(sent ? "green" : "amber") + " rounded-full whitespace-nowrap"}>{sent ? "Enviado" : "Rascunho"}</span>
       </div>
 

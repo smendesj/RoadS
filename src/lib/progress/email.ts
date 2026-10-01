@@ -185,6 +185,8 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   const drawing = visualModel(content);
   const numbers = claudeNumbers(drawing.tiles, counts.concluido);
   const visualSrc = safeImage(options.visualUrl);
+  // How the reader signs in the first time; pushed with the draft, so no account is ever in the code.
+  const signIn = content.access && clean(content.access.account) && content.access.password ? { account: clean(content.access.account), password: content.access.password } : null;
   const roadsLink = safeLink(options.roadsUrl);
   const size = visualSize(content);
 
@@ -277,6 +279,10 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
         `padding:22px ${PAD}px 26px ${PAD}px;border-top:1px solid ${COLOR.rule};${font(13, 19, COLOR.muted)}`,
         `Resumo preparado no RoadS${
           roadsLink ? `: <a href="${escapeHtml(roadsLink)}" style="color:${COLOR.link};text-decoration:underline;">${escapeHtml(roadsLink)}</a>` : "."
+        }${
+          signIn
+            ? `<br>Conta: <b>${escapeHtml(signIn.account)}</b><br>Senha temporária do primeiro acesso: <b>${escapeHtml(signIn.password)}</b> (o sistema pede para criar uma nova senha ao entrar)`
+            : ""
         }`
       )
     )
@@ -322,7 +328,9 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   out.push("", drawing.title, numbers.map((n) => `${n.value} ${n.label}`).join(" · "));
   const projects = visualModel(content).products;
   if (projects.length > 0) out.push(`Projetos somados: ${joinNames(projects)}.`);
-  out.push("", roadsLink ? `Resumo preparado no RoadS: ${roadsLink}` : "Resumo preparado no RoadS.", "");
+  out.push("", roadsLink ? `Resumo preparado no RoadS: ${roadsLink}` : "Resumo preparado no RoadS.");
+  if (signIn) out.push(`Conta: ${signIn.account}`, `Senha temporária do primeiro acesso: ${signIn.password} (o sistema pede para criar uma nova senha ao entrar)`);
+  out.push("");
 
   return { html, text: out.join("\n") };
 }

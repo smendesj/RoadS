@@ -329,6 +329,28 @@ test("the heading above the picture is the picture's own title: the label from t
   assert.doesNotMatch(html(), /Claude por trás das entregas|Uso do Claude no período/);
 });
 
+test("the closing line carries the account and the temporary password when the report has them", () => {
+  const withAccess = rich({ access: { account: "reader@example.test", password: "Tmp-pass-1234" } });
+  const out = html(withAccess);
+  assert.ok(out.includes(OPTIONS.roadsUrl));
+  assert.ok(out.includes("Conta: <b>reader@example.test</b>"));
+  assert.ok(out.includes("Senha temporária do primeiro acesso: <b>Tmp-pass-1234</b>"));
+  assert.match(out, /pede para criar uma nova senha/);
+  const plain = text(withAccess);
+  assert.ok(plain.includes("Conta: reader@example.test"));
+  assert.ok(plain.includes("Senha temporária do primeiro acesso: Tmp-pass-1234"));
+  // Without the details the line is what it always was.
+  assert.doesNotMatch(html(), /Conta:|Senha temporária/);
+  assert.doesNotMatch(text(), /Conta:|Senha temporária/);
+});
+
+test("the sign-in details are escaped like any other text", () => {
+  const out = html(rich({ access: { account: "a<b>@example.test", password: "p&q\"r" } }));
+  assert.ok(!out.includes("<b>a<b>@"));
+  assert.ok(out.includes("a&lt;b&gt;@example.test"));
+  assert.ok(out.includes("p&amp;q&quot;r"));
+});
+
 test("the label is escaped like any other text", () => {
   const out = html(rich({ usage: usageFor(2, { label: '<b>x</b> & "q"' }) }));
   assert.ok(!out.includes("<b>x</b>"));

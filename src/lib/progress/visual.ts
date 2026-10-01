@@ -151,7 +151,7 @@ export function visualProducts(value: unknown): string[] {
     if (typeof raw !== "string") continue;
     const name = raw
       .replace(/[^ -~ -ÿ–]/g, " ")
-      .replace(/s+/g, " ")
+      .replace(/\s+/g, " ")
       .trim()
       .slice(0, PRODUCT_MAX)
       .trim();
@@ -214,6 +214,9 @@ const RESULT_LABEL: Record<ResultKey, string> = {
   bloqueado: "Bloqueadas",
 };
 
+/** The numbers the picture draws. The model keeps the others (sessions, active days, peak) for the e-mail text. */
+const PICTURE_TILES = ["Mensagens", "Tokens de entrada", "Tokens de saída"];
+
 export function visualModel(content: ProgressContent): VisualModel {
   const usage = content.usage;
   const totals = usage?.totals;
@@ -269,16 +272,13 @@ export function visualAlt(content: ProgressContent): string {
   const count = (key: ResultKey) => m.results.find((r) => r.key === key)?.count ?? 0;
   const blocked = count("bloqueado");
   const tile = (label: string) => m.tiles.find((t) => t.label === label);
-  const active = tile("Dias ativos");
-  const peak = tile("Horário de pico")?.value;
   return [
     `${m.title}: uso do Claude de ${m.period}.`,
     ...(m.products.length > 0 ? [`Projetos somados: ${joinNames(m.products)}.`] : []),
     `Resultados: ${count("concluido")} ${plural(count("concluido"), "concluída", "concluídas")}, ${count("em_validacao")} em validação, ${count("em_andamento")} em andamento${
       blocked > 0 ? `, ${blocked} ${plural(blocked, "bloqueada", "bloqueadas")}` : ""
     }.`,
-    `${tile("Sessões")?.value} ${plural(Number(tile("Sessões")?.value.replace(/\D/g, "")), "sessão", "sessões")}, ${tile("Mensagens")?.value} mensagens, ${tile("Tokens de entrada")?.value} tokens de entrada e ${tile("Tokens de saída")?.value} de saída.`,
-    `${active?.value} ${active?.extra} dias ativos${peak && peak !== "–" ? `, horário de pico às ${peak}` : ""}.`,
+    `${tile("Mensagens")?.value} mensagens, ${tile("Tokens de entrada")?.value} tokens de entrada e ${tile("Tokens de saída")?.value} de saída.`,
   ].join(" ");
 }
 
@@ -532,17 +532,15 @@ export function buildVisual(content: ProgressContent): { tree: VisualNode; width
     ),
   ]);
 
-  // --- Visão Geral: four tiles, then two half-width ones, then the strip by hour
+  // --- Visão Geral: one row of tiles, then the strip by hour
   const strip = stripNode(m.strip.rows);
-  const overviewH = 2 * L.cardPad + BORDER + L.tabH + 18 + L.tileH + L.tileGap + L.tileH + 26 + strip.height;
+  const overviewH = 2 * L.cardPad + BORDER + L.tabH + 18 + L.tileH + 26 + strip.height;
   const boxFor = (perRow: number) => Math.floor((innerW - (perRow - 1) * L.tileGap) / perRow) - 2 * L.tilePadX;
-  const first = m.tiles.slice(0, 4);
-  const second = m.tiles.slice(4);
+  const shown = m.tiles.filter((t) => PICTURE_TILES.includes(t.label));
   const overviewCard = card(overviewH, [
     tab("Visão Geral", m.period),
     h({ height: 18 }),
-    h({ width: "100%", gap: L.tileGap }, first.map((t) => tileNode(t, boxFor(first.length)))),
-    h({ width: "100%", gap: L.tileGap, marginTop: L.tileGap }, second.map((t) => tileNode(t, boxFor(second.length)))),
+    h({ width: "100%", gap: L.tileGap }, shown.map((t) => tileNode(t, boxFor(shown.length)))),
     h({ height: 26 }),
     strip.node,
   ]);

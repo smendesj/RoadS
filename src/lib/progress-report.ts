@@ -156,6 +156,11 @@ export type ProgressContent = {
   usage: UsageModel;
   shots?: Shot[];
   gaps?: CoverageGap[];
+  /**
+   * How the reader signs in to RoadS for the first time: the account and its temporary password, which the
+   * system makes them replace at once. Pushed from the local draft, never written in the code.
+   */
+  access?: { account: string; password: string };
 };
 
 /**

@@ -42,8 +42,8 @@ const deepFreeze = <T>(o: T): T => {
 test("every day of the window has a row, in order, and a day with no session keeps its row with zeros", () => {
   const rows = conferenceRows(model([day("2026-01-06", { messages: 40, tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } })]));
   assert.deepEqual(rows.map((r) => r.date), ["2026-01-05", "2026-01-06", "2026-01-07"]);
-  assert.deepEqual(rows[0], { date: "2026-01-05", sessions: [], firstPromptAt: null, lastPromptAt: null, messages: 0, tokens: 0 });
-  assert.deepEqual(rows[2], { date: "2026-01-07", sessions: [], firstPromptAt: null, lastPromptAt: null, messages: 0, tokens: 0 });
+  assert.deepEqual(rows[0], { date: "2026-01-05", sessions: [], firstPromptAt: null, lastPromptAt: null, messages: 0, tokens: 0, inputTokens: 0, outputTokens: 0 });
+  assert.deepEqual(rows[2], { date: "2026-01-07", sessions: [], firstPromptAt: null, lastPromptAt: null, messages: 0, tokens: 0, inputTokens: 0, outputTokens: 0 });
 });
 
 test("a day row carries its sessions, first and last prompt, messages and total tokens (cache included)", () => {
@@ -74,8 +74,30 @@ test("a day row carries its sessions, first and last prompt, messages and total 
     lastPromptAt: "2026-01-05T20:25:00Z",
     messages: 50,
     tokens: 3340,
+    inputTokens: 100,
+    outputTokens: 200,
   });
   assert.equal(totalTokens({ input: 100, output: 200, cacheRead: 3000, cacheWrite: 40 }), 3340);
+});
+
+test("a day row carries the input and output tokens the picture shows, without the cache", () => {
+  const rows = conferenceRows(model([day("2026-01-06", { messages: 5, tokens: { input: 3_600, output: 1_500_000, cacheRead: 900_000_000, cacheWrite: 7_000 } })]));
+  const tuesday = rows.find((r) => r.date === "2026-01-06")!;
+  assert.equal(tuesday.inputTokens, 3_600);
+  assert.equal(tuesday.outputTokens, 1_500_000);
+  // A quiet day still has both, as zeros, so every row of the table has the same columns.
+  const monday = rows.find((r) => r.date === "2026-01-05")!;
+  assert.deepEqual([monday.inputTokens, monday.outputTokens], [0, 0]);
+});
+
+test("a coverage warning says the delivery still counts and that only Claude's use may be missing", () => {
+  const rows = conferenceRows(model([]), [{ at: "2026-01-05T18:39:00Z", ref: "commit abc1234", nearestMessageMinutes: 267 }]);
+  const note = rows.find((r) => r.warning)!.note!;
+  assert.match(note, /^Aviso: trabalho no GitHub em 05\/01 às 15:39 \(commit abc1234\)/);
+  assert.match(note, /a mais próxima está a 267 min/);
+  assert.match(note, /A entrega conta normalmente/);
+  assert.match(note, /só o uso do Claude/);
+  assert.doesNotMatch(note, /não foi medido/);
 });
 
 test("the window is half-open: its end belongs to the next day, unless it falls inside that day", () => {

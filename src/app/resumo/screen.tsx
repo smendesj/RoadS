@@ -63,11 +63,11 @@ export function ResumoScreen({
 
       <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-10">
         <div className="flex flex-col gap-1.5">
-          <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">Resumo para a diretoria</h1>
+          <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">Resumo</h1>
           <p className="max-w-3xl text-[15px] text-rs-text-soft">
             {reviewer
-              ? "O e-mail curto, em linguagem simples, sobre o andamento do GeoCloud. Ajuste as frases, confira os números, copie para o Outlook e marque como enviado."
-              : "Os resumos já enviados à diretoria sobre o andamento do GeoCloud. Somente leitura."}
+              ? "Andamento do GeoCloud."
+              : "Andamento do GeoCloud. Somente leitura."}
           </p>
         </div>
 

@@ -17,6 +17,9 @@ import { localDay, type ConferenceRow, type CoverageGap, type TokenCount, type U
  * `note`, so a table that knows nothing about `warning` still prints it.
  */
 export type ConferenceLine = ConferenceRow & {
+  /** The two token counts the picture shows (cache left out), so the table speaks the picture's language. */
+  inputTokens?: number;
+  outputTokens?: number;
   humanPrompts?: number;
   otherMethodTokens?: number;
   warning?: true;
@@ -87,7 +90,7 @@ function gapLine(gap: CoverageGap): ConferenceLine {
     lastPromptAt: null,
     messages: 0,
     tokens: 0,
-    note: `Aviso: trabalho no GitHub ${when} (${ref}) ${near}. Pode haver uso do Claude que não foi medido.`,
+    note: `Aviso: trabalho no GitHub ${when} (${ref}) ${near}. A entrega conta normalmente; só o uso do Claude desse trabalho pode estar fora da conta (por exemplo, feito pelo celular).`,
     warning: true,
   };
 }
@@ -123,6 +126,8 @@ export function conferenceRows(usage: UsageModel, gaps: CoverageGap[] = []): Con
       lastPromptAt: d?.lastPromptAt ?? null,
       messages: d?.messages ?? 0,
       tokens: d ? totalTokens(d.tokens) : 0,
+      inputTokens: d?.tokens.input ?? 0,
+      outputTokens: d?.tokens.output ?? 0,
       ...(note ? { note } : {}),
       ...(humanPrompts !== undefined ? { humanPrompts } : {}),
       ...(otherMethodTokens !== undefined ? { otherMethodTokens } : {}),

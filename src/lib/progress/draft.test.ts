@@ -85,6 +85,7 @@ function validBody(): Body {
       },
       shots: [{ id: "shot-1", caption: "Tela de exemplo", mime: "image/jpeg", data: jpeg(2048) }],
       gaps: [{ at: "2026-03-02T20:00:00-03:00", ref: "PR 12", nearestMessageMinutes: 120 }],
+      access: { account: "reader@example.test", password: "Tmp-pass-1234" },
     },
   };
 }
@@ -369,6 +370,18 @@ test("anything that is not an object with a content object is refused", () => {
   for (const body of [null, undefined, 42, "texto", [], {}, { content: [] }, { content: "x" }, { produto: "GeoCloud" }]) {
     assert.equal(parseDraft(body).ok, false);
   }
+});
+
+test("the sign-in details are kept, and refused when they do not look like an account and a password", () => {
+  const r = parseDraft(validBody());
+  assert.equal(r.ok, true);
+  if (r.ok) assert.deepEqual(r.content.access, { account: "reader@example.test", password: "Tmp-pass-1234" });
+  const without = parseBent((b) => delete b.content.access);
+  if (without.ok) assert.equal(without.content.access, undefined);
+  refused((b) => (b.content.access = { account: "not an e-mail", password: "Tmp-pass-1234" }), /content\.access\.account/);
+  refused((b) => (b.content.access = { account: "reader@example.test", password: "" }), /content\.access\.password/);
+  refused((b) => (b.content.access = { account: "reader@example.test", password: "has space" }), /content\.access\.password/);
+  refused((b) => (b.content.access = unsafe("x")), /content\.access/);
 });
 
 test("the usage section keeps the names of the projects it adds up, and refuses a malformed list", () => {

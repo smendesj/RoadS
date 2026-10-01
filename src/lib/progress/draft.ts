@@ -34,7 +34,7 @@ export const MAX_SHOTS = 2;
  */
 const fieldsOf = <T>(all: { [K in keyof T]-?: true }) => Object.keys(all) as (keyof T & string)[];
 export const KEPT_FIELDS = {
-  content: fieldsOf<ProgressContent>({ window: true, headline: true, entries: true, internal: true, difficulties: true, nextSteps: true, usage: true, shots: true, gaps: true }),
+  content: fieldsOf<ProgressContent>({ window: true, headline: true, entries: true, internal: true, difficulties: true, nextSteps: true, usage: true, shots: true, gaps: true, access: true }),
   entry: fieldsOf<ProgressEntry>({ id: true, issue: true, status: true, title: true, summary: true, deliveredAt: true, subIssues: true, hidden: true, edited: true, sources: true }),
   usage: fieldsOf<UsageModel>({ scope: true, products: true, window: true, generatedAt: true, label: true, method: true, totals: true, byModel: true, favoriteModel: true, peakHour: true, days: true, notes: true }),
   totals: fieldsOf<UsageModel["totals"]>({ sessions: true, messages: true, humanPrompts: true, activeDays: true, tokens: true }),
@@ -295,6 +295,18 @@ function usage(value: unknown, path: string): UsageModel {
   return model;
 }
 
+const ACCOUNT = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
+
+/** The reader's first sign-in: an e-mail account and a password with no whitespace (it is typed from the e-mail). */
+function access(value: unknown, path: string): { account: string; password: string } {
+  const a = record(value, path);
+  const account = text(a.account, `${path}.account`, 120, true);
+  if (!ACCOUNT.test(account)) refuse(`${path}.account`, "esperado um e-mail");
+  const password = typeof a.password === "string" ? a.password : refuse(`${path}.password`, "esperado um texto");
+  if (password.length === 0 || password.length > 64 || /\s/.test(password)) refuse(`${path}.password`, "de 1 a 64 caracteres, sem espaços");
+  return { account, password };
+}
+
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 const IMAGE_SIGNATURE: Record<Shot["mime"], number[]> = {
   "image/jpeg": [0xff, 0xd8, 0xff],
@@ -367,6 +379,7 @@ function content(value: unknown, path: string): ProgressContent {
     result.shots = shots;
   }
   if (c.gaps !== undefined) result.gaps = list(c.gaps, `${path}.gaps`, 200).map((g, i) => gap(g, `${path}.gaps[${i}]`));
+  if (c.access !== undefined) result.access = access(c.access, `${path}.access`);
   return result;
 }
 

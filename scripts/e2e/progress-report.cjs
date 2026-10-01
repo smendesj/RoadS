@@ -291,7 +291,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     const card = page.locator("[data-report-card]");
     expect("admin -> the Resumo card is on the Dashboard", (await card.count()) === 1);
     const cardText = await card.innerText();
-    expect("admin -> the card is titled 'Resumo para a diretoria' and loaded (no read error)", /resumo para a diretoria/i.test(cardText) && !/Não foi possível carregar/.test(cardText), cardText.slice(0, 80).replace(/\n/g, " | "));
+    expect("admin -> the card is titled 'Resumo' and loaded (no read error)", /^resumo/i.test(cardText.trim()) && !/Não foi possível carregar/.test(cardText), cardText.slice(0, 80).replace(/\n/g, " | "));
     expect("admin -> the card sits right under 'Em paralelo'", await card.evaluate((el) => (el.previousElementSibling?.textContent ?? "").includes("Em paralelo")));
     const open = card.getByRole("link", { name: "Abrir" });
     if ((await open.count()) === 1) expect("admin -> the card's 'Abrir' goes to /resumo", (await open.getAttribute("href")) === "/resumo");
@@ -309,7 +309,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     expect("admin -> the seal says Rascunho", (await page.locator('[data-seal="draft"]').innerText()) === "Rascunho");
     expect("admin -> 'Marcar como enviado' starts disabled", await sendButton.isDisabled());
     const table = await page.locator("[data-conference-table]").innerText();
-    expect("admin -> the conference lists each day with its sessions", /05\/01/.test(table) && /06\/01/.test(table) && table.includes("09:00–17:00"), table.replace(/\s+/g, " ").slice(0, 120));
+    expect("admin -> the conference lists each day with its prompts and the picture's numbers", /05\/01/.test(table) && /06\/01/.test(table) && /09:05/.test(table) && /17:00/.test(table) && /TOKENS DE ENTRADA/i.test(table) && /TOKENS DE SAÍDA/i.test(table) && !/SESSÕES/i.test(table), table.replace(/\s+/g, " ").slice(0, 120));
     const warnings = (await page.locator("[data-conference-warnings]").count()) === 1 ? await page.locator("[data-conference-warnings]").innerText() : "";
     expect("admin -> a coverage gap is called out in the conference", /PR 9001/.test(warnings), warnings.replace(/\s+/g, " ").slice(0, 100));
     expect("admin -> every difficulty and next step is editable", (await field("difficulty:d9001:text").count()) === 1 && (await field("nextStep:n9001:text").count()) === 1);
@@ -396,7 +396,9 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       const next = JSON.parse(JSON.stringify(current.content));
       next.entries[0].summary = "A primeira entrega de teste ganhou um texto novo do Claude.";
       const checkedMs = current.checked_at ? Date.parse(current.checked_at) : Date.now();
-      const pushedAt = new Date(checkedMs + 2000).toISOString(); // after the check, by the database's own clock
+      // Just after the check, by the database's own clock, and well before the next one (the steps in between
+      // take seconds): a wider gap made the second check race the stamp when the page got faster.
+      const pushedAt = new Date(checkedMs + 300).toISOString();
       const { error } = await svc.from("progress_reports").update({ content: next, pushed_at: pushedAt, rev: current.rev + 1 }).eq("id", draft.id);
       expect("(setup) the draft was pushed again", !error, error ? error.message : "");
     }
@@ -415,7 +417,13 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     await conferred.check();
     expect("admin -> conferring again enables the send button", (await until(async () => !(await sendButton.isDisabled()), 10000)) === true);
     await sendButton.click();
-    await page.locator('[data-seal="sent"]').waitFor({ timeout: 15000 });
+    await page.locator('[data-seal="sent"]').waitFor({ timeout: 15000 }).catch(async (e) => {
+      // Say what the screen said, so a red run names the refusal instead of only a timeout.
+      const said = await page.locator('[role="status"], [role="alert"]').allInnerTexts().catch(() => []);
+      const now = await row(draft.id).catch(() => null);
+      const stamps = now ? ` | checked_at ${now.checked_at} pushed_at ${now.pushed_at} rev ${now.rev}` : "";
+      throw new Error(`${String(e.message).split(String.fromCharCode(10))[0]} | screen: ${said.join(" / ").slice(0, 200)}${stamps}`);
+    });
     const sentRow = await until(async () => {
       const r = await row(draft.id);
       return r.status === "sent" ? r : null;
