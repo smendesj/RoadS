@@ -52,17 +52,27 @@ Veja `NEXT_STEPS.md` para o que falta e o que cada passo precisa.
 
 ```bash
 npm test                # unitários (lógica pura, sem rede)
-npm run audit:rls       # auditoria de permissões no banco, com um usuário de cada papel
+npm run audit:rls       # permissões no banco: anônimo, Dev, Scrum Master e admin contra cada tabela
+npm run scan:secrets    # segredos no bundle do cliente, no build do servidor e no histórico do git
+npm run e2e             # as telas de cada papel, num Chrome de verdade (precisa do servidor local, abaixo)
+npm run e2e -- reset    # idem, mais o fluxo de redefinição de senha (envia 1 e-mail real)
+npm run e2e:prod        # só leitura: um passeio por papel na produção
 ```
 
-`audit:rls` chama a API pública do Supabase como anônimo, Dev, Scrum Master e admin e confere cada
-tabela contra o modelo de permissões acima, além da regra de domínio no cadastro. Roda no projeto de
-`.env.local` (o real), com lanes `zz-test-*` e usuários `roads-audit-*` descartáveis, apagados no fim,
-e sai com código 1 se achar qualquer furo. Rode depois de toda migração que mexa em políticas.
+**Servidor para o `e2e`:** `npm run build && GITHUB_TOKEN= TZ=UTC npm start`. O token vazio faz salvar item
+e sincronizar falharem de forma segura, sem nunca criar issue no GitHub de verdade; `TZ=UTC` reproduz o fuso
+do servidor da Vercel (foi o que revelou um erro de hidratação que o modo dev escondia).
 
-Precisa de `.env.test-account` (ignorado pelo git) com as três contas de teste:
-`ROADS_TEST_*` (admin, `sergio.mendes+roads-test@essencislabs.com`), `ROADS_TEST_SM_*` (Scrum Master) e
-`ROADS_TEST_DEV_*` (Dev), cada uma com `_EMAIL` e `_PASSWORD`. A conta admin de teste existe por uma
-exceção única no trigger de admin reservado (migração 0015); para testes de interface com escrita,
-suba o servidor local com `GITHUB_TOKEN=` vazio, para que salvar item ou sincronizar nunca crie issue
-no GitHub de verdade.
+**O que cada um cobre.** `audit:rls` chama a API pública do Supabase como cada papel e confere a regra de
+domínio no cadastro; sai com código 1 se achar furo (rode depois de toda migração que mexa em políticas) e
+avisa se o Site URL do Auth não é o da produção. O `e2e` dirige cada papel pelas telas (controles que devem e
+não devem existir, criar/editar/mover/apagar, notas, Config, inatividade, Sair, abas cruzadas, tema escuro,
+celular) e chama **cada ação do servidor direto**, sem a interface, conferindo o banco depois. Uma lista em
+`src/lib/actions/exports.test.ts` trava quais funções são endpoints: tudo que um arquivo `"use server"`
+exporta pode ser chamado por qualquer usuário logado.
+
+**Contas de teste.** Precisam de `.env.test-account` (ignorado pelo git) com `ROADS_TEST_*` (admin,
+`sergio.mendes+roads-test@essencislabs.com`), `ROADS_TEST_SM_*` (Scrum Master) e `ROADS_TEST_DEV_*` (Dev),
+cada uma com `_EMAIL` e `_PASSWORD`. A conta admin de teste existe por uma exceção única no trigger de
+admin reservado (migração 0015). Os testes criam lanes `zz-test-*` e itens `[TESTE]` no banco real e os
+apagam no fim, junto com as linhas que geram na fila do FrontlightS.
