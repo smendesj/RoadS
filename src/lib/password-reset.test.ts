@@ -78,11 +78,17 @@ test("temporary passwords are long, URL-safe, different every time, and satisfy 
   assert.equal(seen.size, 50);
 });
 
-test("a rate-limited e-mail is explained, in the same words however Supabase phrases it", () => {
+test("the per-person cooldown (one e-mail a minute) is explained as such", () => {
   const tooSoon = /uma vez por minuto/;
-  assert.match(resetFailureMessage({ status: 429, message: "For security purposes, you can only request this after 55 seconds." }), tooSoon);
-  assert.match(resetFailureMessage({ code: "over_email_send_rate_limit", message: "email rate limit exceeded" }), tooSoon);
-  assert.match(resetFailureMessage(new Error("email rate limit exceeded")), tooSoon);
+  assert.match(resetFailureMessage({ status: 429, code: "over_email_send_rate_limit", message: "For security purposes, you can only request this after 55 seconds." }), tooSoon);
+  assert.match(resetFailureMessage(new Error("For security purposes, you can only request this after 12 seconds.")), tooSoon);
+});
+
+test("the project-wide e-mail cap is explained as that, not as the per-person minute", () => {
+  const cap = /limite de e-mails de autenticação do projeto/;
+  assert.match(resetFailureMessage({ status: 429, code: "over_email_send_rate_limit", message: "email rate limit exceeded" }), cap);
+  assert.match(resetFailureMessage(new Error("email rate limit exceeded")), cap);
+  assert.doesNotMatch(resetFailureMessage(new Error("email rate limit exceeded")), /uma vez por minuto/);
 });
 
 test("an unknown account and any other failure each get a plain line, never the raw error", () => {

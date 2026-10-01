@@ -34,8 +34,13 @@ export function resetFailureMessage(error: unknown): string {
   const text = error instanceof Error ? error.message : typeof error === "object" && error !== null && "message" in error ? String((error as { message: unknown }).message) : "";
   const status = typeof error === "object" && error !== null && "status" in error ? Number((error as { status: unknown }).status) : 0;
   const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
-  if (status === 429 || code === "over_email_send_rate_limit" || /rate limit|only request this after/i.test(text)) {
+  // Two different Supabase limits come back as the same 429: one e-mail a minute per person, and a cap on
+  // everything the project sends per hour. Only the first is cured by waiting a minute.
+  if (/only request this after/i.test(text)) {
     return "O e-mail de redefinição só pode ser enviado uma vez por minuto para a mesma pessoa. Tente de novo em instantes.";
+  }
+  if (status === 429 || code === "over_email_send_rate_limit" || /rate limit/i.test(text)) {
+    return "O limite de e-mails de autenticação do projeto foi atingido (o Supabase limita os envios por hora). Tente de novo mais tarde.";
   }
   if (text === "user_not_found") return "Usuário não encontrado.";
   return "Não foi possível concluir o reset agora. Tente de novo.";
