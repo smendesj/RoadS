@@ -189,6 +189,21 @@ test("the delivery date is the merge of the PR, not the day the issue was closed
   assert.ok(entry.evidence.some((line) => line.includes("#1500") && line.includes("09/03 15:00")));
 });
 
+test("an issue with many PRs keeps at most 20 sources, the issue and the delivering PR among them", () => {
+  const many = Array.from({ length: 30 }, (_, i) => pr(2000 + i, { title: `Parte ${i} (#700)`, mergedAt: `2026-03-0${9 + (i % 2)}T10:00:00-03:00`, closedAt: `2026-03-0${9 + (i % 2)}T10:00:00-03:00` }));
+  const late = pr(2999, { title: "Entrega final (#700)", mergedAt: "2026-03-10T18:00:00-03:00", closedAt: "2026-03-10T18:00:00-03:00" });
+  const out = facts({
+    issues: [issue(700, { state: "closed", stateReason: "completed", closedAt: "2026-03-10T19:00:00-03:00" })],
+    prs: [...many, late],
+    projectItems: [board(700, "Done")],
+  });
+  const [entry] = out.entries;
+  assert.ok(entry.sources.length <= 20, `got ${entry.sources.length}`);
+  assert.ok(entry.sources.includes(`https://github.com/${REPO}/issues/700`));
+  assert.ok(entry.sources.includes(`https://github.com/${REPO}/pull/2999`));
+  assert.equal(new Set(entry.sources).size, entry.sources.length);
+});
+
 test("a merge at 23:30 in São Paulo the day before the window is not a delivery of the window", () => {
   const before = facts({
     issues: [issue(600, { state: "closed", stateReason: "completed", closedAt: "2026-03-09T10:00:00-03:00" })],

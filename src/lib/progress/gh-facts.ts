@@ -212,6 +212,9 @@ function unique<T>(list: T[]): T[] {
 const sameRepo = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 const byNumber = (a: { number: number }, b: { number: number }): number => a.number - b.number;
 
+/** Same limit as the draft contract's `sources` (draft.ts); a longer list would make the whole draft be refused. */
+const MAX_SOURCES = 20;
+
 export function buildFacts(input: FactsInput): ProgressFacts {
   const start = Date.parse(input.window.start);
   const end = Date.parse(input.window.end);
@@ -355,7 +358,8 @@ export function buildFacts(input: FactsInput): ProgressFacts {
       hidden: hiddenReason !== null,
       hiddenReason,
       evidence: evidenceLines({ issue, decision, prs, commits, now, since: item?.statusUpdatedAt ?? null, windowEnd: input.window.end, subIssues }),
-      sources: unique([issue.url, ...prs.map((p) => p.url)]),
+      // The draft parser takes at most MAX_SOURCES links: the issue and the PR that delivered it come first.
+      sources: unique([issue.url, ...(decision.delivery?.url ? [decision.delivery.url] : []), ...prs.map((p) => p.url)]).slice(0, MAX_SOURCES),
     });
   }
 
