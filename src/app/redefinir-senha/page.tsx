@@ -73,7 +73,7 @@ export default function RedefinirSenhaPage() {
         </div>
 
         <p className="text-sm text-rs-text">
-          Sua senha foi resetada por um admin. Crie uma senha nova para continuar.
+          Este é o seu primeiro acesso, ou a sua senha foi resetada por um admin. Crie uma senha nova para continuar.
         </p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">

@@ -1,4 +1,5 @@
 import { NavBar } from "@/components/NavBar";
+import { ProgressReportCard } from "@/components/ProgressReportCard";
 import { DashboardBranch, DashboardSyncProvider, KanbanColumns, KpiCards, SprintPanels, SyncPill } from "@/components/DashboardSync";
 import { getDashboard } from "@/lib/actions/dashboard";
 import { getViewerOrReset } from "@/lib/get-viewer";
@@ -12,6 +13,9 @@ export default async function DashboardPage() {
   const viewer = await getViewerOrReset();
   const roleLabel = labelFor(viewer?.role ?? null);
   const isAdmin = viewer?.role === "admin";
+  // Drafts of the report are for the admin to review; nobody else gets the card (a scrum master reads
+  // the sent reports on the Resumo tab).
+  const canSeeReport = isAdmin;
 
   // Everything comes from the Roadmap + the last GitHub sync; the mock columns only fill in
   // before the very first sync ever ran.
@@ -35,7 +39,7 @@ export default async function DashboardPage() {
 
           <KpiCards />
 
-          <SprintPanels />
+          <SprintPanels reportSlot={canSeeReport ? <ProgressReportCard /> : undefined} />
 
           <div className="flex flex-col gap-3.5">
             <span className="text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Kanban</span>

@@ -115,7 +115,9 @@ export function KpiCards() {
   );
 }
 
-export function SprintPanels() {
+// reportSlot is the server-drawn "Resumo para a diretoria" card (admin only); it sits right under
+// "Em paralelo". A server component can't be imported in this client file, so the page hands it in.
+export function SprintPanels({ reportSlot }: { reportSlot?: ReactNode }) {
   const { model } = useSync();
   return (
     <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[2fr_1fr]">
@@ -156,6 +158,7 @@ export function SprintPanels() {
             <div className="border-t border-rs-bg py-2 text-sm text-rs-text-faint">Nada em andamento fora da sprint.</div>
           )}
         </div>
+        {reportSlot}
         <div className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-6">
           <span className="text-[13px] font-bold uppercase tracking-wide text-rs-brand-text">Próxima semana</span>
           {model.proxima.map((p) => (

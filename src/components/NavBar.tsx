@@ -17,9 +17,10 @@ function SunMoonIcon({ theme }: { theme: "light" | "dark" }) {
   );
 }
 
-type Tab = "dashboard" | "roadmap" | "config";
+type Tab = "dashboard" | "roadmap" | "resumo" | "config";
 
-// showConfig is only ever true for admin — the Config tab doesn't render for anyone else.
+// showConfig is only ever true for admin — the Config tab doesn't render for anyone else. The Resumo
+// tab follows the role label (admin and scrum master only), so no page has to pass anything new.
 export function NavBar({
   active,
   roleLabel,
@@ -32,11 +33,15 @@ export function NavBar({
   showConfig?: boolean;
 }) {
   const { theme, toggle } = useTheme();
+  const showResumo = roleLabel === "Admin" || roleLabel === "Scrum Master";
+  // Four tabs (admin) do not fit a 320px phone at the usual size: tighter below sm, and the bar scrolls
+  // inside itself rather than ever widening the page.
+  const crowded = showResumo && showConfig;
 
   const tabClass = (tab: Tab) =>
-    `flex-1 rounded-lg px-3 py-2 text-center text-sm font-bold md:flex-none md:px-4 ${
-      active === tab ? "bg-rs-brand text-white" : "text-rs-text-soft"
-    }`;
+    `flex-1 rounded-lg py-2 text-center font-bold md:flex-none md:px-4 ${
+      crowded ? "px-1.5 text-xs sm:px-3 sm:text-sm" : "px-3 text-sm"
+    } ${active === tab ? "bg-rs-brand text-white" : "text-rs-text-soft"}`;
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-rs-border bg-rs-card px-4 py-3 sm:px-6 md:h-[72px] md:flex-nowrap md:py-0 lg:px-10">
@@ -51,13 +56,22 @@ export function NavBar({
         <span className="text-xl font-extrabold tracking-tight text-rs-text">RoadS</span>
       </div>
 
-      <div className="order-last flex w-full gap-1.5 rounded-[10px] bg-rs-bg p-1 md:order-none md:w-auto">
+      <div
+        className={`order-last flex w-full gap-1.5 rounded-[10px] bg-rs-bg p-1 md:order-none md:w-auto ${
+          crowded ? "overflow-x-auto" : ""
+        }`}
+      >
         <Link href="/dashboard" className={tabClass("dashboard")}>
           Dashboard
         </Link>
         <Link href="/roadmap" className={tabClass("roadmap")}>
           Roadmap
         </Link>
+        {showResumo && (
+          <Link href="/resumo" className={tabClass("resumo")}>
+            Resumo
+          </Link>
+        )}
         {showConfig && (
           <Link href="/config" className={tabClass("config")}>
             Config

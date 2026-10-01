@@ -12,6 +12,7 @@ const PUBLIC_ACTIONS: Record<string, string[]> = {
   "admin.ts": ["listUsersForConfig", "resetUserPassword", "updateUserRole"],
   "dashboard.ts": ["getDashboard", "syncDashboard"],
   "profile.ts": ["updateMyAvatar"],
+  "progress.ts": ["markProgressReportSent", "saveProgressEdit", "setProgressChecked"],
   "roadmap.ts": ["createRoadmapItem", "deleteRoadmapItem", "getRoadmapBoard", "moveRoadmapItemLane", "saveRoadmapItemEdit"],
   "sync.ts": ["getLatestBoardSnapshot", "syncBoardAsViewer"],
 };

@@ -24,11 +24,13 @@ const { BASE, expect, sleep, svc } = L;
     await page.getByText("Usuários", { exact: true }).waitFor({ timeout: 30000 });
     await page.locator("tbody tr").first().waitFor();
     const rows = page.locator("tbody tr");
-    expect("config: lists the 4 accounts", (await count(rows)) === 4, String(await count(rows)));
+    // Real accounts come and go (an invited CEO, say), so the table is held to the profiles table, not to a number.
+    const { count: accounts } = await svc.from("profiles").select("id", { count: "exact", head: true });
+    expect("config: lists every account", (await count(rows)) === accounts, `${await count(rows)} of ${accounts}`);
     const adminRows = rows.filter({ hasText: "Admin" }).filter({ hasNot: page.locator("select") });
     expect("config: admin rows show a fixed 'Admin' badge (no role select)", (await count(adminRows)) === 2, String(await count(adminRows)));
-    expect("config: the two non-admin accounts get a role select", (await count(page.locator("tbody select"))) === 2);
-    expect("config: every row has 'Resetar senha'", (await count(page.getByRole("button", { name: "Resetar senha" }))) === 4);
+    expect("config: every non-admin account gets a role select", (await count(page.locator("tbody select"))) === accounts - 2, String(await count(page.locator("tbody select"))));
+    expect("config: every row has 'Resetar senha'", (await count(page.getByRole("button", { name: "Resetar senha" }))) === accounts);
 
     const devRow = rows.filter({ hasText: "RoadS Tester Dev" });
     await devRow.locator("select").selectOption("scrum_master");

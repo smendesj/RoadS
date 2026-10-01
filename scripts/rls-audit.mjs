@@ -13,6 +13,11 @@
 // scrum_master writes items they own (plus priority/effort/lane on seeded ones) and notes as
 // scrum_master; an admin does everything except hand out or take away the admin role; lanes are
 // admin-only; only company e-mail domains can have an account.
+//
+// The reports for the board (progress_reports) are read and edited by the admin, read by a scrum_master
+// only once sent, created and refreshed only by the ingest route (service role), and frozen once sent.
+// Their fixtures are ELIMS reports in 2099, marked content.zz_test, so the real GeoCloud rows are never
+// touched.
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 
@@ -179,6 +184,153 @@ try {
   await check("admin", "demote an admin (the TEST admin's own row)", "deny", async () => rows(await adm.c.from("profiles").update({ role: "dev" }).eq("id", adm.id).select("id")));
   await svc.from("profiles").update({ role: "admin" }).eq("id", adm.id); // put it back if the demotion went through
 
+  // ===================== PROGRESS REPORTS ("Resumo para a diretoria")
+  // The admin reads and edits every report (the screen's edits live in `overrides`); a scrum_master reads
+  // only the SENT ones and edits none; dev and anonymous read nothing. Nobody signed in creates or deletes a
+  // report, or rewrites what the collectors pushed (content, link token, product, period); a sent report is
+  // frozen; "sent" needs the numbers checked AFTER the last push. A product has one draft at a time, so the
+  // fixtures are one sent report and one draft (plus the draft the ingest round trip makes at the end).
+  const R = "progress_reports";
+  const when = (n) => `2099-03-${String(n).padStart(2, "0")}T03:00:00Z`;
+  const fixtureRow = (n, extra = {}) => ({ produto: "ELIMS", period_start: when(n), period_end: when(n + 1), content: { zz_test: true }, ...extra });
+  const report = async (n, extra = {}) => {
+    const r = await svc.from(R).insert(fixtureRow(n, extra)).select("id").single();
+    return { id: r.data?.id, detail: r.error ? r.error.message.slice(0, 90) : "created" };
+  };
+  const readReport = async (id) => (await svc.from(R).select("*").eq("id", id).single()).data;
+  const edit = (c, id, patch) => c.from(R).update(patch).eq("id", id).select("id");
+  const recent = (iso) => iso != null && Math.abs(Date.now() - Date.parse(iso)) < 120000;
+  await svc.from(R).delete().eq("content->>zz_test", "true"); // leftovers of a run that died halfway
+
+  const S1 = await report(12, { status: "sent", checked_at: when(12), sent_at: when(13) });
+  const D1 = await report(14);
+  await check("svc", "create the fixture reports (the ingest route does)", "allow", async () => ({ ok: Boolean(S1.id && D1.id), detail: S1.id ? D1.detail : S1.detail }));
+  // The table's own invariants, which the ingest route relies on.
+  await check("svc", "a second draft of the same product", "deny", async () => rows(await svc.from(R).insert(fixtureRow(30)).select("id")));
+  await check("svc", "the same period twice for a product", "deny", async () => rows(await svc.from(R).insert(fixtureRow(12, { status: "sent" })).select("id")));
+  await check("svc", "a period that ends before it starts", "deny", async () => rows(await svc.from(R).insert({ ...fixtureRow(40, { status: "sent" }), period_end: when(39) }).select("id")));
+  await check("svc", "a status other than draft or sent", "deny", async () => rows(await svc.from(R).insert(fixtureRow(41, { status: "archived" })).select("id")));
+
+  for (const [who, c] of [["anon", anon], ["dev", dev.c]]) {
+    await check(who, "read a draft", "deny", async () => rows(await c.from(R).select("id").eq("id", D1.id)));
+    await check(who, "read a sent report", "deny", async () => rows(await c.from(R).select("id").eq("id", S1.id)));
+    await check(who, "edit a draft", "deny", async () => rows(await edit(c, D1.id, { overrides: { zz: { value: "x" } } })));
+    await check(who, "edit a sent report", "deny", async () => rows(await edit(c, S1.id, { overrides: { zz: { value: "x" } } })));
+    await check(who, "insert a report", "deny", async () => rows(await c.from(R).insert(fixtureRow(31)).select("id")));
+    await check(who, "delete a report", "deny", async () => rows(await c.from(R).delete().eq("id", D1.id).select("id")));
+  }
+
+  // A scrum_master reads what was sent and nothing else: no draft, no edit.
+  await check("sm", "read a sent report", "allow", async () => rows(await sm.c.from(R).select("id").eq("id", S1.id)));
+  await check("sm", "read a draft", "deny", async () => rows(await sm.c.from(R).select("id").eq("id", D1.id)));
+  await check("sm", "edit a draft", "deny", async () => rows(await edit(sm.c, D1.id, { overrides: { zz: { value: "x" } } })));
+  await check("sm", "tick checked_at on a draft", "deny", async () => rows(await edit(sm.c, D1.id, { checked_at: new Date().toISOString() })));
+  await check("sm", "edit a sent report", "deny", async () => rows(await edit(sm.c, S1.id, { overrides: { zz: { value: "x" } } })));
+  await check("sm", "insert a report", "deny", async () => rows(await sm.c.from(R).insert(fixtureRow(32)).select("id")));
+  await check("sm", "delete a sent report", "deny", async () => rows(await sm.c.from(R).delete().eq("id", S1.id).select("id")));
+
+  await check("admin", "read a draft", "allow", async () => rows(await adm.c.from(R).select("id").eq("id", D1.id)));
+  await check("admin", "read a sent report", "allow", async () => rows(await adm.c.from(R).select("id").eq("id", S1.id)));
+  await check("admin", "edit overrides of a draft", "allow", async () => rows(await edit(adm.c, D1.id, { overrides: { headline: { value: "[TESTE] frase" } } })));
+  await check("admin", "rewrite content", "deny", async () => rows(await edit(adm.c, D1.id, { content: { zz_test: true, headline: "forjado" } })));
+  await check("admin", "rewrite share_token", "deny", async () => rows(await edit(adm.c, D1.id, { share_token: "00000000-0000-4000-8000-000000000000" })));
+  await check("admin", "rewrite produto", "deny", async () => rows(await edit(adm.c, D1.id, { produto: "GeoCloud" })));
+  await check("admin", "rewrite the period", "deny", async () => rows(await edit(adm.c, D1.id, { period_start: when(10), period_end: when(11) })));
+  await check("admin", "rewrite pushed_at", "deny", async () => rows(await edit(adm.c, D1.id, { pushed_at: when(12) })));
+  await check("admin", "insert a report", "deny", async () => rows(await adm.c.from(R).insert(fixtureRow(33)).select("id")));
+  await check("admin", "delete a draft", "deny", async () => rows(await adm.c.from(R).delete().eq("id", D1.id).select("id")));
+  await check("admin", "send a report nobody checked", "deny", async () => rows(await edit(adm.c, D1.id, { status: "sent" })));
+  await check("admin", "tick checked_at", "allow", async () => rows(await edit(adm.c, D1.id, { checked_at: new Date().toISOString() })));
+  // The stamp is the database's: the time and the author sent along are ignored.
+  await check("admin", "forge the checked_at / checked_by stamp", "deny", async () => {
+    await edit(adm.c, D1.id, { checked_at: null });
+    await edit(adm.c, D1.id, { checked_at: "2000-01-01T00:00:00Z", checked_by: sm.id });
+    const row = await readReport(D1.id);
+    const forged = row.checked_by !== adm.id || !recent(row.checked_at);
+    return { ok: forged, detail: forged ? "forged stamp stored" : "stamped by the database" };
+  });
+  await check("admin", "rewrite checked_by of a checked report", "deny", async () => {
+    await edit(adm.c, D1.id, { checked_by: sm.id });
+    return { ok: (await readReport(D1.id)).checked_by !== adm.id, detail: "checked_by changed" };
+  });
+  // A push after the check makes the check stale: the report can't be sent until it is checked again.
+  await svc.from(R).update({ pushed_at: new Date(Date.now() + 3600000).toISOString() }).eq("id", D1.id);
+  await check("admin", "send a report checked before the last push", "deny", async () => rows(await edit(adm.c, D1.id, { status: "sent" })));
+  await svc.from(R).update({ checked_at: new Date(Date.now() + 7200000).toISOString() }).eq("id", D1.id);
+  await check("admin", "send forging sent_by / sent_at", "deny", async () => {
+    await edit(adm.c, D1.id, { status: "sent", sent_by: sm.id, sent_at: "2000-01-01T00:00:00Z" });
+    const row = await readReport(D1.id);
+    const forged = row.sent_by !== adm.id || !recent(row.sent_at);
+    return { ok: forged, detail: forged ? "forged stamp stored" : "stamped by the database" };
+  });
+  await check("admin", "a checked report is sent, stamped by the database", "allow", async () => {
+    const row = await readReport(D1.id);
+    return { ok: row.status === "sent" && row.sent_by === adm.id && recent(row.sent_at), detail: `status ${row.status}` };
+  });
+  await check("sm", "read the report once it is sent", "allow", async () => rows(await sm.c.from(R).select("id").eq("id", D1.id)));
+
+  // A sent report is frozen, for everyone signed in.
+  await check("admin", "sent report: edit overrides", "deny", async () => rows(await edit(adm.c, D1.id, { overrides: { headline: { value: "depois de enviado" } } })));
+  await check("admin", "sent report: untick checked_at", "deny", async () => rows(await edit(adm.c, D1.id, { checked_at: null })));
+  await check("admin", "sent report: back to draft", "deny", async () => rows(await edit(adm.c, D1.id, { status: "draft" })));
+  await check("admin", "sent report: delete", "deny", async () => rows(await adm.c.from(R).delete().eq("id", D1.id).select("id")));
+  await check("admin", "sent fixture: edit overrides", "deny", async () => rows(await edit(adm.c, S1.id, { overrides: { zz: { value: "x" } } })));
+
+  // The ingest route's store, against the real table (the service role): the rules of ingest.ts meeting the
+  // table's guards. Skipped, loudly, on a Node that can't load .ts files.
+  let ingestModules = null;
+  try {
+    ingestModules = [await import("../src/lib/progress/ingest.ts"), await import("../src/lib/progress/ingest-store.ts")];
+  } catch (e) {
+    if (e?.code === "ERR_MODULE_NOT_FOUND") throw e; // a renamed file must not silently drop the checks
+    console.log("(ingest round trip skipped: this Node can't load .ts files)");
+  }
+  if (ingestModules) {
+    const [{ ingestDraft, reportState }, { supabaseReportStore }] = ingestModules;
+    const store = supabaseReportStore(svc);
+    const push = (headline, endDay) =>
+      ingestDraft(store, {
+        produto: "ELIMS",
+        content: {
+          zz_test: true,
+          window: { start: when(20), end: when(endDay) },
+          headline,
+          entries: [{ id: "zz-1", status: "em_validacao", hidden: false }, { id: "zz-2", status: "concluido", hidden: true }],
+        },
+        now: new Date(),
+      });
+    const first = await push("[TESTE] primeira", 21);
+    await check("ingest", "the first push creates the draft", "allow", async () => ({ ok: first.status === 200 && first.created === true, detail: `status ${first.status}` }));
+    await edit(adm.c, first.id, {
+      overrides: { headline: { value: "[TESTE] minha frase", base: "[TESTE] primeira" }, "entry:zz-1:status": { value: "concluido", base: "em_validacao" } },
+    });
+    await edit(adm.c, first.id, { checked_at: new Date().toISOString() });
+    const before = await readReport(first.id);
+    const second = await push("[TESTE] segunda", 22);
+    const after = await readReport(first.id);
+    await check("ingest", "pushing again keeps edits and link, voids the check", "allow", async () => {
+      const kept = JSON.stringify(after.overrides) === JSON.stringify(before.overrides) && after.share_token === before.share_token;
+      const voided = after.checked_at === null && after.checked_by === null;
+      const fresh = after.content.headline === "[TESTE] segunda" && after.rev > before.rev;
+      return { ok: second.status === 200 && second.created === false && second.id === first.id && kept && voided && fresh, detail: `kept ${kept}, voided ${voided}, fresh ${fresh}` };
+    });
+    await edit(adm.c, first.id, { checked_at: new Date().toISOString() });
+    await edit(adm.c, first.id, { status: "sent" });
+    const late = await push("[TESTE] tarde demais", 22);
+    await check("ingest", "a period already sent answers 409", "allow", async () => ({ ok: late.status === 409 && late.error === "period_already_sent", detail: `status ${late.status}` }));
+    // The GET answer: the window since the last sent report, and what that report told (edits applied).
+    await check("ingest", "the state lists what the sent report told", "allow", async () => {
+      const state = await reportState(store, "ELIMS", new Date());
+      const told = JSON.stringify(state.lastSent?.entries);
+      const ok = state.lastSent?.id === first.id && told === JSON.stringify([{ id: "zz-1", status: "concluido" }]);
+      return { ok, detail: `told ${told}` };
+    });
+    await check("ingest", "...and the sent report is untouched", "allow", async () => {
+      const row = await readReport(first.id);
+      return { ok: row.status === "sent" && row.content.headline === "[TESTE] segunda", detail: `status ${row.status}` };
+    });
+  }
+
   // ===================== SIGNUP / E-MAIL DOMAIN
   // No real e-mail is ever sent: the public signUp probe only runs once the backend has already refused
   // the same domain through the admin API (a refused row never reaches GoTrue's confirmation e-mail).
@@ -228,6 +380,7 @@ try {
   await svc.from("lanes").delete().like("id", "zz-test-%");
   await svc.from("roadmap_items").delete().in("created_by", [sm.id, adm.id]);
   await svc.from("roadmap_sync_queue").delete().eq("payload->>zz_test", "true");
+  await svc.from("progress_reports").delete().eq("content->>zz_test", "true");
   for (const u of (await svc.auth.admin.listUsers({ page: 1, perPage: 1000 })).data.users.filter((x) => /roads-audit-/.test(x.email ?? ""))) {
     await svc.auth.admin.deleteUser(u.id);
   }
