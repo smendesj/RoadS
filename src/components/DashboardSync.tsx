@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useTransition, type ReactNode } from "react";
 import { badgeClass } from "@/lib/tones";
 import { syncDashboard, type DashboardModel } from "@/lib/actions/dashboard";
+import { useLocalTime } from "@/lib/use-local-time";
 
 type SyncContextValue = {
   model: DashboardModel;
@@ -60,10 +61,10 @@ export function DashboardBranch() {
 
 export function SyncPill() {
   const { isPending, error, model, canSync, sync } = useSync();
+  // Shown in the viewer's time zone, which only the browser knows: "—" holds the line until then.
+  const syncedAt = useLocalTime(model.syncedAt);
   const lastSync = model.syncedAt && (
-    <span className="text-[11px] text-rs-text-faint">
-      Última sincronização: {new Date(model.syncedAt).toLocaleTimeString("pt-BR")}
-    </span>
+    <span className="text-[11px] text-rs-text-faint">Última sincronização: {syncedAt ?? "—"}</span>
   );
 
   return (
