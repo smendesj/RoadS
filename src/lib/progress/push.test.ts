@@ -255,3 +255,103 @@ test("a wrong command line prints the usage and exits with 2", async () => {
     assert.equal(w.requests.length, 0);
   }
 });
+
+/* ---------- --assemble: the texts file plus the collected files become the draft ---------- */
+
+const factsFile = (over: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    window: WINDOW,
+    entries: [
+      { id: "gc-101", issue: 101, title: "Técnico A", status: "concluido", deliveredAt: "2026-03-02T15:00:00-03:00", subIssues: null, hidden: false, sources: ["https://github.com/OWNER/REPOSITORY/issues/101"] },
+      { id: "gc-102", issue: 102, title: "Técnico B", status: "em_andamento", deliveredAt: null, subIssues: null, hidden: false, sources: [] },
+    ],
+    internal: { count: 0, items: [] },
+    ...over,
+  });
+const textsFile = (over: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    headline: "Abertura de exemplo.",
+    entries: [
+      { issue: 101, title: "Título de exemplo A", summary: "Resumo de exemplo A." },
+      { issue: 102, title: "Título de exemplo B", summary: "Resumo de exemplo B." },
+    ],
+    nextSteps: ["Passo de exemplo."],
+    ...over,
+  });
+const ASSEMBLE = ["--draft", "textos.json", "--assemble", "--facts", "fatos.json", "--usage", "uso.json", "--local", "local.json"];
+const assembling = (extra: Record<string, string | Buffer> = {}) =>
+  world({
+    files: {
+      "textos.json": textsFile(),
+      "fatos.json": factsFile(),
+      "uso.json": JSON.stringify(draft().usage),
+      "local.json": JSON.stringify({ access: { account: "reader@example.test", password: "Tmp-pass-1234" } }),
+      ...extra,
+    },
+  });
+const sentContent = (w: ReturnType<typeof world>) => JSON.parse(String(w.requests[0].init.body)).content;
+
+test("--assemble builds the draft from the texts and the collected files, and sends it", async () => {
+  const w = assembling();
+  assert.equal(await w.run(...ASSEMBLE), 0, w.output());
+  const content = sentContent(w);
+  assert.deepEqual(content.entries.map((e: { status: string }) => e.status), ["concluido", "em_andamento"]);
+  assert.equal(content.entries[0].title, "Título de exemplo A");
+  assert.deepEqual(content.access, { account: "reader@example.test", password: "Tmp-pass-1234" });
+  assert.equal(content.usage.scope, "GeoCloud");
+});
+
+test("--assemble without the local file simply sends no sign-in details", async () => {
+  const w = assembling();
+  assert.equal(await w.run("--draft", "textos.json", "--assemble", "--facts", "fatos.json", "--usage", "uso.json", "--local", "nao-existe.json"), 0, w.output());
+  assert.equal(sentContent(w).access, undefined);
+});
+
+test("--assemble names a delivery that has no text, and sends nothing", async () => {
+  const w = assembling({ "textos.json": textsFile({ entries: [{ issue: 101, title: "Só A", summary: "Frase." }] }) });
+  assert.equal(await w.run(...ASSEMBLE), 1);
+  assert.match(w.output(), /#102/);
+  assert.equal(w.requests.length, 0);
+});
+
+test("--assemble says which file it could not read, without quoting it", async () => {
+  const w = assembling();
+  assert.equal(await w.run("--draft", "textos.json", "--assemble", "--facts", "sumiu.json", "--usage", "uso.json"), 1);
+  assert.match(w.output(), /sumiu\.json/);
+  const broken = assembling({ "fatos.json": "{ isto não é json SEGREDO" });
+  assert.equal(await broken.run(...ASSEMBLE), 1);
+  assert.ok(!broken.output().includes("SEGREDO"));
+});
+
+test("--shots-dir takes the prints listed in captions.json, in that order, and ignores the rest", async () => {
+  const dir = ".frontlights/progress/shots";
+  const w = assembling({
+    [`${dir}/captions.json`]: JSON.stringify([{ file: "b.png", caption: "Segunda tela." }, { file: "a.jpg", caption: "Primeira tela." }]),
+    [`${dir}/a.jpg`]: jpeg(200),
+    [`${dir}/b.png`]: png(200),
+    [`${dir}/velho.png`]: png(200),
+  });
+  assert.equal(await w.run(...ASSEMBLE, "--shots-dir", dir), 0, w.output());
+  const shots = sentContent(w).shots;
+  assert.deepEqual(shots.map((s: { caption: string; mime: string }) => [s.caption, s.mime]), [["Segunda tela.", "image/png"], ["Primeira tela.", "image/jpeg"]]);
+});
+
+test("--shots-dir without a captions.json sends no prints; a listed file that is missing is named", async () => {
+  const dir = ".frontlights/progress/shots";
+  const none = assembling({ [`${dir}/a.jpg`]: jpeg(200) });
+  assert.equal(await none.run(...ASSEMBLE, "--shots-dir", dir), 0, none.output());
+  assert.equal(sentContent(none).shots, undefined);
+  const gone = assembling({ [`${dir}/captions.json`]: JSON.stringify([{ file: "sumiu.png", caption: "X." }]) });
+  assert.equal(await gone.run(...ASSEMBLE, "--shots-dir", dir), 1);
+  assert.match(gone.output(), /sumiu\.png/);
+  assert.equal(gone.requests.length, 0);
+});
+
+test("--shots-dir refuses a name that leaves the folder, a missing caption and a bad list", async () => {
+  const dir = ".frontlights/progress/shots";
+  for (const list of [[{ file: "../segredo.png", caption: "X." }], [{ file: "a.jpg", caption: "" }], [{ file: "a.jpg" }], { file: "a.jpg" }]) {
+    const w = assembling({ [`${dir}/captions.json`]: JSON.stringify(list), [`${dir}/a.jpg`]: jpeg(200), "segredo.png": png(200) });
+    assert.equal(await w.run(...ASSEMBLE, "--shots-dir", dir), 1, JSON.stringify(list));
+    assert.equal(w.requests.length, 0);
+  }
+});
