@@ -55,8 +55,9 @@ npm test                # unitários (lógica pura, sem rede)
 npm run audit:rls       # permissões no banco: anônimo, Dev, Scrum Master e admin contra cada tabela
 npm run scan:secrets    # segredos no bundle do cliente, no build do servidor e no histórico do git
 npm run e2e             # as telas de cada papel, num Chrome de verdade (precisa do servidor local, abaixo)
-npm run e2e -- reset    # idem, mais o fluxo de redefinição de senha (envia 1 e-mail real)
+npm run e2e -- reset    # idem, mais o fluxo de redefinição de senha (envia 1 e-mail real; E2E_NO_EMAIL=1 pula esse passo)
 npm run e2e:prod        # só leitura: um passeio por papel na produção
+npm run e2e:prod -- recovery   # idem, e termina um link de recuperação pela página de produção (troca e restaura a senha da conta Dev de teste)
 ```
 
 **Servidor para o `e2e`:** `npm run build && GITHUB_TOKEN= TZ=UTC npm start`. O token vazio faz salvar item

@@ -54,43 +54,48 @@ const fresh = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.e
     await svc.from("profiles").update({ must_reset_password: false }).eq("id", L.ids.dev);
 
     // ================================================= part 2: the admin's "Resetar senha"
-    const adm = await L.newSession(browser, "admin");
-    await L.login(adm);
-    await adm.page.goto(BASE + "/config", { waitUntil: "load" });
-    await adm.page.locator("tbody tr").first().waitFor({ timeout: 30000 });
-    const row = adm.page.locator("tbody tr", { hasText: "RoadS Tester Dev" });
-
-    await row.getByRole("button", { name: "Resetar senha" }).click();
-    await adm.page.getByText(/Resetar a senha de/).waitFor();
-    await adm.page.getByRole("button", { name: "Cancelar" }).click();
-    await sleep(800);
-    expect("config: Cancelar changes nothing (flag off, old password works)", (await flag()) === false && (await canLogin(devPassword)));
-
-    await row.getByRole("button", { name: "Resetar senha" }).click();
-    await adm.page.getByRole("button", { name: "Confirmar reset" }).click();
-    // Supabase may refuse (its e-mail cap is tiny on the default sender); both outcomes must be handled honestly.
-    const outcome = await Promise.race([
-      adm.page.getByText(/E-mail de redefinição enviado/).waitFor({ timeout: 30000 }).then(() => "sent"),
-      adm.page.getByText(/uma vez por minuto|limite de e-mails/).waitFor({ timeout: 30000 }).then(() => "refused"),
-    ]).catch(() => "none");
-    await sleep(1500);
-    if (outcome === "sent") {
-      expect("config: Confirmar reset shows the 'e-mail enviado' notice", true);
-      expect("config: the Dev account is flagged and the old password stopped working", (await flag()) === true && !(await canLogin(devPassword)));
-      expect("config: the row says the person needs a new password", (await row.getByText("Precisa criar nova senha").count()) === 1);
+    let adm = { problems: [] };
+    if (process.env.E2E_NO_EMAIL === "1") {
+      console.log("   (part 2, the admin's Resetar senha, skipped: E2E_NO_EMAIL=1)");
     } else {
-      expect("config: e-mail refused by Supabase -> the screen says so and NOTHING was changed (flag off, old password works)", outcome === "refused" && (await flag()) === false && (await canLogin(devPassword)), `outcome=${outcome}`);
-      console.log("   (success path of the reset NOT exercised this run: Supabase refused to send. Re-run once its e-mail cap has reset.)");
-    }
+      adm = await L.newSession(browser, "admin");
+      await L.login(adm);
+      await adm.page.goto(BASE + "/config", { waitUntil: "load" });
+      await adm.page.locator("tbody tr").first().waitFor({ timeout: 30000 });
+      const row = adm.page.locator("tbody tr", { hasText: "RoadS Tester Dev" });
 
-    // a second reset right after: refused or throttled by Supabase. The screen must say so, and change nothing.
-    const before = await updatedAt();
-    await row.getByRole("button", { name: "Resetar senha" }).click();
-    await adm.page.getByRole("button", { name: "Confirmar reset" }).click();
-    await adm.page.getByText(/uma vez por minuto|limite de e-mails/).waitFor({ timeout: 30000 }).catch(() => {});
-    await sleep(1000);
-    expect("config: a refused e-mail is reported as such, never as 'enviado'", (await adm.page.getByText(/uma vez por minuto|limite de e-mails/).count()) === 1 && (await adm.page.getByText(/E-mail de redefinição enviado/).count()) === 0);
-    expect("config: and the failed attempt left the account untouched (the old password is not thrown away)", (await updatedAt()) === before);
+      await row.getByRole("button", { name: "Resetar senha" }).click();
+      await adm.page.getByText(/Resetar a senha de/).waitFor();
+      await adm.page.getByRole("button", { name: "Cancelar" }).click();
+      await sleep(800);
+      expect("config: Cancelar changes nothing (flag off, old password works)", (await flag()) === false && (await canLogin(devPassword)));
+
+      await row.getByRole("button", { name: "Resetar senha" }).click();
+      await adm.page.getByRole("button", { name: "Confirmar reset" }).click();
+      // Supabase may refuse (its e-mail cap is tiny on the default sender); both outcomes must be handled honestly.
+      const outcome = await Promise.race([
+        adm.page.getByText(/E-mail de redefinição enviado/).waitFor({ timeout: 30000 }).then(() => "sent"),
+        adm.page.getByText(/uma vez por minuto|limite de e-mails/).waitFor({ timeout: 30000 }).then(() => "refused"),
+      ]).catch(() => "none");
+      await sleep(1500);
+      if (outcome === "sent") {
+        expect("config: Confirmar reset shows the 'e-mail enviado' notice", true);
+        expect("config: the Dev account is flagged and the old password stopped working", (await flag()) === true && !(await canLogin(devPassword)));
+        expect("config: the row says the person needs a new password", (await row.getByText("Precisa criar nova senha").count()) === 1);
+      } else {
+        expect("config: e-mail refused by Supabase -> the screen says so and NOTHING was changed (flag off, old password works)", outcome === "refused" && (await flag()) === false && (await canLogin(devPassword)), `outcome=${outcome}`);
+        console.log("   (success path of the reset NOT exercised this run: Supabase refused to send. Re-run once its e-mail cap has reset.)");
+      }
+
+      // a second reset right after: refused or throttled by Supabase. The screen must say so, and change nothing.
+      const before = await updatedAt();
+      await row.getByRole("button", { name: "Resetar senha" }).click();
+      await adm.page.getByRole("button", { name: "Confirmar reset" }).click();
+      await adm.page.getByText(/uma vez por minuto|limite de e-mails/).waitFor({ timeout: 30000 }).catch(() => {});
+      await sleep(1000);
+      expect("config: a refused e-mail is reported as such, never as 'enviado'", (await adm.page.getByText(/uma vez por minuto|limite de e-mails/).count()) === 1 && (await adm.page.getByText(/E-mail de redefinição enviado/).count()) === 0);
+      expect("config: and the failed attempt left the account untouched (the old password is not thrown away)", (await updatedAt()) === before);
+    }
 
     // ================================================= part 3: the person opens the link in a browser of their own
     const { data: linkData } = await svc.auth.admin.generateLink({ type: "recovery", email: devEmail, options: { redirectTo: BASE + "/redefinir-senha" } });
@@ -98,7 +103,11 @@ const fresh = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.e
     const rp = await recipient.newPage();
     const rpProblems = [];
     rp.on("pageerror", (e) => rpProblems.push(String(e).slice(0, 120)));
-    await rp.goto(linkData.properties.action_link, { waitUntil: "load" });
+    // Supabase now sends this link to the production site (localhost is not an allowed redirect), so take the tokens it
+    // issues and open them on the local page: same link, same tokens, this build's page under test.
+    const hop = await fetch(linkData.properties.action_link, { redirect: "manual" });
+    const tokens = new URL(hop.headers.get("location")).hash;
+    await rp.goto(`${BASE}/redefinir-senha${tokens}`, { waitUntil: "load" });
     // the page turns the link's tokens into a session shortly after loading: wait for it, up to 20s
     for (let i = 0; i < 40; i++) {
       const done = new URL(rp.url()).hash === "" && (await recipient.cookies()).some((c) => c.name.startsWith("sb-") && /auth-token/.test(c.name));
