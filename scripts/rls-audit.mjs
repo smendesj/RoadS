@@ -40,6 +40,7 @@ async function signIn(prefix) {
 }
 
 const results = [];
+const warnings = []; // dashboard settings the audit can see but code can't fix: shown, never fail the run
 // expected "deny": a HOLE if it succeeds. expected "allow": BROKEN if it fails.
 async function check(who, what, expected, fn) {
   let actual;
@@ -117,6 +118,12 @@ try {
   await check("dev", "delete lane", "deny", async () => rows(await dev.c.from("lanes").delete().eq("id", "zz-test-a").select("id")));
   await check("dev", "insert sync_queue", "deny", async () => rows(await dev.c.from("roadmap_sync_queue").insert({ item_id: null, action: "add", payload: { zz_test: true } }).select("id")));
 
+  // The forced password reset can't be skipped by switching its flag off through the API.
+  await svc.from("profiles").update({ must_reset_password: true }).eq("id", dev.id);
+  await check("dev", "clear own must_reset_password flag", "deny", async () => rows(await dev.c.from("profiles").update({ must_reset_password: false }).eq("id", dev.id).select("id")));
+  await svc.from("profiles").update({ must_reset_password: false }).eq("id", dev.id);
+  await check("dev", "set own avatar while NOT flagged (flag trigger leaves other updates alone)", "allow", async () => rows(await dev.c.from("profiles").update({ avatar: "avatar-03" }).eq("id", dev.id).select("id")));
+
   // ===================== SCRUM MASTER
   await check("sm", "read another profile (admin)", "deny", async () => rows(await sm.c.from("profiles").select("id").eq("id", adm.id)));
   await check("sm", "insert own item", "allow", async () => rows(await sm.c.from("roadmap_items").insert({ lane_id: "zz-test-a", title: "[TESTE] sm novo", created_by: sm.id }).select("id")));
@@ -124,6 +131,11 @@ try {
   await check("sm", "insert item with created_by null", "deny", async () => rows(await sm.c.from("roadmap_items").insert({ lane_id: "zz-test-a", title: "[TESTE] sem dono", created_by: null }).select("id")));
   await check("sm", "edit own item (title+prioridade)", "allow", async () => rows(await sm.c.from("roadmap_items").update({ title: "[TESTE] sm editado", prioridade: "High" }).eq("id", M).select("id")));
   await check("sm", "change own item's created_by", "deny", async () => rows(await sm.c.from("roadmap_items").update({ created_by: adm.id }).eq("id", M).select("id")));
+  // The issue link renders as a link for everyone, so only GitHub issue links of the org are stored.
+  await check("sm", "own item: link to a phishing site", "deny", async () => rows(await sm.c.from("roadmap_items").update({ github_issue_url: "https://evil.example.com/login" }).eq("id", M).select("id")));
+  await check("sm", "own item: javascript: link", "deny", async () => rows(await sm.c.from("roadmap_items").update({ github_issue_url: "javascript:alert(1)" }).eq("id", M).select("id")));
+  await check("sm", "own item: lookalike GitHub host", "deny", async () => rows(await sm.c.from("roadmap_items").update({ github_issue_url: "https://github.com.evil.example.com/Essencis-Labs/x/issues/1" }).eq("id", M).select("id")));
+  await check("sm", "own item: a real GitHub issue link", "allow", async () => rows(await sm.c.from("roadmap_items").update({ github_issue_url: "https://github.com/Essencis-Labs/GeoCloudAI/issues/1" }).eq("id", M).select("id")));
   await check("sm", "seeded item: prioridade/effort", "allow", async () => rows(await sm.c.from("roadmap_items").update({ prioridade: "Low", effort: "High" }).eq("id", S).select("id")));
   await check("sm", "seeded item: move lane", "allow", async () => rows(await sm.c.from("roadmap_items").update({ lane_id: "zz-test-b" }).eq("id", S).select("id")));
   await check("sm", "seeded item: title", "deny", async () => rows(await sm.c.from("roadmap_items").update({ title: "[TESTE] renomeado" }).eq("id", S).select("id")));
@@ -197,6 +209,17 @@ try {
     const r = await svc.auth.admin.updateUserById(good.id, { email: `roads-audit-${tag}c@gmail.com`, email_confirm: true });
     return { ok: !r.error, detail: r.error ? r.error.message.slice(0, 90) : "e-mail changed" };
   });
+
+  // ===================== AUTH CONFIG (a warning: it's a dashboard setting, code can't fix it)
+  // Auth e-mails (password reset, signup confirmation) only link to the production site if it is the
+  // project's Site URL / an allowed redirect. generateLink sends no e-mail.
+  const production = process.env.PRODUCTION_URL ?? "https://roads-psi.vercel.app";
+  const asked = `${production}/redefinir-senha`;
+  const { data: probeLink } = await svc.auth.admin.generateLink({ type: "recovery", email: cred("ROADS_TEST_DEV_EMAIL"), options: { redirectTo: asked } });
+  const effective = probeLink?.properties?.action_link ? new URL(probeLink.properties.action_link).searchParams.get("redirect_to") : null;
+  if (effective !== asked) {
+    warnings.push(`Auth e-mails (password reset, signup confirmation) would send people to ${effective} instead of ${production}. Set Site URL and Redirect URLs in the Supabase dashboard, Authentication > URL Configuration.`);
+  }
 } catch (e) {
   console.error("AUDIT FAILED:", e.message ?? e);
   exitCode = 1;
@@ -224,5 +247,6 @@ for (const r of results) {
   const note = r.verdict === "ok" ? "" : `[${r.detail}]`;
   console.log(`${mark} ${r.who.padEnd(6)} ${r.what.padEnd(48)} expected ${r.expected.padEnd(5)} -> ${r.actual.padEnd(7)} ${note}`);
 }
-console.log(`\n${results.length} checks | holes (allowed but forbidden): ${holes} | broken (refused but allowed): ${broken}`);
+for (const w of warnings) console.log(`  WARN  ${w}`);
+console.log(`\n${results.length} checks | holes (allowed but forbidden): ${holes} | broken (refused but allowed): ${broken}${warnings.length ? ` | warnings: ${warnings.length}` : ""}`);
 process.exit(exitCode || (holes + broken > 0 ? 1 : 0));

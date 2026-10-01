@@ -15,6 +15,7 @@ export function ConfigPanel() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [resetId, setResetId] = useState<string | null>(null);
   const [resetSentTo, setResetSentTo] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function reload() {
@@ -121,9 +122,10 @@ export function ConfigPanel() {
                   const user = users.find((u) => u.id === resetId);
                   if (!user) return;
                   startTransition(async () => {
-                    await resetUserPassword(user.id, user.email);
-                    setResetSentTo(user.email);
+                    const result = await resetUserPassword(user.id);
                     setResetId(null);
+                    setResetSentTo(result.ok ? result.email : null);
+                    setResetError(result.ok ? null : result.error);
                     reload();
                   });
                 }}
@@ -134,6 +136,15 @@ export function ConfigPanel() {
             </div>
           </div>
         </div>
+      )}
+
+      {resetError && (
+        <p className="text-[13px] font-semibold text-red-600 dark:text-red-400">
+          {resetError}{" "}
+          <button onClick={() => setResetError(null)} className="font-bold text-rs-brand-text">
+            Ok
+          </button>
+        </p>
       )}
 
       {resetSentTo && (

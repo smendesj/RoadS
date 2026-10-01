@@ -2,11 +2,11 @@ import { isAvatarId } from "./avatars.ts";
 import type { Role } from "./types.ts";
 
 /** Who is looking at the page, as the server knows it — available from the very first render. */
-export type Viewer = { id: string; role: Role; avatar: string | null };
+export type Viewer = { id: string; role: Role; avatar: string | null; mustResetPassword: boolean };
 
 export type ViewerSource = {
   getUserId: () => Promise<string | null>;
-  getProfile: (userId: string) => Promise<{ role?: string | null; avatar?: string | null } | null>;
+  getProfile: (userId: string) => Promise<{ role?: string | null; avatar?: string | null; must_reset_password?: boolean | null } | null>;
 };
 
 const ROLES: Role[] = ["admin", "scrum_master", "dev"];
@@ -26,5 +26,5 @@ export async function loadViewer({ getUserId, getProfile }: ViewerSource): Promi
   const profile = await getProfile(id);
   const role = ROLES.find((r) => r === profile?.role) ?? "dev";
   const avatar = profile?.avatar;
-  return { id, role, avatar: isAvatarId(avatar) ? avatar : null };
+  return { id, role, avatar: isAvatarId(avatar) ? avatar : null, mustResetPassword: profile?.must_reset_password === true };
 }

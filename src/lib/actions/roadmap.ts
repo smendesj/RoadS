@@ -94,7 +94,8 @@ async function requireScrumMasterActor(): Promise<{ userId: string; realRole: "s
   } = await supabase.auth.getUser();
   if (!user) throw new Error("unauthenticated");
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  const { data: profile } = await supabase.from("profiles").select("role, must_reset_password").eq("id", user.id).single();
+  if (profile?.must_reset_password) throw new Error("must_reset_password");
   if (profile?.role !== "scrum_master" && profile?.role !== "admin") throw new Error("forbidden");
 
   return { userId: user.id, realRole: profile.role };

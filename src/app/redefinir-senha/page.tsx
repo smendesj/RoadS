@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SessionGuard } from "@/components/SessionGuard";
+import { completePasswordReset } from "@/lib/actions/account";
 import { createClient } from "@/lib/supabase/client";
 import { useLogout } from "@/lib/use-logout";
 import { isValidPassword, PASSWORD_HINT } from "@/lib/validation";
+
+const LINK_ERROR = "Esse link expirou ou já foi usado. Peça um novo ao admin.";
 
 export default function RedefinirSenhaPage() {
   const router = useRouter();
@@ -13,6 +16,24 @@ export default function RedefinirSenhaPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Settles once a recovery link's tokens (when the page was opened from one) have become a session.
+  const linkSession = useRef<Promise<boolean>>(Promise.resolve(true));
+
+  // A recovery link carries its tokens in the URL fragment, so it works in whichever browser the person
+  // opens it. Turn them into a session, then take them out of the address bar and the history.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    if (!accessToken || !refreshToken) return;
+    linkSession.current = createClient()
+      .auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+      .then(({ error: sessionError }) => {
+        window.history.replaceState(null, "", window.location.pathname);
+        if (sessionError) setError(LINK_ERROR);
+        return !sessionError;
+      });
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -24,19 +45,18 @@ export default function RedefinirSenhaPage() {
     }
 
     setLoading(true);
-    const supabase = createClient();
-
-    const { data: userData } = await supabase.auth.getUser();
-    const { error: updateError } = await supabase.auth.updateUser({ password });
-
-    if (updateError) {
-      setError(updateError.message);
+    if (!(await linkSession.current)) {
+      setError(LINK_ERROR);
       setLoading(false);
       return;
     }
 
-    if (userData.user) {
-      await supabase.from("profiles").update({ must_reset_password: false }).eq("id", userData.user.id);
+    // The server checks the password again, sets it and clears the "must reset" flag; this page can't.
+    const result = await completePasswordReset(password);
+    if (!result.ok) {
+      setError(result.error);
+      setLoading(false);
+      return;
     }
 
     router.push("/dashboard");

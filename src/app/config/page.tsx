@@ -2,14 +2,14 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { NavBar } from "@/components/NavBar";
 import { ConfigPanel } from "@/components/ConfigPanel";
-import { getViewer } from "@/lib/get-viewer";
+import { getViewerOrReset } from "@/lib/get-viewer";
 
 export const metadata: Metadata = { title: "RoadS — Config" };
 
 // Admin-only. Everyone else is sent back to the Dashboard (the tab never shows for them anyway);
 // the server actions ConfigPanel calls re-check admin on their own.
 export default async function ConfigPage() {
-  const viewer = await getViewer();
+  const viewer = await getViewerOrReset();
   if (!viewer) redirect("/login");
   if (viewer.role !== "admin") redirect("/dashboard");
 

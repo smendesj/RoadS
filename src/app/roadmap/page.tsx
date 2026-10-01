@@ -1,6 +1,6 @@
 import { RoadmapView } from "@/components/RoadmapView";
-import { getViewer } from "@/lib/get-viewer";
+import { getViewerOrReset } from "@/lib/get-viewer";
 
 export default async function RoadmapPage() {
-  return <RoadmapView viewer={await getViewer()} />;
+  return <RoadmapView viewer={await getViewerOrReset()} />;
 }

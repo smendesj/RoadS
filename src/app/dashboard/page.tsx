@@ -1,7 +1,7 @@
 import { NavBar } from "@/components/NavBar";
 import { DashboardBranch, DashboardSyncProvider, KanbanColumns, KpiCards, SprintPanels, SyncPill } from "@/components/DashboardSync";
 import { getDashboard } from "@/lib/actions/dashboard";
-import { getViewer } from "@/lib/get-viewer";
+import { getViewerOrReset } from "@/lib/get-viewer";
 import { dashboardData } from "@/lib/mock-data";
 import { roleLabel as labelFor } from "@/lib/viewer";
 import type { Metadata } from "next";
@@ -9,7 +9,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = { title: "RoadS — Dashboard" };
 
 export default async function DashboardPage() {
-  const viewer = await getViewer();
+  const viewer = await getViewerOrReset();
   const roleLabel = labelFor(viewer?.role ?? null);
   const isAdmin = viewer?.role === "admin";
 

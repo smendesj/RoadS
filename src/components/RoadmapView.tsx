@@ -5,6 +5,8 @@ import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { syncBoardAsViewer } from "@/lib/actions/sync";
+import { moveItem } from "@/lib/roadmap-move";
+import { syncFailureMessage } from "@/lib/sync-message";
 import { MAX_ITEMS_PER_SPRINT, type Lane, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 import { roleLabel as labelFor, type Viewer } from "@/lib/viewer";
 
@@ -54,7 +56,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
     startSync(async () => {
       const result = await syncBoardAsViewer();
       if (!result.ok) {
-        setSyncMessage(result.message ?? "Erro ao sincronizar.");
+        setSyncMessage(syncFailureMessage(result));
         return;
       }
       const { added, removed, issuesCreated, error } = result.roadmap;
@@ -83,38 +85,11 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   // allowed on purpose: the sprint shows n/4 and a warning until the overflow is moved out.
   function moveToLane(targetLaneId: string, itemId: string | null = draggingId) {
     if (!itemId) return;
-    const target = [...lanes, ...groups].find((l) => l.id === targetLaneId);
-    if (target?.items.some((it) => it.id === itemId)) {
-      setDraggingId(null);
-      return;
-    }
-    let found: RoadmapItem | null = null;
-
-    const nextLanes = lanes.map((lane) => {
-      const items = lane.items.filter((it) => {
-        if (it.id === itemId) {
-          found = it;
-          return false;
-        }
-        return true;
-      });
-      return { ...lane, items };
-    });
-    const nextGroups = groups.map((g) => {
-      const items = g.items.filter((it) => {
-        if (it.id === itemId) {
-          found = it;
-          return false;
-        }
-        return true;
-      });
-      return { ...g, items };
-    });
-
-    if (!found) return;
-    setLanes(nextLanes.map((lane) => (lane.id === targetLaneId ? { ...lane, items: [...lane.items, found as RoadmapItem] } : lane)));
-    setGroups(nextGroups);
     setDraggingId(null);
+    const next = moveItem({ lanes, groups }, itemId, targetLaneId);
+    if (!next) return;
+    setLanes(next.lanes);
+    setGroups(next.groups);
 
     moveRoadmapItemLane(itemId, targetLaneId).catch((e) => {
       console.error("moveRoadmapItemLane failed, reloading board", e);

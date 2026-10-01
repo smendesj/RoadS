@@ -6,7 +6,9 @@
 // no hand-kept data in between.
 
 import { getRoadmapBoard } from "@/lib/actions/roadmap";
-import { getLatestBoardSnapshot, syncBoardAsViewer, type SyncColumn } from "@/lib/actions/sync";
+import { getLatestBoardSnapshot, syncBoardAsViewer } from "@/lib/actions/sync";
+import type { SyncColumn } from "@/lib/board-sync";
+import { syncFailureMessage } from "@/lib/sync-message";
 import { createClient } from "@/lib/supabase/server";
 import type { Tone } from "@/lib/tones";
 
@@ -119,9 +121,6 @@ export async function syncDashboard(): Promise<{ model: DashboardModel; error: s
   }
 
   const snapshot = await getLatestBoardSnapshot();
-  const error =
-    result.reason === "not_configured"
-      ? "Sincronização do GitHub ainda não configurada (falta GITHUB_TOKEN no servidor)."
-      : result.message ?? "Erro ao sincronizar.";
+  const error = syncFailureMessage(result);
   return { model: await buildDashboard(snapshot?.columns ?? [], snapshot?.syncedAt ?? null), error };
 }

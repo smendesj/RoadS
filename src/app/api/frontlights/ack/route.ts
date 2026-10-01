@@ -1,5 +1,7 @@
+import { serverError } from "@/lib/api-response";
 import { checkFrontlightsAuth } from "@/lib/frontlights-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isIsoTimestamp } from "@/lib/timestamp";
 import { NextResponse } from "next/server";
 
 // POST /api/frontlights/ack { "asOf": "<ISO timestamp>" }
@@ -12,7 +14,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => null);
   const asOf = body?.asOf;
-  if (typeof asOf !== "string" || Number.isNaN(Date.parse(asOf))) {
+  if (!isIsoTimestamp(asOf)) {
     return NextResponse.json({ error: "asOf must be an ISO timestamp string" }, { status: 400 });
   }
 
@@ -24,7 +26,7 @@ export async function POST(request: Request) {
     .lte("created_at", asOf)
     .select("id");
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return serverError("ack", error);
 
   return NextResponse.json({ acked: data?.length ?? 0 });
 }

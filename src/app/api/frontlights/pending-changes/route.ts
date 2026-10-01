@@ -1,5 +1,7 @@
+import { serverError } from "@/lib/api-response";
 import { checkFrontlightsAuth } from "@/lib/frontlights-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isIsoTimestamp } from "@/lib/timestamp";
 import { NextResponse } from "next/server";
 
 // GET /api/frontlights/pending-changes?since=<ISO timestamp, optional>
@@ -17,6 +19,9 @@ export async function GET(request: Request) {
   }
 
   const since = new URL(request.url).searchParams.get("since");
+  if (since && !isIsoTimestamp(since)) {
+    return NextResponse.json({ error: "since must be an ISO timestamp string" }, { status: 400 });
+  }
 
   const admin = createAdminClient();
   let query = admin
@@ -30,7 +35,7 @@ export async function GET(request: Request) {
   if (since) query = query.gt("created_at", since);
 
   const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return serverError("pending-changes", error);
 
   const rows = data ?? [];
   const changes = rows.flatMap((row) => {
