@@ -310,8 +310,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     expect("admin -> 'Marcar como enviado' starts disabled", await sendButton.isDisabled());
     const table = await page.locator("[data-conference-table]").innerText();
     expect("admin -> the conference lists each day with its prompts and the picture's numbers", /05\/01/.test(table) && /06\/01/.test(table) && /09:05/.test(table) && /17:00/.test(table) && /TOKENS DE ENTRADA/i.test(table) && /TOKENS DE SAÍDA/i.test(table) && !/SESSÕES/i.test(table), table.replace(/\s+/g, " ").slice(0, 120));
-    const warnings = (await page.locator("[data-conference-warnings]").count()) === 1 ? await page.locator("[data-conference-warnings]").innerText() : "";
-    expect("admin -> a coverage gap is called out in the conference", /PR 9001/.test(warnings), warnings.replace(/\s+/g, " ").slice(0, 100));
+    expect("admin -> the conference shows no coverage warnings", (await page.locator("[data-conference-warnings]").count()) === 0 && !/Avisos de cobertura/.test(table));
     expect("admin -> every difficulty and next step is editable", (await field("difficulty:d9001:text").count()) === 1 && (await field("nextStep:n9001:text").count()) === 1);
 
     for (const width of [390, 320]) {

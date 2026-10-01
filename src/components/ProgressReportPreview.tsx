@@ -330,7 +330,6 @@ function ReviewPreview({ row }: { row: ProgressReportRow }) {
         <div className="flex min-w-0 flex-col gap-5">
           <ProgressReportConference
             usage={resolved.usage}
-            gaps={resolved.gaps}
             checked={checked}
             checkedAt={checkedAt}
             readOnly={readOnly}

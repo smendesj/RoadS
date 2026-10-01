@@ -1,14 +1,13 @@
 "use client";
 
 import { useId, useMemo } from "react";
-import type { CoverageGap, UsageModel } from "@/lib/progress-report";
+import type { UsageModel } from "@/lib/progress-report";
 import { clockSP, conferenceRows, dayLabel, type ConferenceLine } from "@/lib/progress/conference";
 import { formatStamp } from "@/lib/progress/report-view";
 import { compactCount, visualTitle, wholeNumber } from "@/lib/progress/visual";
 
 // The numbers are the picture's own (messages, input and output tokens, written the same way), day by
-// day. The collector may also send the prompts typed by the person, which get a column when present;
-// coverage-gap warnings come as their own lines, after the days.
+// day. The collector may also send the prompts typed by the person, which get a column when present.
 type Row = ConferenceLine;
 
 const th = "px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wide text-rs-text-faint";
@@ -19,7 +18,6 @@ const num = "px-3 py-2.5 text-right tabular-nums";
 // draft cancels the tick (the page gets `checked` from the server, which already accounts for that).
 export function ProgressReportConference({
   usage,
-  gaps,
   checked,
   checkedAt,
   readOnly,
@@ -27,7 +25,6 @@ export function ProgressReportConference({
   onToggle,
 }: {
   usage: UsageModel;
-  gaps: CoverageGap[] | undefined;
   checked: boolean;
   checkedAt: string | null;
   readOnly: boolean;
@@ -36,9 +33,8 @@ export function ProgressReportConference({
 }) {
   const boxId = useId();
   const hintId = useId();
-  const rows = useMemo(() => conferenceRows(usage, gaps ?? []), [usage, gaps]);
+  const rows = useMemo(() => conferenceRows(usage), [usage]);
   const days = rows.filter((r) => !r.warning);
-  const warnings = rows.filter((r) => r.warning);
   const showHuman = days.some((r) => r.humanPrompts !== undefined);
   const columns = 6 + (showHuman ? 1 : 0);
 
@@ -57,17 +53,6 @@ export function ProgressReportConference({
           estranho, não marque.
         </p>
       </div>
-
-      {warnings.length > 0 && (
-        <div role="note" data-conference-warnings className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-[13px] text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-          <b>Avisos de cobertura.</b> O trabalho abaixo foi feito no GitHub e entra normalmente nas entregas. O que pode faltar é só o uso do Claude dele.
-          <ul className="mt-1.5 flex flex-col gap-1">
-            {warnings.map((w, i) => (
-              <li key={`${w.date}-${i}`}>{w.note}</li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       {days.length === 0 ? (
         <p className="text-sm text-rs-text-faint">Sem dados de uso neste período.</p>

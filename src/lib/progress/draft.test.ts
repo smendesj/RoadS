@@ -207,10 +207,11 @@ test("the hourly strip has exactly 24 buckets of whole, non-negative message cou
   assert.equal(parseBent((b) => (b.content.usage.days[0].hourly = hourly(24))).ok, true);
 });
 
-test("at most two prints, each a real jpeg or png in valid base64", () => {
+test("at most ten prints, each a real jpeg or png in valid base64", () => {
   const shot = (n: number) => ({ id: `shot-${n}`, caption: "Tela", mime: "image/png" as const, data: png(1024) });
-  refused((b) => (b.content.shots = [shot(1), shot(2), shot(3)]), /content\.shots/);
-  assert.equal(parseBent((b) => (b.content.shots = [shot(1), shot(2)])).ok, true);
+  const many = (n: number) => Array.from({ length: n }, (_, i) => shot(i + 1));
+  refused((b) => (b.content.shots = many(11)), /content\.shots/);
+  assert.equal(parseBent((b) => (b.content.shots = many(10))).ok, true);
   assert.equal(parseBent((b) => delete b.content.shots).ok, true);
   refused((b) => (b.content.shots![0].mime = unsafe("image/gif")), /content\.shots\[0\]\.mime/);
   refused((b) => (b.content.shots![0].data = "isto não é base64!"), /content\.shots\[0\]\.data/);
@@ -221,22 +222,22 @@ test("at most two prints, each a real jpeg or png in valid base64", () => {
   refused((b) => (b.content.shots![0].data = ""), /content\.shots\[0\]\.data/);
 });
 
-test("a print is refused above 350 KB decoded and accepted right at the limit", () => {
-  assert.equal(MAX_SHOT_BYTES, 350 * 1024);
+test("a print is refused above 256 KB decoded and accepted right at the limit", () => {
+  assert.equal(MAX_SHOT_BYTES, 256 * 1024);
   assert.equal(parseBent((b) => (b.content.shots![0].data = jpeg(MAX_SHOT_BYTES))).ok, true);
-  refused((b) => (b.content.shots![0].data = jpeg(MAX_SHOT_BYTES + 1)), /content\.shots\[0\].*350 KB/);
+  refused((b) => (b.content.shots![0].data = jpeg(MAX_SHOT_BYTES + 1)), /content\.shots\[0\].*256 KB/);
   // Far above every limit: never accepted.
   assert.equal(parseBent((b) => (b.content.shots![0].data = jpeg(2 * 1024 * 1024))).ok, false);
 });
 
-test("a payload above 900 KB is refused before anything else is looked at", () => {
-  assert.equal(MAX_PAYLOAD_BYTES, 900 * 1024);
+test("a payload above 4096 KB is refused before anything else is looked at", () => {
+  assert.equal(MAX_PAYLOAD_BYTES, 4096 * 1024);
   const r = parseBent((b) => {
-    b.content.entries = Array.from({ length: 4000 }, (_, i) => ({ ...b.content.entries[0], id: `gc-${i}`, issue: i + 1 }));
+    b.content.entries = Array.from({ length: 30000 }, (_, i) => ({ ...b.content.entries[0], id: `gc-${i}`, issue: i + 1 }));
     b.content.window.end = "isto também está errado";
   });
   assert.equal(r.ok, false);
-  if (!r.ok) assert.match(r.error, /900 KB/);
+  if (!r.ok) assert.match(r.error, /4096 KB/);
 });
 
 test("an error never repeats what it was sent", () => {

@@ -288,12 +288,14 @@ test("pictures come from https, from this site's own path (the preview) or from 
 
 /* ---------- the prints and the Claude picture ---------- */
 
-test("each print is an image with its caption and a filled alt, two at most", () => {
-  const out = html(rich({ shots: [shot(1), shot(2), shot(3)] }), { ...OPTIONS, shotUrls: [...OPTIONS.shotUrls, `${ORIGIN}/third.png`] });
+test("each print is an image with its caption and a filled alt, ten at most", () => {
+  const urls = Array.from({ length: 11 }, (_, i) => `${ORIGIN}/api/progress-report/${TOKEN}/abc/shot-${i + 1}.jpg`);
+  const out = html(rich({ shots: Array.from({ length: 11 }, (_, i) => shot(i + 1)) }), { ...OPTIONS, shotUrls: urls });
   assert.match(out, new RegExp(`<img src="${OPTIONS.shotUrls[0].replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}"[^>]*alt="Legenda do print 1"`));
   assert.ok(out.includes('alt="Legenda do print 2"'));
   assert.ok(out.includes(">Legenda do print 1<") && out.includes(">Legenda do print 2<"));
-  assert.ok(!out.includes("third.png"));
+  assert.ok(out.includes('alt="Legenda do print 10"'));
+  assert.ok(!out.includes("shot-11.jpg") && !out.includes("Legenda do print 11"));
   for (const tag of out.match(/<img\b[^>]*>/g) ?? []) assert.match(tag, /\salt="[^"]+"/);
 });
 

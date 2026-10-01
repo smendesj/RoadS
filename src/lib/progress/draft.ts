@@ -21,11 +21,14 @@ import type {
 } from "../progress-report.ts";
 import type { Produto } from "../types.ts";
 
-/** The whole serialized body, prints included: the content is stored in one row the screen loads each time. */
-export const MAX_PAYLOAD_BYTES = 900 * 1024;
-/** One print, decoded. Two of them at this size can't both fit in the payload limit: the payload limit wins. */
-export const MAX_SHOT_BYTES = 350 * 1024;
-export const MAX_SHOTS = 2;
+/**
+ * The whole serialized body, prints included: the content is stored in one row the screen loads each time.
+ * Kept under the 4.5 MB request cap of the host, with room for ten full-size prints (see MAX_SHOT_BYTES).
+ */
+export const MAX_PAYLOAD_BYTES = 4096 * 1024;
+/** One print, decoded. Ten of them are about 3.4 MB once base64: they fit the payload limit with the report. */
+export const MAX_SHOT_BYTES = 256 * 1024;
+export const MAX_SHOTS = 10;
 
 /**
  * Every field of the contract this parser keeps. The mapped type turns a field added to the contract into

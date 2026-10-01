@@ -184,24 +184,27 @@ test("prints are attached with their captions, and travel as base64 inside the c
   ]);
 });
 
-test("a print above 350 KB is refused with the limit in the message, even in a dry run", async () => {
-  const w = world({ files: { "grande.jpg": jpeg(350 * 1024 + 1) } });
+test("a print above 256 KB is refused with the limit in the message, even in a dry run", async () => {
+  const w = world({ files: { "grande.jpg": jpeg(256 * 1024 + 1) } });
   for (const extra of [[], ["--dry-run"]]) {
     assert.equal(await w.run("--draft", "rascunho.json", "--shot", "grande.jpg", "--caption", "Tela", ...extra), 1);
   }
   assert.equal(w.requests.length, 0);
-  assert.match(w.output(), /350 KB/);
+  assert.match(w.output(), /256 KB/);
   assert.match(w.output(), /grande\.jpg/);
   // A print exactly at the limit is fine.
-  const ok = world({ files: { "limite.jpg": jpeg(350 * 1024) } });
+  const ok = world({ files: { "limite.jpg": jpeg(256 * 1024) } });
   assert.equal(await ok.run("--draft", "rascunho.json", "--shot", "limite.jpg", "--caption", "Tela", "--dry-run"), 0);
 });
 
-test("at most two prints, each with a caption, and only jpeg or png", async () => {
+test("at most ten prints, each with a caption, and only jpeg or png", async () => {
   const files = { "a.jpg": jpeg(100), "b.jpg": jpeg(100), "c.jpg": jpeg(100), "nota.txt": "texto" };
-  const three = world({ files });
-  assert.equal(await three.run("--draft", "rascunho.json", "--shot", "a.jpg", "--caption", "A", "--shot", "b.jpg", "--caption", "B", "--shot", "c.jpg", "--caption", "C"), 1);
-  assert.match(three.output(), /no máximo 2/);
+  const pairs = (n: number) => Array.from({ length: n }, (_, i) => ["--shot", "a.jpg", "--caption", `Tela ${i + 1}`]).flat();
+  const eleven = world({ files });
+  assert.equal(await eleven.run("--draft", "rascunho.json", ...pairs(11), "--dry-run"), 1);
+  assert.match(eleven.output(), /no máximo 10/);
+  const ten = world({ files });
+  assert.equal(await ten.run("--draft", "rascunho.json", ...pairs(10), "--dry-run"), 0);
 
   const noCaption = world({ files });
   assert.equal(await noCaption.run("--draft", "rascunho.json", "--shot", "a.jpg"), 1);
@@ -214,7 +217,7 @@ test("at most two prints, each with a caption, and only jpeg or png", async () =
   assert.equal(await notAnImage.run("--draft", "rascunho.json", "--shot", "nota.txt", "--caption", "X"), 1);
   assert.match(notAnImage.output(), /JPEG ou PNG/);
 
-  for (const w of [three, noCaption, stray, notAnImage]) assert.equal(w.requests.length, 0);
+  for (const w of [eleven, noCaption, stray, notAnImage]) assert.equal(w.requests.length, 0);
 });
 
 test("a draft the server would refuse is refused here, with the field named and without its value", async () => {

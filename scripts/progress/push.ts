@@ -2,7 +2,7 @@
 // collectors (Claude usage, GitHub facts) and the plain-language text written by Claude are in one JSON file.
 //
 //   node --experimental-strip-types scripts/progress/push.ts --draft .frontlights/progress/draft.json
-//        [--produto GeoCloud] [--shot print.jpg --caption "Tela de exemplo"]... (at most 2)
+//        [--produto GeoCloud] [--shot print.jpg --caption "Tela de exemplo"]... (at most 10)
 //        [--endpoint https://.../api/frontlights] [--dry-run]
 //
 // The secret comes only from FRONTLIGHTS_API_SECRET (.env.local is loaded when it exists). Nothing printed
@@ -27,7 +27,7 @@ const USAGE = [
   "Uso: node --experimental-strip-types scripts/progress/push.ts --draft <arquivo.json> [opções]",
   "  --draft <arquivo>     o rascunho (um ProgressContent em JSON)",
   "  --produto <nome>      padrão: GeoCloud",
-  '  --shot <imagem>       um print JPEG ou PNG de até 350 KB; repita para o segundo (no máximo 2)',
+  '  --shot <imagem>       um print JPEG ou PNG de até 256 KB; repita para cada print (no máximo 10)',
   '  --caption "<texto>"   a legenda do print que vem logo antes',
   "  --endpoint <url>      base da API (padrão: roadmapSync.endpoint de .frontlights/config.json)",
   "  --dry-run             só valida e mostra um resumo; não envia nada",

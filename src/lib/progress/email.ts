@@ -8,6 +8,7 @@
 // links are https ones.
 import { STATUS_LABEL } from "../progress-report.ts";
 import type { EmailBuild, EmailOptions, EntryStatus, ProgressContent, ProgressEntry } from "../progress-report.ts";
+import { MAX_SHOTS } from "./draft.ts";
 import { joinNames, visualAlt, visualModel, visualSize, windowDays } from "./visual.ts";
 
 /* ---------- escaping and URLs ---------- */
@@ -87,7 +88,6 @@ const CARD_WIDTH = 600;
 const PAD = 28;
 const SHOT_WIDTH = CARD_WIDTH - 2 * PAD;
 /** The picture has a floor of two shots: the screens only ever hold this many. */
-const MAX_SHOTS = 2;
 
 const visibleOf = (content: ProgressContent): ProgressEntry[] =>
   (Array.isArray(content.entries) ? content.entries : []).filter((e) => e && !e.hidden && (clean(e.title) || clean(e.summary)));
