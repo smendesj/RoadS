@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { logout } from "@/components/UserMenu";
 import { createClient } from "@/lib/supabase/client";
+import { useLogout } from "@/lib/use-logout";
 import { isValidPassword, PASSWORD_HINT } from "@/lib/validation";
 
 export default function RedefinirSenhaPage() {
   const router = useRouter();
+  const logout = useLogout();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

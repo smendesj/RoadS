@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { updateMyAvatar } from "@/lib/actions/profile";
 import { AVATAR_IDS, avatarSrc, isAvatarId } from "@/lib/avatars";
 import { isIdleExpired } from "@/lib/idle";
-import { clearActivity, readActivity, touchActivity } from "@/lib/idle-storage";
+import { readActivity, touchActivity } from "@/lib/idle-storage";
 import { createClient } from "@/lib/supabase/client";
+import { useLogout } from "@/lib/use-logout";
 
 const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"] as const;
 const CHECK_EVERY_MS = 15_000;
@@ -19,17 +21,11 @@ function UserIcon() {
   );
 }
 
-// Signs out and does a full navigation, so no signed-in page state survives in memory.
-export async function logout() {
-  clearActivity();
-  await createClient().auth.signOut();
-  window.location.assign("/login");
-}
-
 export function UserMenu({ roleLabel }: { roleLabel: string }) {
   const [avatar, setAvatar] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const logout = useLogout();
 
   useEffect(() => {
     const supabase = createClient();
@@ -69,7 +65,7 @@ export function UserMenu({ roleLabel }: { roleLabel: string }) {
       document.removeEventListener("visibilitychange", check);
       window.clearInterval(timer);
     };
-  }, []);
+  }, [logout]);
 
   useEffect(() => {
     if (!open) return;
@@ -103,7 +99,7 @@ export function UserMenu({ roleLabel }: { roleLabel: string }) {
         className="flex items-center gap-2.5 rounded-full"
       >
         <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-rs-brand-soft text-rs-text-soft">
-          {avatar ? <img src={avatarSrc(avatar)} alt="" className="h-full w-full object-cover" /> : <UserIcon />}
+          {avatar ? <Image src={avatarSrc(avatar)} alt="" width={32} height={32} className="h-full w-full object-cover" /> : <UserIcon />}
         </span>
         <span className="hidden text-sm font-bold text-rs-text sm:inline">{roleLabel}</span>
       </button>
@@ -120,7 +116,7 @@ export function UserMenu({ roleLabel }: { roleLabel: string }) {
                 aria-pressed={avatar === id}
                 className={`h-8 w-8 overflow-hidden rounded-full border-2 ${avatar === id ? "border-rs-brand" : "border-transparent"}`}
               >
-                <img src={avatarSrc(id)} alt="" className="h-full w-full object-cover" />
+                <Image src={avatarSrc(id)} alt="" width={32} height={32} className="h-full w-full object-cover" />
               </button>
             ))}
           </div>

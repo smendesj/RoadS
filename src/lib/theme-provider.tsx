@@ -1,39 +1,22 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useSyncExternalStore } from "react";
+import { createThemeStore, type Theme } from "@/lib/theme-store";
 
-type Theme = "light" | "dark";
 type ThemeContextValue = { theme: Theme; toggle: () => void };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
+const themeStore = createThemeStore(() => window.localStorage);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("light");
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem("roads-theme");
-      if (stored === "light" || stored === "dark") setTheme(stored);
-    } catch {
-      // localStorage unavailable (private window, blocked storage) — default to light.
-    }
-  }, []);
+  const theme = useSyncExternalStore(themeStore.subscribe, themeStore.getSnapshot, themeStore.getServerSnapshot);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    try {
-      window.localStorage.setItem("roads-theme", theme);
-    } catch {
-      // best-effort only; a failed write here shouldn't break the toggle itself.
-    }
   }, [theme]);
 
   return (
-    <ThemeContext.Provider
-      value={{ theme, toggle: () => setTheme((t) => (t === "dark" ? "light" : "dark")) }}
-    >
-      {children}
-    </ThemeContext.Provider>
+    <ThemeContext.Provider value={{ theme, toggle: themeStore.toggle }}>{children}</ThemeContext.Provider>
   );
 }
 
