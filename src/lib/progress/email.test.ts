@@ -72,7 +72,7 @@ test("the e-mail reads top to bottom: period, opening line, counters, sections, 
     "Próximos passos",
     "Também houve 12 ajustes internos",
     OPTIONS.shotUrls[0],
-    "Uso do Claude no período",
+    "AI usage",
     OPTIONS.visualUrl,
     "entregas concluídas",
     `href="${OPTIONS.roadsUrl}"`,
@@ -321,12 +321,12 @@ test("the Claude picture is 600 wide with a descriptive alt, then three numbers 
   assert.match(after, />2<[\s\S]*?>entregas concluídas</);
 });
 
-test("the heading above the picture is a fixed phrase; the label from the data rides in the picture's alt text", () => {
-  const out = html(rich({ usage: usageFor(2, { label: "Example - AI usage" }) }));
-  assert.match(out, /<b>Uso do Claude no período<\/b>/);
-  assert.ok(out.includes('alt="Example - AI usage: uso do Claude de'));
-  assert.ok(html().includes('alt="AI usage: uso do Claude de'));
-  assert.doesNotMatch(html(), /Claude por trás das entregas/);
+test("the heading above the picture is the picture's own title: the label from the data, or 'AI usage'", () => {
+  const labelled = html(rich({ usage: usageFor(2, { label: "Example - AI usage" }) }));
+  assert.match(labelled, /<b>Example - AI usage<\/b>/);
+  assert.match(html(), /<b>AI usage<\/b>/);
+  assert.match(text(rich({ usage: usageFor(2, { label: "Example - AI usage" }) })), /^Example - AI usage$/m);
+  assert.doesNotMatch(html(), /Claude por trás das entregas|Uso do Claude no período/);
 });
 
 test("the label is escaped like any other text", () => {
@@ -370,7 +370,7 @@ test("the text version says the same thing without markup or escaping", () => {
     "- Primeiro passo de teste.",
     "Também houve 12 ajustes internos de organização.",
     "Legenda do print 1",
-    "Uso do Claude no período",
+    "AI usage",
     "sessões",
     "entregas concluídas",
     OPTIONS.roadsUrl,

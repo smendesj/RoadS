@@ -150,9 +150,6 @@ function picture(src: string, width: number, height: number | null, alt: string)
   return `<img src="${escapeHtml(src)}" ${size} alt="${escapeHtml(alt)}" border="0" style="${style}">`;
 }
 
-/** The heading above the picture of Claude's work, in the e-mail and its text version. */
-const PICTURE_HEADING = "Uso do Claude no período";
-
 /* ---------- the three groups of numbers ---------- */
 
 function claudeNumbers(tiles: { label: string; value: string }[], delivered: number): { value: string; label: string }[] {
@@ -183,8 +180,8 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   const upcoming = by("proximo");
   const internal = content.internal && content.internal.count > 0 ? clean(content.internal.text) : "";
   const shots = (Array.isArray(content.shots) ? content.shots : []).slice(0, MAX_SHOTS);
-  // The picture's numbers, so the text under a blocked image says what the image would have said. Its
-  // title (the label from the data) rides in the alt text; the heading stays a fixed phrase the CEO reads.
+  // The picture's own title (the label from the data, or "AI usage") and numbers, so the text under a
+  // blocked image says what the image would have said.
   const drawing = visualModel(content);
   const numbers = claudeNumbers(drawing.tiles, counts.concluido);
   const visualSrc = safeImage(options.visualUrl);
@@ -251,7 +248,7 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
 
   // The picture of Claude's work, then its three headline numbers as TEXT: mail clients block images by
   // default, and the CEO should still read what Claude did.
-  rows.push(padded(28, 8, full(row(cell(font(17, 24, COLOR.ink), `<b>${PICTURE_HEADING}</b>`)))));
+  rows.push(padded(28, 8, full(row(cell(font(17, 24, COLOR.ink), `<b>${escapeHtml(drawing.title)}</b>`)))));
   if (visualSrc) {
     rows.push(
       row(
@@ -322,7 +319,7 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   if (internal) out.push("", internal);
   const captions = shots.map((s, i) => (safeImage(options.shotUrls?.[i]) ? clean(s.caption) : "")).filter(Boolean);
   if (captions.length > 0) out.push("", ...captions.map((c) => `Print: ${c}`));
-  out.push("", PICTURE_HEADING, numbers.map((n) => `${n.value} ${n.label}`).join(" · "));
+  out.push("", drawing.title, numbers.map((n) => `${n.value} ${n.label}`).join(" · "));
   const projects = visualModel(content).products;
   if (projects.length > 0) out.push(`Projetos somados: ${joinNames(projects)}.`);
   out.push("", roadsLink ? `Resumo preparado no RoadS: ${roadsLink}` : "Resumo preparado no RoadS.", "");

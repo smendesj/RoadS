@@ -4,6 +4,7 @@ import { useId, useMemo } from "react";
 import type { CoverageGap, UsageModel } from "@/lib/progress-report";
 import { clockSP, conferenceRows, dayLabel, sessionSpan, type ConferenceLine } from "@/lib/progress/conference";
 import { formatStamp } from "@/lib/progress/report-view";
+import { visualTitle } from "@/lib/progress/visual";
 
 // The collector may send more than the contract's columns (see conference.ts): the prompts typed by the
 // person and the total by the other counting method get a column when present; coverage-gap warnings
@@ -55,7 +56,7 @@ export function ProgressReportConference({
           Conferência dos números
         </h2>
         <p className="text-[13px] text-rs-text-soft">
-          O Claude por trás das entregas, dia a dia, no horário de São Paulo. Compare com o que você sabe do período; se algo parecer
+          {visualTitle(usage.label)}, dia a dia, no horário de São Paulo. Compare com o que você sabe do período; se algo parecer
           estranho, não marque.
         </p>
       </div>
