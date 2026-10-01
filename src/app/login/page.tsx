@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { touchActivity } from "@/lib/idle-storage";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
@@ -25,6 +26,8 @@ export default function LoginPage() {
       setLoading(false);
       return;
     }
+
+    touchActivity();
 
     const { data: profile } = await supabase
       .from("profiles")

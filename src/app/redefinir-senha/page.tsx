@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { logout } from "@/components/UserMenu";
 import { createClient } from "@/lib/supabase/client";
 import { isValidPassword, PASSWORD_HINT } from "@/lib/validation";
 
@@ -75,6 +76,10 @@ export default function RedefinirSenhaPage() {
             {loading ? "Salvando..." : "Salvar e continuar"}
           </button>
         </form>
+
+        <button type="button" onClick={logout} className="text-center text-[13px] font-bold text-rs-brand-text">
+          Sair
+        </button>
       </div>
     </div>
   );

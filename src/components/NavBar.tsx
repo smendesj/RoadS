@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { UserMenu } from "@/components/UserMenu";
 import { useTheme } from "@/lib/theme-provider";
 
 function SunMoonIcon({ theme }: { theme: "light" | "dark" }) {
@@ -11,15 +12,6 @@ function SunMoonIcon({ theme }: { theme: "light" | "dark" }) {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d={d} />
-    </svg>
-  );
-}
-
-function UserIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="8" r="4" />
-      <path d="M4 20c0-4 3.5-7 8-7s8 3 8 7" />
     </svg>
   );
 }
@@ -78,12 +70,7 @@ export function NavBar({ active, roleLabel, showConfig = false }: { active: Tab;
             Entrar
           </Link>
         ) : (
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-rs-brand-soft text-rs-text-soft">
-              <UserIcon />
-            </div>
-            <span className="hidden text-sm font-bold text-rs-text sm:inline">{roleLabel}</span>
-          </div>
+          <UserMenu roleLabel={roleLabel} />
         )}
       </div>
     </div>
