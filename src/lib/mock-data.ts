@@ -108,7 +108,7 @@ export function getRoadmapGroups(): RoadmapGroup[] {
       items: [
         { id: "r4", title: "Guias especializadas por classe de geologia no chat", produto: "GeoCloud", prioridade: "Medium", effort: "High", desc: "", url: null, notes: [] },
         { id: "r5", title: "Segmentação de testemunho na visão computacional", produto: "GeoCloud", prioridade: "Medium", effort: "High", desc: "Modelo novo — litologia já treinada, acima de 90% de acurácia.", url: null, notes: [] },
-        { id: "r6", title: "Sincronizar sample e resultados com o ELIMS", produto: "ELIMS", prioridade: "Medium", effort: "Medium", desc: "Depende do schema do Victor, sem previsão.", url: null, notes: [] },
+        { id: "r6", title: "Sincronizar sample e resultados com o ELIMS", produto: "GeoCloud", prioridade: "Medium", effort: "Medium", desc: "Depende do schema do Victor, sem previsão.", url: null, notes: [] },
       ],
     },
     {

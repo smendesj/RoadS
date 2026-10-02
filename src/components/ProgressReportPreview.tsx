@@ -116,12 +116,6 @@ function Facts({ row }: { row: ProgressReportRow }) {
         <dt>Período</dt>
         <dd className="font-semibold text-rs-text">{reportPeriodLabel({ start: row.period_start, end: row.period_end })}</dd>
       </div>
-      {row.produto !== "GeoCloud" && (
-        <div className="flex gap-1.5">
-          <dt>Produto</dt>
-          <dd className="font-semibold text-rs-text">{row.produto}</dd>
-        </div>
-      )}
       <div className="flex gap-1.5">
         <dt>Atualizado em</dt>
         <dd className="font-semibold text-rs-text">{formatStamp(row.pushed_at)}</dd>

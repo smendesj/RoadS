@@ -16,7 +16,7 @@ export type AppUser = {
   role: Role;
   mustResetPassword: boolean;
 };
-export type Produto = "GeoCloud" | "ELIMS";
+export type Produto = "GeoCloud"; // RoadS only handles GeoCloud; ELIMS issues are never pulled in.
 export type Prioridade = "Critical" | "High" | "Medium" | "Low";
 export type Effort = "Low" | "Medium" | "High" | "Very High";
 

@@ -193,16 +193,6 @@ test("after a report is sent, the next push starts a new draft", async () => {
   assert.equal(db.rows.length, 2);
 });
 
-test("a draft of another product is left alone", async () => {
-  const db = fakeDatabase();
-  await ingestDraft(db.store, { produto: "GeoCloud", content: content("Do GeoCloud."), now: T1 });
-  const result = await ingestDraft(db.store, { produto: "ELIMS", content: content("Outro produto."), now: T2 });
-  assert.equal(result.status === 200 && result.created, true);
-  assert.equal(db.rows.length, 2);
-  assert.equal(db.rows[0].content.headline, "Do GeoCloud.");
-  assert.equal(db.rows[1].produto, "ELIMS");
-});
-
 test("if another push creates the draft first, this push is applied to that draft", async () => {
   const db = fakeDatabase();
   db.hooks.beforeInsert = () => {

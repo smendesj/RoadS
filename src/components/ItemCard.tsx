@@ -5,7 +5,6 @@ import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones
 
 const PRIORIDADES: Prioridade[] = ["Critical", "High", "Medium", "Low"];
 const EFFORTS: Effort[] = ["Very High", "High", "Medium", "Low"];
-const PRODUTOS: Produto[] = ["GeoCloud", "ELIMS"];
 
 /** content is only present when the viewer may edit title/description/produto (admin, or RoadS-created items). */
 export type EditDraft = {
@@ -113,20 +112,6 @@ export function ItemCard({
                   rows={3}
                   className="resize-y rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-base text-rs-text sm:text-xs"
                 />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Produto</span>
-                <select
-                  value={content.produto}
-                  onChange={(e) => setContent({ produto: e.target.value as Produto })}
-                  className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-base font-bold text-rs-text sm:text-xs"
-                >
-                  {PRODUTOS.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
               </label>
             </>
           )}

@@ -21,8 +21,8 @@ export function effortTone(e: Effort): Tone {
   return { Low: "green", Medium: "amber", High: "red", "Very High": "pink" }[e] as Tone;
 }
 
-export function produtoTone(p: Produto): Tone {
-  return p === "ELIMS" ? "teal" : "indigo";
+export function produtoTone(_p: Produto): Tone {
+  return "indigo";
 }
 
 export function badgeClass(tone: Tone): string {

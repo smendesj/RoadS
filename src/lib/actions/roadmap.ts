@@ -230,13 +230,13 @@ export async function saveRoadmapItemEdit(
 
 // Every Roadmap item is a GitHub issue. A GeoCloud item saved without one (a "+ Novo item" once it
 // has a real title) gets its issue here, Open on Project #7. A failure doesn't fail the save: the
-// next board sync retries it. ELIMS has no issue destination configured yet, so it waits.
+// next board sync retries it.
 async function ensureIssue(
   itemId: string,
   item: { title: string; description: string; produto: Produto; github_issue_url: string | null }
 ): Promise<{ url: string; number: number } | null> {
   const token = process.env.GITHUB_TOKEN;
-  if (item.github_issue_url || item.produto !== "GeoCloud" || item.title === NEW_ITEM_TITLE || !token) return null;
+  if (item.github_issue_url || item.title === NEW_ITEM_TITLE || !token) return null;
   try {
     const issue = await createGeoCloudIssue(token, item.title, item.description);
     // Linking is bookkeeping, not a content edit, so it goes through the admin client: the
