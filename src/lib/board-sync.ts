@@ -22,7 +22,8 @@ import "server-only";
 
 import { createGeoCloudIssue, GEOCLOUD_REPO } from "@/lib/github";
 import { boardCard } from "@/lib/board";
-import { laneForLabels, TRIAGE_LANE, TYPE_LANES } from "@/lib/issue-lane";
+import { isStack, isTipo } from "@/lib/issue-fields";
+import { laneForLabels, tipoForLabels, TRIAGE_LANE, TYPE_LANES } from "@/lib/issue-lane";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NEW_ITEM_TITLE } from "@/lib/types";
 
@@ -183,7 +184,7 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
   const admin = createAdminClient();
   const [{ data: lanes, error: lanesError }, { data: items, error: itemsError }] = await Promise.all([
     admin.from("lanes").select("id, kind"),
-    admin.from("roadmap_items").select("id, lane_id, title, description, produto, github_issue_url"),
+    admin.from("roadmap_items").select("id, lane_id, title, description, produto, prioridade, effort, tipo, stack, github_issue_url"),
   ]);
   if (lanesError) throw lanesError;
   if (itemsError) throw itemsError;
@@ -194,7 +195,14 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
   let issuesCreated = 0;
   for (const item of items ?? []) {
     if (!item.github_issue_url && item.produto === "GeoCloud" && item.title !== NEW_ITEM_TITLE) {
-      const issue = await createGeoCloudIssue(token, item.title, item.description);
+      const issue = await createGeoCloudIssue(token, {
+        title: item.title,
+        description: item.description,
+        prioridade: item.prioridade,
+        effort: item.effort,
+        tipo: isTipo(item.tipo) ? item.tipo : "feature",
+        stack: isStack(item.stack) ? item.stack : "Geral",
+      });
       const { error } = await admin
         .from("roadmap_items")
         .update({ github_issue_url: issue.url, github_issue_number: issue.number })
@@ -257,6 +265,7 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
           title: i.title,
           description: summarize(i.body),
           produto: "GeoCloud",
+          tipo: tipoForLabels(i.labels),
           github_issue_url: i.url,
           github_issue_number: i.number,
         }))

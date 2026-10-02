@@ -1,6 +1,7 @@
 "use client";
 
 import type { Effort, Prioridade, Produto, RoadmapItem } from "@/lib/types";
+import { isStack, isTipo, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } from "@/lib/issue-fields";
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
 
 const PRIORIDADES: Prioridade[] = ["Critical", "High", "Medium", "Low"];
@@ -11,7 +12,7 @@ export type EditDraft = {
   prioridade: Prioridade;
   effort: Effort;
   note: string;
-  content?: { title: string; description: string; produto: Produto };
+  content?: { title: string; description: string; produto: Produto; tipo: Tipo; stack: Stack };
 };
 
 export function ItemCard({
@@ -113,6 +114,36 @@ export function ItemCard({
                   className="resize-y rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-base text-rs-text sm:text-xs"
                 />
               </label>
+              <div className="flex gap-2">
+                <label className="flex flex-1 flex-col gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Tipo</span>
+                  <select
+                    value={content.tipo}
+                    onChange={(e) => isTipo(e.target.value) && setContent({ tipo: e.target.value })}
+                    className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-base font-bold text-rs-text sm:text-xs"
+                  >
+                    {TIPOS.map((t) => (
+                      <option key={t} value={t}>
+                        {TIPO_LABELS[t]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-1 flex-col gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Stack</span>
+                  <select
+                    value={content.stack}
+                    onChange={(e) => isStack(e.target.value) && setContent({ stack: e.target.value })}
+                    className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-base font-bold text-rs-text sm:text-xs"
+                  >
+                    {STACKS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
             </>
           )}
           <div className="flex gap-2">

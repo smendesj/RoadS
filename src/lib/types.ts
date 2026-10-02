@@ -37,6 +37,9 @@ export type RoadmapItem = {
   url: string | null;
   /** GitHub issue number, taken from the issue URL; null for items with no issue. */
   number?: number | null;
+  /** Issue type (label type:*) and Project #7 Stack, kept to create the issue with every field filled. */
+  tipo?: "feature" | "bug" | "chore" | "spike" | null;
+  stack?: string | null;
   /** Profile that created the item from RoadS; null for the seeded/GitHub-backed items. */
   createdBy?: string | null;
   /** The issue's Status on Project #7 (last snapshot), set only on sprint items; "done" shows as Concluído. */

@@ -3,6 +3,7 @@
 import { getLatestBoardSnapshot } from "@/lib/actions/sync";
 import { withIssueStatus } from "@/lib/board";
 import { createGeoCloudIssue } from "@/lib/github";
+import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { NEW_ITEM_TITLE, type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
@@ -22,6 +23,8 @@ type ItemRow = {
   prioridade: Prioridade;
   effort: Effort;
   github_issue_url: string | null;
+  tipo?: RoadmapItem["tipo"];
+  stack?: string | null;
   created_by: string | null;
   notes: { id: string; author_role: string; created_at: string; body: string }[];
 };
@@ -36,6 +39,8 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
     desc: row.description,
     url: row.github_issue_url,
     number: Number(row.github_issue_url?.match(/\/issues\/(\d+)/)?.[1]) || null,
+    tipo: row.tipo ?? null,
+    stack: row.stack ?? null,
     createdBy: row.created_by,
     notes: row.notes
       .slice()
@@ -60,7 +65,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
 
   const { data: items, error: itemsError } = await supabase
     .from("roadmap_items")
-    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, created_by, notes:item_notes(id, author_role, created_at, body)")
+    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, notes:item_notes(id, author_role, created_at, body)")
     .order("sort_order");
   if (itemsError) throw itemsError;
 
@@ -126,7 +131,7 @@ export async function createRoadmapItem(laneId: string): Promise<RoadmapItem> {
       effort: "Medium",
       created_by: userId,
     })
-    .select("id, lane_id, title, description, produto, prioridade, effort, github_issue_url, created_by")
+    .select("id, lane_id, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by")
     .single();
   if (error) throw error;
 
@@ -147,12 +152,14 @@ async function getItemAccess(
   itemId: string,
   actor: { userId: string; realRole: "scrum_master" | "admin" }
 ): Promise<
-  ItemAccess & { item: { lane_id: string; title: string; produto: Produto; description: string; github_issue_url: string | null } }
+  ItemAccess & {
+    item: { lane_id: string; title: string; produto: Produto; description: string; github_issue_url: string | null; tipo: Tipo | null; stack: Stack | null };
+  }
 > {
   const supabase = await createServerSupabase();
   const { data: item, error } = await supabase
     .from("roadmap_items")
-    .select("lane_id, title, produto, description, github_issue_url, created_by")
+    .select("lane_id, title, produto, description, github_issue_url, tipo, stack, created_by")
     .eq("id", itemId)
     .single();
   if (error) throw error;
@@ -174,7 +181,7 @@ export async function saveRoadmapItemEdit(
     effort: Effort;
     note: string;
     activeView: ViewAs;
-    content?: { title: string; description: string; produto: Produto };
+    content?: { title: string; description: string; produto: Produto; tipo: Tipo; stack: Stack };
   }
 ): Promise<void> {
   const actor = await requireScrumMasterActor();
@@ -200,6 +207,9 @@ export async function saveRoadmapItemEdit(
     update.title = title;
     update.description = input.content.description.trim();
     update.produto = input.content.produto;
+    if (!isTipo(input.content.tipo) || !isStack(input.content.stack)) throw new Error("type_and_stack_required");
+    update.tipo = input.content.tipo;
+    update.stack = input.content.stack;
   }
 
   const { error: updateError } = await supabase.from("roadmap_items").update(update).eq("id", itemId);
@@ -215,15 +225,18 @@ export async function saveRoadmapItemEdit(
   const issue = await ensureIssue(itemId, {
     title: input.content ? (update.title as string) : access.item.title,
     description: input.content ? (update.description as string) : access.item.description,
-    produto: input.content ? input.content.produto : access.item.produto,
     github_issue_url: access.item.github_issue_url,
+    prioridade: input.prioridade,
+    effort: input.effort,
+    tipo: input.content ? input.content.tipo : access.item.tipo ?? "feature",
+    stack: input.content ? input.content.stack : access.item.stack ?? "Geral",
   });
 
   await queueChange(itemId, "modify", {
     prioridade: input.prioridade,
     effort: input.effort,
     note: input.note.trim() || null,
-    ...(input.content ? { title: update.title, description: update.description, produto: update.produto } : {}),
+    ...(input.content ? { title: update.title, description: update.description, produto: update.produto, tipo: update.tipo, stack: update.stack } : {}),
     ...(issue ? { github_issue_url: issue.url } : {}),
   });
 }
@@ -233,12 +246,12 @@ export async function saveRoadmapItemEdit(
 // next board sync retries it.
 async function ensureIssue(
   itemId: string,
-  item: { title: string; description: string; produto: Produto; github_issue_url: string | null }
+  item: NewIssueFields & { github_issue_url: string | null }
 ): Promise<{ url: string; number: number } | null> {
   const token = process.env.GITHUB_TOKEN;
   if (item.github_issue_url || item.title === NEW_ITEM_TITLE || !token) return null;
   try {
-    const issue = await createGeoCloudIssue(token, item.title, item.description);
+    const issue = await createGeoCloudIssue(token, item);
     // Linking is bookkeeping, not a content edit, so it goes through the admin client: the
     // actor was already authorized above, and the 0007 triggers limit what their own session may set.
     const { error } = await createAdminClient()

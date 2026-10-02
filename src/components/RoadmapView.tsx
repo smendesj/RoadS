@@ -6,6 +6,7 @@ import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { SyncButton } from "@/components/SyncButton";
 import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { syncBoardAsViewer } from "@/lib/actions/sync";
+import { isStack } from "@/lib/issue-fields";
 import { moveItem } from "@/lib/roadmap-move";
 import { roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
 import { MAX_ITEMS_PER_SPRINT, type Lane, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
@@ -114,7 +115,15 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
       prioridade: item.prioridade,
       effort: item.effort,
       note: "",
-      content: canEditContent(item) ? { title: item.title, description: item.desc, produto: item.produto } : undefined,
+      content: canEditContent(item)
+        ? {
+            title: item.title,
+            description: item.desc,
+            produto: item.produto,
+            tipo: item.tipo ?? "feature",
+            stack: isStack(item.stack) ? item.stack : "Geral",
+          }
+        : undefined,
     });
   }
 
