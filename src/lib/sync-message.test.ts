@@ -17,17 +17,17 @@ test("and fall back to a generic line when there isn't", () => {
 });
 
 test("the Roadmap summary counts what came in and went out, and mentions created issues only when there were some", () => {
-  assert.equal(roadmapSyncMessage({ added: 2, removed: 1, issuesCreated: 0 }), "2 issue(s) adicionada(s), 1 encerrada(s) removida(s).");
+  assert.equal(roadmapSyncMessage({ added: 2, removed: 1, issuesCreated: 0 }), "2 issue(s) adicionada(s), 1 encerrada(s) ou fora do Project removida(s).");
   assert.equal(
     roadmapSyncMessage({ added: 0, removed: 0, issuesCreated: 3 }),
-    "0 issue(s) adicionada(s), 0 encerrada(s) removida(s), 3 issue(s) criada(s) para itens sem issue."
+    "0 issue(s) adicionada(s), 0 encerrada(s) ou fora do Project removida(s), 3 issue(s) criada(s) para itens sem issue."
   );
 });
 
 test("the Roadmap summary says how many issues stayed out for lack of a type label", () => {
   assert.equal(
     roadmapSyncMessage({ added: 1, removed: 0, issuesCreated: 0, untyped: 2 }),
-    "1 issue(s) adicionada(s), 0 encerrada(s) removida(s). 2 issue(s) aberta(s) sem label type:* ficaram de fora até ganharem tipo."
+    "1 issue(s) adicionada(s), 0 encerrada(s) ou fora do Project removida(s). 2 issue(s) aberta(s) sem label type:* ficaram de fora até ganharem tipo."
   );
 });
 

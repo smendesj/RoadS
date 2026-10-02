@@ -21,7 +21,7 @@ import "server-only";
 // session) and writes with the admin client.
 
 import { createGeoCloudIssue, GEOCLOUD_REPO } from "@/lib/github";
-import { boardCard } from "@/lib/board";
+import { BOARD_REPO, boardCard } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
 import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { planRotation, SPRINT_IDS, type SprintDates, type SprintId } from "@/lib/sprint-rotation";
@@ -71,6 +71,7 @@ export async function syncBoard(): Promise<SyncResult> {
   const token = process.env.GITHUB_TOKEN;
   if (!token) return { ok: false, reason: "not_configured" };
 
+  const onProject = new Set<number>();
   const counts = new Map<string, number>();
   const itemsByStatus = new Map<string, { title: string; ref: string; url: string }[]>();
 
@@ -99,6 +100,8 @@ export async function syncBoard(): Promise<SyncResult> {
 
       const items = project.items;
       for (const node of items.nodes) {
+        // On the project whatever its Status; an issue taken off the project leaves the Roadmap too.
+        if (node.content?.number && node.content.repository?.nameWithOwner === BOARD_REPO) onProject.add(node.content.number);
         const entry = boardCard(node);
         if (!entry) continue;
         counts.set(entry.status, (counts.get(entry.status) ?? 0) + 1);
@@ -132,7 +135,7 @@ export async function syncBoard(): Promise<SyncResult> {
     await rotateSprints(doneUrls).catch((e) => console.error("syncBoard: sprint rotation failed", e));
 
     // The Roadmap follows the repo's open issues; a failure here doesn't fail the board sync.
-    const roadmap = await reconcileRoadmapWithIssues(token).catch((e) => {
+    const roadmap = await reconcileRoadmapWithIssues(token, onProject).catch((e) => {
       console.error("syncBoard: roadmap reconcile failed", e);
       return { added: 0, removed: 0, issuesCreated: 0, error: e instanceof Error ? e.message : "Erro ao atualizar o Roadmap." };
     });
@@ -209,11 +212,11 @@ async function rotateSprints(doneUrls: Set<string>): Promise<void> {
   }
 }
 
-// Every Roadmap item is a GitHub issue, and every open GeoCloud issue is on the Roadmap, ready to
-// be dragged into a sprint. A GeoCloud item without an issue (its creation on save failed) gets
-// one now, Open on Project #7. An open issue
+// Every Roadmap item is a GitHub issue, and every open GeoCloud issue that is on Project #7 is on the
+// Roadmap, ready to be dragged into a sprint. A GeoCloud item without an issue (its creation on save
+// failed) gets one now, Open on Project #7. An open issue
 // the Roadmap doesn't have yet lands in the group of its type label (laneForLabels). A Roadmap item whose issue is
-// no longer open leaves the Roadmap, but only from the groups: an item already in a sprint stays
+// no longer open, or no longer on the project, leaves the Roadmap, but only from the groups: an item already in a sprint stays
 // there as delivered. Items without an issue, or with an issue from another repo, are left alone.
 // Each add/remove is queued in roadmap_sync_queue so FrontlightS writes it into ROADMAP.md.
 const ISSUE_URL = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
@@ -248,8 +251,11 @@ function summarize(body: string): string {
   return paragraph.length > 280 ? `${paragraph.slice(0, 277).trimEnd()}...` : paragraph;
 }
 
-async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconcile> {
-  const open = await fetchOpenIssues(token);
+async function reconcileRoadmapWithIssues(token: string, onProject: Set<number>): Promise<RoadmapReconcile> {
+  // The Roadmap is the open issues that are on Project #7. An empty project read means the read went
+  // wrong, so nothing is removed on its account.
+  if (onProject.size === 0) throw new Error("O Project #7 não devolveu issues do GeoCloud; o Roadmap não foi alterado.");
+  const open = (await fetchOpenIssues(token)).filter((i) => onProject.has(i.number));
   const openNumbers = new Set(open.map((i) => i.number));
 
   const admin = createAdminClient();
@@ -301,7 +307,7 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
     await admin.from("roadmap_sync_queue").insert({
       item_id: item.id,
       action: "remove",
-      payload: { item_id: item.id, lane_id: item.lane_id, title: item.title, github_issue_url: item.github_issue_url, reason: "issue closed outside a sprint" },
+      payload: { item_id: item.id, lane_id: item.lane_id, title: item.title, github_issue_url: item.github_issue_url, reason: "issue closed or taken off the project, outside a sprint" },
     });
     const { error } = await admin.from("roadmap_items").delete().eq("id", item.id);
     if (error) throw error;
