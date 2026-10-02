@@ -22,6 +22,7 @@ import "server-only";
 
 import { createGeoCloudIssue, GEOCLOUD_REPO } from "@/lib/github";
 import { boardCard } from "@/lib/board";
+import { laneForLabels, TRIAGE_LANE, TYPE_LANES } from "@/lib/issue-lane";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NEW_ITEM_TITLE } from "@/lib/types";
 
@@ -139,14 +140,13 @@ export async function syncBoard(): Promise<SyncResult> {
 // Every Roadmap item is a GitHub issue, and every open GeoCloud issue is on the Roadmap, ready to
 // be dragged into a sprint. A GeoCloud item without an issue (its creation on save failed) gets
 // one now, Open on Project #7. An open issue
-// the Roadmap doesn't have yet lands in the TRIAGE_LANE group. A Roadmap item whose issue is
+// the Roadmap doesn't have yet lands in the group of its type label (laneForLabels). A Roadmap item whose issue is
 // no longer open leaves the Roadmap, but only from the groups: an item already in a sprint stays
 // there as delivered. Items without an issue, or with an issue from another repo, are left alone.
 // Each add/remove is queued in roadmap_sync_queue so FrontlightS writes it into ROADMAP.md.
-const TRIAGE_LANE = "triagem";
 const ISSUE_URL = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
 
-type OpenIssue = { number: number; title: string; url: string; body: string };
+type OpenIssue = { number: number; title: string; url: string; body: string; labels: string[] };
 
 async function fetchOpenIssues(token: string): Promise<OpenIssue[]> {
   const issues: OpenIssue[] = [];
@@ -156,9 +156,9 @@ async function fetchOpenIssues(token: string): Promise<OpenIssue[]> {
       cache: "no-store",
     });
     if (!res.ok) throw new Error(`GitHub respondeu ${res.status} ao listar as issues abertas`);
-    const batch: { number: number; title: string; html_url: string; body: string | null; pull_request?: unknown }[] = await res.json();
+    const batch: { number: number; title: string; html_url: string; body: string | null; labels: { name: string }[]; pull_request?: unknown }[] = await res.json();
     for (const it of batch) {
-      if (!it.pull_request) issues.push({ number: it.number, title: it.title, url: it.html_url, body: it.body ?? "" });
+      if (!it.pull_request) issues.push({ number: it.number, title: it.title, url: it.html_url, body: it.body ?? "", labels: it.labels.map((l) => l.name) });
     }
     if (batch.length < 100) return issues;
   }
@@ -228,22 +228,32 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
     if (error) throw error;
   }
 
+  // Items still in the catch-all or in a type block go to the block of their issue's type label
+  // (an item the scrum master dragged into any other group is left where it was put).
+  const sortedItems = (items ?? []).slice();
+  for (const item of sortedItems) {
+    const n = Number(item.github_issue_url?.match(ISSUE_URL)?.[1]);
+    const issue = open.find((i) => i.number === n);
+    if (!issue || (item.lane_id !== TRIAGE_LANE && !TYPE_LANES.includes(item.lane_id))) continue;
+    const target = laneForLabels(issue.labels);
+    if (target === item.lane_id) continue;
+    const { error } = await admin.from("roadmap_items").update({ lane_id: target, sort_order: issue.number }).eq("id", item.id);
+    if (error) throw error;
+    await admin.from("roadmap_sync_queue").insert({
+      item_id: item.id,
+      action: "move_lane",
+      payload: { lane_id: target, from_lane_id: item.lane_id, title: item.title, reason: "filed by type label" },
+    });
+  }
+
   const missing = open.filter((i) => !onRoadmap.has(i.number)).sort((a, b) => a.number - b.number);
   if (missing.length) {
-    const { data: last } = await admin
-      .from("roadmap_items")
-      .select("sort_order")
-      .eq("lane_id", TRIAGE_LANE)
-      .order("sort_order", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const base = (last?.sort_order ?? -1) + 1;
     const { data: inserted, error } = await admin
       .from("roadmap_items")
       .insert(
-        missing.map((i, k) => ({
-          lane_id: TRIAGE_LANE,
-          sort_order: base + k,
+        missing.map((i) => ({
+          lane_id: laneForLabels(i.labels),
+          sort_order: i.number,
           title: i.title,
           description: summarize(i.body),
           produto: "GeoCloud",
@@ -251,13 +261,13 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
           github_issue_number: i.number,
         }))
       )
-      .select("id, title, github_issue_url");
+      .select("id, lane_id, title, github_issue_url");
     if (error) throw error;
     await admin.from("roadmap_sync_queue").insert(
       (inserted ?? []).map((row) => ({
         item_id: row.id,
         action: "add",
-        payload: { lane_id: TRIAGE_LANE, title: row.title, github_issue_url: row.github_issue_url, reason: "open issue imported from GitHub" },
+        payload: { lane_id: row.lane_id, title: row.title, github_issue_url: row.github_issue_url, reason: "open issue imported from GitHub" },
       }))
     );
   }
