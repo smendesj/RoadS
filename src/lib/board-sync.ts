@@ -24,6 +24,7 @@ import { createGeoCloudIssue, GEOCLOUD_REPO } from "@/lib/github";
 import { boardCard } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
 import { laneForLabels, tipoForLabels, TRIAGE_LANE, TYPE_LANES } from "@/lib/issue-lane";
+import { planRotation, SPRINT_IDS, type SprintDates, type SprintId } from "@/lib/sprint-rotation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NEW_ITEM_TITLE } from "@/lib/types";
 
@@ -126,6 +127,10 @@ export async function syncBoard(): Promise<SyncResult> {
       console.error("syncBoard: failed to persist snapshot", persistError);
     }
 
+    // A sprint whose week is over hands the current spot to the next one; a failure doesn't fail the sync.
+    const doneUrls = new Set(columns.find((c) => c.key === "done")?.items.map((i) => i.url));
+    await rotateSprints(doneUrls).catch((e) => console.error("syncBoard: sprint rotation failed", e));
+
     // The Roadmap follows the repo's open issues; a failure here doesn't fail the board sync.
     const roadmap = await reconcileRoadmapWithIssues(token).catch((e) => {
       console.error("syncBoard: roadmap reconcile failed", e);
@@ -135,6 +140,72 @@ export async function syncBoard(): Promise<SyncResult> {
     return { ok: true, columns, syncedAt, roadmap };
   } catch (e) {
     return { ok: false, reason: "error", message: e instanceof Error ? e.message : "Erro desconhecido" };
+  }
+}
+
+// Moves the three sprints up a step once the current one's last day has passed (see sprint-rotation.ts).
+// The guarded update of "atual" claims the rotation, so the cron and a button sync running together
+// can't rotate twice. Every removal and move is queued so FrontlightS mirrors it.
+async function rotateSprints(doneUrls: Set<string>): Promise<void> {
+  const admin = createAdminClient();
+  const [{ data: lanes, error: lanesError }, { data: items, error: itemsError }] = await Promise.all([
+    admin.from("lanes").select("id, start_date, end_date").in("id", [...SPRINT_IDS]),
+    admin.from("roadmap_items").select("id, lane_id, title, github_issue_url").in("lane_id", [...SPRINT_IDS]),
+  ]);
+  if (lanesError) throw lanesError;
+  if (itemsError) throw itemsError;
+
+  const dates = {} as Record<SprintId, SprintDates>;
+  for (const id of SPRINT_IDS) {
+    const lane = lanes?.find((l) => l.id === id);
+    if (!lane?.start_date || !lane.end_date) return;
+    dates[id] = { start: lane.start_date, end: lane.end_date };
+  }
+
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const plan = planRotation({
+    today,
+    dates,
+    items: (items ?? []).map((it) => ({ id: it.id, laneId: it.lane_id, url: it.github_issue_url })),
+    doneUrls,
+  });
+  if (plan.rotations === 0) return;
+
+  const { data: claimed, error: claimError } = await admin
+    .from("lanes")
+    .update({ start_date: plan.dates.atual.start, end_date: plan.dates.atual.end })
+    .eq("id", "atual")
+    .eq("end_date", dates.atual.end)
+    .select("id");
+  if (claimError) throw claimError;
+  if (!claimed?.length) return;
+  for (const id of ["proxima", "terceira"] as const) {
+    const { error } = await admin.from("lanes").update({ start_date: plan.dates[id].start, end_date: plan.dates[id].end }).eq("id", id);
+    if (error) throw error;
+  }
+
+  const byId = new Map((items ?? []).map((it) => [it.id, it]));
+  for (const id of plan.finished) {
+    const item = byId.get(id)!;
+    // Queue first: the queue's FK goes null once the row is deleted, so the payload carries it all.
+    await admin.from("roadmap_sync_queue").insert({
+      item_id: id,
+      action: "remove",
+      payload: { item_id: id, lane_id: item.lane_id, title: item.title, github_issue_url: item.github_issue_url, reason: "sprint ended, issue done" },
+    });
+    const { error } = await admin.from("roadmap_items").delete().eq("id", id);
+    if (error) throw error;
+  }
+  for (const p of plan.placements) {
+    const { error } = await admin.from("roadmap_items").update({ lane_id: p.to, sort_order: p.sortOrder }).eq("id", p.id);
+    if (error) throw error;
+    if (p.from !== p.to) {
+      await admin.from("roadmap_sync_queue").insert({
+        item_id: p.id,
+        action: "move_lane",
+        payload: { lane_id: p.to, from_lane_id: p.from, title: byId.get(p.id)!.title, reason: "sprints rotated" },
+      });
+    }
   }
 }
 
