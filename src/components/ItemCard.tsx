@@ -69,6 +69,7 @@ export function ItemCard({
     >
       {item.url ? (
         <a href={item.url} target="_blank" rel="noreferrer" className={`font-bold text-rs-text ${compact ? "text-xs" : "text-sm"}`}>
+          {item.number ? `#${item.number} ` : ""}
           {item.title} ↗
         </a>
       ) : (

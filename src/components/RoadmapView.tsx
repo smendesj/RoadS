@@ -278,7 +278,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                         </div>
                         {/* A long group scrolls inside its box instead of stretching the whole column. */}
                         <div className="-mr-1.5 flex max-h-[560px] flex-col gap-2.5 overflow-y-auto pr-1.5">
-                          {g.items.map((item) => (
+                          {[...g.items].sort((a, b) => (b.number ?? 0) - (a.number ?? 0)).map((item) => (
                             <ItemCard
                               key={item.id}
                               item={item}

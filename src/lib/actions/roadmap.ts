@@ -35,6 +35,7 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
     effort: row.effort,
     desc: row.description,
     url: row.github_issue_url,
+    number: Number(row.github_issue_url?.match(/\/issues\/(\d+)/)?.[1]) || null,
     createdBy: row.created_by,
     notes: row.notes
       .slice()
