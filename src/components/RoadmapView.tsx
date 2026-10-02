@@ -6,6 +6,7 @@ import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { SyncButton } from "@/components/SyncButton";
 import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { syncBoardAsViewer } from "@/lib/actions/sync";
+import { orderGroups } from "@/lib/group-order";
 import { isStack } from "@/lib/issue-fields";
 import { moveItem } from "@/lib/roadmap-move";
 import { roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
@@ -75,7 +76,8 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   // Groups are dealt left to right (1-2-3, 4-5-6, 7...) into columns that each stack tightly, so
   // rows stay full in reading order and no short group leaves a gap under it.
   const groupColumnCount = useGroupColumns();
-  const groupColumns = Array.from({ length: groupColumnCount }, (_, c) => groups.filter((_, i) => i % groupColumnCount === c));
+  const orderedGroups = orderGroups(groups);
+  const groupColumns = Array.from({ length: groupColumnCount }, (_, c) => orderedGroups.filter((_, i) => i % groupColumnCount === c));
 
   // Drop targets call this with the dragged item; the "Mover para" select on each card (touch
   // screens have no HTML drag and drop) passes its item directly. Moving into a full sprint is
