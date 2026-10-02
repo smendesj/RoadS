@@ -1,6 +1,5 @@
-// The Roadmap block an open issue is filed in comes from its type:* label; without a known one it
-// stays in the "Sem tipo" block (TRIAGE_LANE, kept from before the type blocks existed).
-export const TRIAGE_LANE = "triagem";
+// The Roadmap block an open issue is filed in comes from its type:* label. An issue without a known
+// one has no block and stays out of the Roadmap until it gets a type.
 const BLOCK_TYPES = ["feature", "bug", "chore", "spike", "epic"];
 export const TYPE_LANES = BLOCK_TYPES.map((t) => `tipo-${t}`);
 
@@ -10,9 +9,9 @@ function blockType(labels: string[]): string | null {
   return types.includes("epic") ? "epic" : (types.find((t) => BLOCK_TYPES.includes(t)) ?? null);
 }
 
-export function laneForLabels(labels: string[]): string {
+export function laneForLabels(labels: string[]): string | null {
   const type = blockType(labels);
-  return type ? `tipo-${type}` : TRIAGE_LANE;
+  return type ? `tipo-${type}` : null;
 }
 
 /** The type RoadS stores on an item (feature, bug, chore or spike), or null: an epic has none of its own. */

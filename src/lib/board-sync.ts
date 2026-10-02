@@ -23,7 +23,7 @@ import "server-only";
 import { createGeoCloudIssue, GEOCLOUD_REPO } from "@/lib/github";
 import { boardCard } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
-import { laneForLabels, tipoForLabels, TRIAGE_LANE, TYPE_LANES } from "@/lib/issue-lane";
+import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { planRotation, SPRINT_IDS, type SprintDates, type SprintId } from "@/lib/sprint-rotation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NEW_ITEM_TITLE } from "@/lib/types";
@@ -43,7 +43,7 @@ export type SyncColumn = {
   items: { title: string; ref: string; url: string }[];
 };
 
-export type RoadmapReconcile = { added: number; removed: number; issuesCreated: number; error?: string };
+export type RoadmapReconcile = { added: number; removed: number; issuesCreated: number; untyped?: number; error?: string };
 
 export type SyncResult =
   | { ok: true; columns: SyncColumn[]; syncedAt: string; roadmap: RoadmapReconcile }
@@ -307,15 +307,14 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
     if (error) throw error;
   }
 
-  // Items still in the catch-all or in a type block go to the block of their issue's type label
-  // (an item the scrum master dragged into any other group is left where it was put).
-  const sortedItems = (items ?? []).slice();
-  for (const item of sortedItems) {
+  // Items in a type block follow their issue's type label to the block it names (an item the scrum
+  // master dragged into any other group is left where it was put).
+  for (const item of items ?? []) {
     const n = Number(item.github_issue_url?.match(ISSUE_URL)?.[1]);
     const issue = open.find((i) => i.number === n);
-    if (!issue || (item.lane_id !== TRIAGE_LANE && !TYPE_LANES.includes(item.lane_id))) continue;
+    if (!issue || !TYPE_LANES.includes(item.lane_id)) continue;
     const target = laneForLabels(issue.labels);
-    if (target === item.lane_id) continue;
+    if (!target || target === item.lane_id) continue;
     const { error } = await admin.from("roadmap_items").update({ lane_id: target, sort_order: issue.number }).eq("id", item.id);
     if (error) throw error;
     await admin.from("roadmap_sync_queue").insert({
@@ -325,13 +324,15 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
     });
   }
 
-  const missing = open.filter((i) => !onRoadmap.has(i.number)).sort((a, b) => a.number - b.number);
+  // An issue with no type:* label stays out of the Roadmap until it gets one: there is no block for it.
+  const notYet = open.filter((i) => !onRoadmap.has(i.number)).sort((a, b) => a.number - b.number);
+  const missing = notYet.filter((i) => laneForLabels(i.labels));
   if (missing.length) {
     const { data: inserted, error } = await admin
       .from("roadmap_items")
       .insert(
         missing.map((i) => ({
-          lane_id: laneForLabels(i.labels),
+          lane_id: laneForLabels(i.labels)!,
           sort_order: i.number,
           title: i.title,
           description: summarize(i.body),
@@ -352,5 +353,5 @@ async function reconcileRoadmapWithIssues(token: string): Promise<RoadmapReconci
     );
   }
 
-  return { added: missing.length, removed: closed.length, issuesCreated };
+  return { added: missing.length, removed: closed.length, issuesCreated, untyped: notYet.length - missing.length };
 }

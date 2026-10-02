@@ -1,12 +1,11 @@
-import { TRIAGE_LANE, TYPE_LANES } from "./issue-lane.ts";
+type Group = { items: { number?: number | null }[] };
 
-type Group = { id: string; items: { number?: number | null }[] };
-
-// The type blocks come first, the one holding the highest issue number on top (an empty one goes
-// last among them); the curated groups follow in their own order.
+// The group holding the highest issue number comes first, whatever lower numbers it also has; groups
+// with no numbered issue go last. Groups that tie keep the order they came in.
 export function orderGroups<G extends Group>(groups: G[]): G[] {
-  const isTypeBlock = (g: G) => g.id === TRIAGE_LANE || TYPE_LANES.includes(g.id);
   const highest = (g: G) => Math.max(0, ...g.items.map((it) => it.number ?? 0));
-  const typeBlocks = groups.filter(isTypeBlock).sort((a, b) => highest(b) - highest(a));
-  return [...typeBlocks, ...groups.filter((g) => !isTypeBlock(g))];
+  return groups
+    .map((g, i) => ({ g, i, top: highest(g) }))
+    .sort((a, b) => b.top - a.top || a.i - b.i)
+    .map(({ g }) => g);
 }

@@ -13,9 +13,9 @@ test("an epic wins over the type it also carries", () => {
   assert.equal(tipoForLabels(["type:epic", "type:feature"]), "feature");
 });
 
-test("leaves issues without a known type label in the no-type block", () => {
-  assert.equal(laneForLabels([]), "triagem");
-  assert.equal(laneForLabels(["security", "type:unknown"]), "triagem");
+test("an issue without a known type label has no block", () => {
+  assert.equal(laneForLabels([]), null);
+  assert.equal(laneForLabels(["security", "type:unknown"]), null);
 });
 
 test("an epic alone has no stored type", () => {

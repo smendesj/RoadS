@@ -24,6 +24,13 @@ test("the Roadmap summary counts what came in and went out, and mentions created
   );
 });
 
+test("the Roadmap summary says how many issues stayed out for lack of a type label", () => {
+  assert.equal(
+    roadmapSyncMessage({ added: 1, removed: 0, issuesCreated: 0, untyped: 2 }),
+    "1 issue(s) adicionada(s), 0 encerrada(s) removida(s). 2 issue(s) aberta(s) sem label type:* ficaram de fora até ganharem tipo."
+  );
+});
+
 test("a Roadmap that failed reports its own error instead of counts", () => {
   assert.equal(roadmapSyncMessage({ added: 0, removed: 0, issuesCreated: 0, error: "falhou" }), "falhou");
 });
