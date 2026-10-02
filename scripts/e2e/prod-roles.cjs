@@ -24,12 +24,12 @@ const { BASE, expect, sleep } = L;
       await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 45000 });
       await sleep(800);
       const novo = await page.getByRole("button", { name: "+ Novo item" }).count();
-      const syncIssues = await page.getByRole("button", { name: /Sincronizar issues/ }).count();
+      const syncIssues = await page.getByRole("button", { name: /^Sincronizar$/ }).count();
       const draggable = await page.locator('div[draggable="true"]').count();
       const mover = await page.locator('select[aria-label="Mover para"]').count();
       const editable = role !== "dev";
       expect(`${label}: roadmap controls ${editable ? "present" : "absent"} (novo ${novo}, sync ${syncIssues}, draggable ${draggable}, mover ${mover})`,
-        editable ? novo === 3 && syncIssues === 1 && draggable > 0 && mover > 0 : novo === 0 && syncIssues === 0 && draggable === 0 && mover === 0);
+        editable ? novo === 3 && syncIssues === 1 && draggable > 0 && mover > 0 : novo === 0 && syncIssues === 1 && draggable === 0 && mover === 0);
       expect(`${label}: never sees 'Entrar' while signed in`, (await page.locator('a[href="/login"]').count()) === 0);
 
       await page.goto(BASE + "/config", { waitUntil: "load" });

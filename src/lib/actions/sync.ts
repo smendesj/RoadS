@@ -6,11 +6,8 @@
 
 import { syncBoard, type SyncColumn, type SyncResult } from "@/lib/board-sync";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
+import { SYNC_COOLDOWN_MS } from "@/lib/sync-cooldown";
 import { isWithin } from "@/lib/timestamp";
-
-// A second sync inside this window gets the last result back instead of spending GitHub API calls: the
-// token's quota is shared with the daily cron and with whoever owns it, and any role can press the button.
-const SYNC_COOLDOWN_MS = 30_000;
 
 // Client entry point for the manual "Board sincronizado" button — dev, scrum_master
 // and admin can all trigger it (it's a read-refresh, not an edit, so there's no

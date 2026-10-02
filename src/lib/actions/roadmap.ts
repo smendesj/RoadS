@@ -1,5 +1,7 @@
 "use server";
 
+import { getLatestBoardSnapshot } from "@/lib/actions/sync";
+import { withIssueStatus } from "@/lib/board";
 import { createGeoCloudIssue } from "@/lib/github";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
@@ -84,7 +86,9 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
     }
   }
 
-  return { lanes: sprintLanes, groups };
+  // The sprints show which items are already delivered, from the same Project #7 snapshot the Dashboard reads.
+  const snapshot = await getLatestBoardSnapshot();
+  return { lanes: withIssueStatus(sprintLanes, snapshot?.columns ?? []), groups };
 }
 
 async function requireScrumMasterActor(): Promise<{ userId: string; realRole: "scrum_master" | "admin" }> {

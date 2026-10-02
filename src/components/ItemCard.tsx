@@ -79,6 +79,7 @@ export function ItemCard({
         <span className={badgeClass(produtoTone(item.produto)) + (compact ? " !text-[9px] !px-1.5" : "")}>{item.produto}</span>
         <span className={badgeClass(prioridadeTone(item.prioridade)) + (compact ? " !text-[9px] !px-1.5" : "")}>{item.prioridade}</span>
         <span className={badgeClass(effortTone(item.effort)) + (compact ? " !text-[9px] !px-1.5" : "")}>{item.effort}</span>
+        {item.status === "done" && <span className={badgeClass("green") + (compact ? " !text-[9px] !px-1.5" : "")}>Concluído</span>}
       </div>
 
       {item.desc && <p className="text-[13px] leading-snug text-rs-text-soft">{item.desc}</p>}

@@ -26,7 +26,7 @@ const { BASE, expect, sleep, svc } = L;
     await page.getByText("[TESTE] item do scrum master").waitFor();
     const count = (loc) => loc.count();
     expect("roadmap: subtitle offers 'defina o que entra e quando'", (await count(page.getByText(/defina o que entra e quando/))) === 1);
-    expect("roadmap: 'Sincronizar issues' is available", (await count(page.getByRole("button", { name: /Sincronizar issues/ }))) === 1);
+    expect("roadmap: 'Sincronizar' is available", (await count(page.getByRole("button", { name: /^Sincronizar$/ }))) === 1);
     const novoButtons = await count(page.getByRole("button", { name: "+ Novo item" }));
     expect("roadmap: a '+ Novo item' in every sprint lane (3 real + 1 test)", novoButtons === 4, String(novoButtons));
     expect("roadmap: no 'Config' for a Scrum Master", (await count(page.getByRole("link", { name: "Config", exact: true }))) === 0);
@@ -138,8 +138,8 @@ const { BASE, expect, sleep, svc } = L;
     expect("delete: own item is removed", gone.length === 0);
     expect("delete: the admin's item survives, the seeded one has no Excluir", (await svc.from("roadmap_items").select("id").eq("id", L.ids.adminItem)).data.length === 1);
 
-    // ------------------------------------------------ Sincronizar issues with no token
-    await page.getByRole("button", { name: /Sincronizar issues/ }).click();
+    // ------------------------------------------------ Sincronizar with no token
+    await page.getByRole("button", { name: /^Sincronizar$/ }).click();
     const msg = await page.getByText(/Erro ao sincronizar|não configurada/).waitFor({ timeout: 20000 }).then(() => true, () => false);
     expect("sync issues: with no GitHub token it fails closed with a message", msg);
 

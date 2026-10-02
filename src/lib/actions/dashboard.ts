@@ -7,6 +7,7 @@
 
 import { getRoadmapBoard } from "@/lib/actions/roadmap";
 import { getLatestBoardSnapshot, syncBoardAsViewer } from "@/lib/actions/sync";
+import { statusByUrl } from "@/lib/board";
 import type { SyncColumn } from "@/lib/board-sync";
 import { syncFailureMessage } from "@/lib/sync-message";
 import { createClient } from "@/lib/supabase/server";
@@ -44,8 +45,7 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null): P
   const [{ lanes }, branch] = await Promise.all([getRoadmapBoard(), currentSprintBranch()]);
 
   // Issue URL -> Kanban status key, from the snapshot (every issue, per status).
-  const statusByUrl = new Map<string, string>();
-  for (const col of columns) for (const it of col.items) statusByUrl.set(it.url, col.key);
+  const statusOf = statusByUrl(columns);
 
   const atual = lanes.find((l) => l.id === "atual");
   const proxima = lanes.find((l) => l.id === "proxima");
@@ -53,7 +53,7 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null): P
   const sprintUrls = new Set(sprintItems.map((it) => it.url).filter(Boolean) as string[]);
 
   const entregas = sprintItems.map((it) => {
-    const key = it.url ? statusByUrl.get(it.url) : undefined;
+    const key = it.url ? statusOf.get(it.url) : undefined;
     const label = key ? STATUS_LABEL[key] : NO_ISSUE;
     return {
       title: it.title,
@@ -65,7 +65,7 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null): P
     };
   });
 
-  const countStatus = (key: string) => sprintItems.filter((it) => it.url && statusByUrl.get(it.url) === key).length;
+  const countStatus = (key: string) => sprintItems.filter((it) => it.url && statusOf.get(it.url) === key).length;
 
   const inDev = countStatus("dev");
   const done = countStatus("done");

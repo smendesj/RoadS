@@ -3,10 +3,11 @@
 import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
 import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
+import { SyncButton } from "@/components/SyncButton";
 import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { syncBoardAsViewer } from "@/lib/actions/sync";
 import { moveItem } from "@/lib/roadmap-move";
-import { syncFailureMessage } from "@/lib/sync-message";
+import { roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
 import { MAX_ITEMS_PER_SPRINT, type Lane, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 import { roleLabel as labelFor, type Viewer } from "@/lib/viewer";
 
@@ -59,12 +60,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
         setSyncMessage(syncFailureMessage(result));
         return;
       }
-      const { added, removed, issuesCreated, error } = result.roadmap;
-      setSyncMessage(
-        error ??
-          `${added} issue(s) adicionada(s), ${removed} encerrada(s) removida(s)` +
-            (issuesCreated ? `, ${issuesCreated} issue(s) criada(s) para itens sem issue.` : ".")
-      );
+      setSyncMessage(roadmapSyncMessage(result.roadmap));
       reloadBoard();
     });
   }
@@ -167,15 +163,9 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
               </p>
             )}
           </div>
-          {canEdit && (
+          {myRole !== null && (
             <div className="flex flex-col items-end gap-1">
-              <button
-                onClick={syncIssues}
-                disabled={isSyncing}
-                className="rounded-full border border-rs-border bg-rs-card px-3.5 py-2 text-[13px] font-bold text-rs-text-soft transition-colors hover:border-rs-brand hover:text-rs-brand-text disabled:opacity-70"
-              >
-                {isSyncing ? "Sincronizando..." : "Sincronizar issues"}
-              </button>
+              <SyncButton onClick={syncIssues} isPending={isSyncing} />
               {syncMessage && <span className="max-w-[260px] text-right text-[11px] text-rs-text-faint">{syncMessage}</span>}
             </div>
           )}

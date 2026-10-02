@@ -37,6 +37,8 @@ export type RoadmapItem = {
   url: string | null;
   /** Profile that created the item from RoadS; null for the seeded/GitHub-backed items. */
   createdBy?: string | null;
+  /** The issue's Status on Project #7 (last snapshot), set only on sprint items; "done" shows as Concluído. */
+  status?: "open" | "dev" | "blocker" | "done";
   notes: Note[];
 };
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useTransition, type ReactNode } from "react";
+import { SyncButton } from "@/components/SyncButton";
 import { badgeClass } from "@/lib/tones";
 import { syncDashboard, type DashboardModel } from "@/lib/actions/dashboard";
 import { useLocalTime } from "@/lib/use-local-time";
@@ -69,28 +70,7 @@ export function SyncPill() {
 
   return (
     <div className="flex flex-col items-end gap-1">
-      {canSync && (
-        <button
-          onClick={sync}
-          disabled={isPending}
-          className="flex items-center gap-2 rounded-full border border-rs-border bg-rs-card px-3.5 py-2 text-[13px] font-bold text-rs-text-soft transition-colors hover:border-rs-brand hover:text-rs-brand-text disabled:opacity-70"
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={isPending ? "animate-spin" : ""}
-          >
-            <path d="M21 12a9 9 0 11-2.64-6.36M21 3v6h-6" />
-          </svg>
-          {isPending ? "Sincronizando..." : "Sincronizar"}
-        </button>
-      )}
+      {canSync && <SyncButton onClick={sync} isPending={isPending} />}
       {error ? <span className="max-w-[260px] text-right text-[11px] text-red-500">{error}</span> : lastSync}
     </div>
   );

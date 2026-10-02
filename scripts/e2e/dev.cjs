@@ -48,7 +48,7 @@ const { BASE, expect, sleep } = L;
     const count = (loc) => loc.count();
     expect("roadmap: dev can READ the board (fixture items visible)", (await count(page.getByText("[TESTE] item do scrum master"))) === 1);
     expect("roadmap: no '+ Novo item'", (await count(page.getByRole("button", { name: "+ Novo item" }))) === 0);
-    expect("roadmap: no 'Sincronizar issues'", (await count(page.getByRole("button", { name: /Sincronizar issues/ }))) === 0);
+    expect("roadmap: the same read-refresh Sincronizar button as the Dashboard", (await count(page.getByRole("button", { name: /^Sincronizar$/ }))) === 1);
     expect("roadmap: no Editar / + nota / Excluir", (await count(page.getByRole("button", { name: /^(Editar|\+ nota|Excluir)$/ }))) === 0);
     expect("roadmap: no card is draggable", (await count(page.locator('div[draggable="true"]'))) === 0);
     expect("roadmap: no 'Mover para' select", (await count(page.locator('select[aria-label="Mover para"]'))) === 0);
@@ -73,7 +73,9 @@ const { BASE, expect, sleep } = L;
     // ------------------------------------------------ the API routes refuse a signed-in Dev too
     const cron = await page.evaluate(async () => (await fetch("/api/cron/sync-board")).status);
     const queue = await page.evaluate(async () => (await fetch("/api/frontlights/pending-changes")).status);
-    expect("api: cron and queue routes answer 401 to a signed-in Dev (they take secrets, not sessions)", cron === 401 && queue === 401, `${cron}/${queue}`);
+    const roadmapState = await page.evaluate(async () => (await fetch("/api/frontlights/roadmap-state")).status);
+    const syncRoute = await page.evaluate(async () => (await fetch("/api/frontlights/sync-board", { method: "POST" })).status);
+    expect("api: cron, queue, roadmap-state and sync-board answer 401 to a signed-in Dev (they take secrets, not sessions)", cron === 401 && queue === 401 && roadmapState === 401 && syncRoute === 401, `${cron}/${queue}/${roadmapState}/${syncRoute}`);
 
     // ------------------------------------------------ idle logout and Sair
     await page.evaluate(() => localStorage.setItem("roads-last-activity", String(Date.now() - (10 * 60 + 1) * 1000)));

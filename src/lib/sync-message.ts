@@ -4,3 +4,12 @@ export function syncFailureMessage(result: { reason: string; message?: string })
   if (result.reason === "unauthenticated") return result.message ?? "Entre para sincronizar o board.";
   return result.message ?? "Erro ao sincronizar.";
 }
+
+// What the Sincronizar buttons say after a sync that ran: how many issues the Roadmap took in and let go.
+export function roadmapSyncMessage(roadmap: { added: number; removed: number; issuesCreated: number; error?: string }): string {
+  if (roadmap.error) return roadmap.error;
+  return (
+    `${roadmap.added} issue(s) adicionada(s), ${roadmap.removed} encerrada(s) removida(s)` +
+    (roadmap.issuesCreated ? `, ${roadmap.issuesCreated} issue(s) criada(s) para itens sem issue.` : ".")
+  );
+}
