@@ -80,7 +80,7 @@ function PreviewFrame({ html, className }: { html: string; className: string }) 
   return (
     <iframe
       ref={frame}
-      title="Prévia do e-mail"
+      title="Prévia"
       sandbox="allow-same-origin"
       srcDoc={html}
       onLoad={() => {
@@ -136,8 +136,8 @@ function ReadOnlyPreview({ row }: { row: ProgressReportRow }) {
         </div>
         <Facts row={row} />
       </div>
-      <section aria-label="Prévia do e-mail" className="flex flex-col gap-2">
-        <h2 className={sectionTitle}>Prévia do e-mail</h2>
+      <section aria-label="Prévia" className="flex flex-col gap-2">
+        <h2 className={sectionTitle}>Prévia</h2>
         <PreviewFrame html={html} className="h-[75vh]" />
       </section>
     </div>
@@ -316,8 +316,8 @@ function ReviewPreview({ row }: { row: ProgressReportRow }) {
       </div>
 
       <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-2">
-        <section aria-label="Prévia do e-mail" className="flex flex-col gap-2 xl:sticky xl:top-4">
-          <h2 className={sectionTitle}>Prévia do e-mail</h2>
+        <section aria-label="Prévia" className="flex flex-col gap-2 xl:sticky xl:top-4">
+          <h2 className={sectionTitle}>Prévia</h2>
           <PreviewFrame html={html} className="h-[70vh] xl:h-[calc(100vh-8rem)]" />
         </section>
 

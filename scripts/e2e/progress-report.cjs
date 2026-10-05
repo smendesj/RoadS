@@ -231,16 +231,17 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     expect("scrum master -> /resumo opens", new URL(smPage.url()).pathname === "/resumo", smPage.url());
     expect("scrum master -> /resumo: nothing to edit, check, copy or send", (await smPage.locator(reviewControls).count()) === 0 && (await noReviewButtons(smPage)));
     const smEmpty = await smPage.getByText("Nenhum resumo enviado ainda.").count();
-    const smFrames = await smPage.locator('iframe[title="Prévia do e-mail"]').count();
+    const smFrames = await smPage.locator('iframe[title="Prévia"]').count();
     expect("scrum master -> /resumo shows the last sent e-mail, or says none was sent yet", smEmpty + smFrames === 1, `empty=${smEmpty} frames=${smFrames}`);
 
     await smPage.goto(BASE + `/resumo/${sent.id}`, { waitUntil: "load" });
-    const smFrame = smPage.locator('iframe[title="Prévia do e-mail"]');
+    const smFrame = smPage.locator('iframe[title="Prévia"]');
     await smFrame.waitFor();
     const smSrcdoc = (await smFrame.getAttribute("srcdoc")) ?? "";
     const smSandbox = await smFrame.getAttribute("sandbox");
     expect("scrum master -> a sent report opens as a preview of the e-mail", smSrcdoc.includes("Resumo enviado"), `srcdoc has ${smSrcdoc.length} chars`);
     expect("scrum master -> the preview frame is sandboxed and runs no scripts", smSandbox !== null && !/allow-scripts/.test(smSandbox), String(smSandbox));
+    expect("scrum master -> the preview is titled just 'Prévia'", (await smPage.getByRole("heading", { name: "Prévia", exact: true }).count()) === 1 && (await smPage.getByRole("region", { name: "Prévia", exact: true }).count()) === 1 && (await smPage.getByText("Prévia do e-mail").count()) === 0);
     expect("scrum master -> the seal says it was sent", (await smPage.locator('[data-seal="sent"]').innerText()).startsWith("Enviado em"));
     expect("scrum master -> a sent report has nothing to edit, check, copy or send", (await smPage.locator(reviewControls).count()) === 0 && (await noReviewButtons(smPage)));
 
@@ -257,7 +258,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
 
     await smPage.setViewportSize({ width: 390, height: 800 });
     await smPage.goto(BASE + `/resumo/${sent.id}`, { waitUntil: "load" });
-    await smPage.locator('iframe[title="Prévia do e-mail"]').waitFor();
+    await smPage.locator('iframe[title="Prévia"]').waitFor();
     const smWidth = await smPage.evaluate(() => ({ w: window.innerWidth, sw: document.documentElement.scrollWidth }));
     expect("scrum master -> /resumo/<sent> at phone width has no sideways scroll", smWidth.sw <= smWidth.w + 1, `scrollWidth ${smWidth.sw} vs ${smWidth.w}`);
     expect("scrum master -> no console errors or failed requests", noise(sm, /\/resumo\//).length === 0, noise(sm, /\/resumo\//).slice(0, 3).join(" | "));
@@ -272,7 +273,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
 
     const field = (key) => page.locator(`[data-field="${key}"]`);
     const saved = (key) => page.locator(`[data-field-box="${key}"][data-save-state="saved"]`);
-    const srcdocNow = async () => (await page.locator('iframe[title="Prévia do e-mail"]').getAttribute("srcdoc")) ?? "";
+    const srcdocNow = async () => (await page.locator('iframe[title="Prévia"]').getAttribute("srcdoc")) ?? "";
     const sendButton = page.getByRole("button", { name: "Marcar como enviado", exact: true });
     const conferred = field("checked");
 
@@ -302,10 +303,11 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     // ---- the draft: what is on the screen
     await page.goto(BASE + `/resumo/${draft.id}`, { waitUntil: "load" });
     await field("headline").waitFor();
-    const frame = page.locator('iframe[title="Prévia do e-mail"]');
+    const frame = page.locator('iframe[title="Prévia"]');
     const sandbox = await frame.getAttribute("sandbox");
     expect("admin -> the preview frame is sandboxed and runs no scripts", sandbox !== null && !/allow-scripts/.test(sandbox), String(sandbox));
     expect("admin -> the preview is the e-mail built from the draft", (await srcdocNow()).includes("Resumo rascunho") && (await srcdocNow()).includes("Primeira entrega"));
+    expect("admin -> the preview is titled just 'Prévia'", (await page.getByRole("heading", { name: "Prévia", exact: true }).count()) === 1 && (await page.getByRole("region", { name: "Prévia", exact: true }).count()) === 1 && (await page.getByText("Prévia do e-mail").count()) === 0);
     expect("admin -> the seal says Rascunho", (await page.locator('[data-seal="draft"]').innerText()) === "Rascunho");
     expect("admin -> 'Marcar como enviado' starts disabled", await sendButton.isDisabled());
     const table = await page.locator("[data-conference-table]").innerText();
@@ -449,7 +451,8 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
 
     // ---- the report that was sent before
     await page.goto(BASE + `/resumo/${sent.id}`, { waitUntil: "load" });
-    await page.locator('iframe[title="Prévia do e-mail"]').waitFor();
+    await page.locator('iframe[title="Prévia"]').waitFor();
+    expect("admin -> a sent report's preview is titled just 'Prévia' too", (await page.getByRole("heading", { name: "Prévia", exact: true }).count()) === 1 && (await page.getByRole("region", { name: "Prévia", exact: true }).count()) === 1);
     expect("admin -> an older sent report opens read-only, with its seal", (await page.locator('[data-seal="sent"]').count()) === 1 && !(await field("entry:gc-9001:summary").isEditable()) && (await sendButton.count()) === 0);
 
     expect("admin -> no console errors, hydration errors or failed requests during the whole run", noise(adm).length === 0, noise(adm).slice(0, 3).join(" | "));
