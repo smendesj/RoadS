@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { DayUsage, ProgressContent } from "../progress-report.ts";
-import { combineWeek, groupByWeek, weekHeadline, weekStartOf, type WeekReport } from "./week.ts";
+import { combineWeek, groupByWeek, weekHeadline, weekOfPeriod, weekStartOf, type WeekReport } from "./week.ts";
 import { entry, sampleContent } from "./visual-fixture.ts";
 
 // Made-up data only: invented deliveries and round numbers.
 
 /* ---------- which week a report belongs to ---------- */
 
-test("a report belongs to the week (Monday to Sunday, São Paulo time) of the day its period starts", () => {
+test("an instant falls in the week (Monday to Sunday, São Paulo time) of its day", () => {
   assert.equal(weekStartOf("2026-09-28T03:00:00.000Z"), "2026-09-28"); // Monday 00:00 in São Paulo
   assert.equal(weekStartOf("2026-10-01T03:00:00.000Z"), "2026-09-28"); // Thursday
   assert.equal(weekStartOf("2026-10-05T02:30:00.000Z"), "2026-09-28"); // Sunday 23:30 in São Paulo
@@ -16,11 +16,26 @@ test("a report belongs to the week (Monday to Sunday, São Paulo time) of the da
   assert.equal(weekStartOf("2027-01-01T12:00:00.000Z"), "2026-12-28"); // across the year
 });
 
+test("a report belongs to the week its period ends in, not the one it starts in", () => {
+  // Monday to Wednesday and Thursday to Friday: both end in the week they start in, as before.
+  assert.equal(weekOfPeriod({ period_start: "2026-09-28T03:00:00.000Z", period_end: "2026-10-01T03:00:00.000Z" }), "2026-09-28");
+  assert.equal(weekOfPeriod({ period_start: "2026-10-01T03:00:00.000Z", period_end: "2026-10-03T03:00:00.000Z" }), "2026-09-28");
+  // Starts on the Saturday (where the report before it stopped) and ends on Wednesday evening: the Wednesday's week.
+  assert.equal(weekOfPeriod({ period_start: "2026-10-03T03:00:00.000Z", period_end: "2026-10-08T00:30:00.000Z" }), "2026-10-05");
+});
+
+test("the end of a period is exclusive: a period that stops at Monday 00:00 belongs to the week that just ended", () => {
+  assert.equal(weekOfPeriod({ period_start: "2026-10-03T03:00:00.000Z", period_end: "2026-10-05T03:00:00.000Z" }), "2026-09-28");
+  assert.equal(weekOfPeriod({ period_start: "2026-10-03T03:00:00.000Z", period_end: "2026-10-05T03:00:00.001Z" }), "2026-10-05");
+  // A period with no length still has a week: the one it sits in.
+  assert.equal(weekOfPeriod({ period_start: "2026-10-05T12:00:00.000Z", period_end: "2026-10-05T12:00:00.000Z" }), "2026-10-05");
+});
+
 test("the sent list is grouped by week, newest first, each group labelled Monday to Friday", () => {
   const sent = [
-    { id: "c", period_start: "2026-10-05T03:00:00.000Z" },
-    { id: "b", period_start: "2026-10-01T03:00:00.000Z" },
-    { id: "a", period_start: "2026-09-28T03:00:00.000Z" },
+    { id: "c", period_start: "2026-10-03T03:00:00.000Z", period_end: "2026-10-08T00:30:00.000Z" },
+    { id: "b", period_start: "2026-10-01T03:00:00.000Z", period_end: "2026-10-03T03:00:00.000Z" },
+    { id: "a", period_start: "2026-09-28T03:00:00.000Z", period_end: "2026-10-01T03:00:00.000Z" },
   ];
   const groups = groupByWeek(sent);
   assert.deepEqual(

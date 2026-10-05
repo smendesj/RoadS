@@ -27,6 +27,9 @@ const WEEK = "2099-02-02";
 const WEEK_PATH = `/resumo/semana/${WEEK}?produto=ELIMS`;
 const WEEK_USAGE = `/resumo/semana/${WEEK}/uso?produto=ELIMS`;
 const WEEK_HEADLINE = "Na semana, 2 entregas concluídas e 1 em andamento.";
+// The next Monday: the week of a synthetic report that starts on the Saturday before it and ends on its Wednesday.
+const NEXT_WEEK_PATH = "/resumo/semana/2099-02-09?produto=ELIMS";
+const NEXT_WEEK_HEADLINE = "Na semana, 1 entrega concluída, 1 em validação e 1 em andamento.";
 
 // ---------------------------------------------------------------- fixtures (service role)
 function makeContent(kind, d1, d2, end) {
@@ -266,6 +269,15 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       fridayToken = data?.share_token ?? null;
       expect("(setup) a second sent report in the same week", !error && Boolean(fridayToken), error ? error.message : "");
     }
+    // A third one that starts where Friday's stopped (the Saturday) and ends the Wednesday after: the week it
+    // reports on is the next one, so it must not add to the numbers of the week above.
+    {
+      const stamp = new Date().toISOString();
+      const { error } = await svc
+        .from("progress_reports")
+        .insert({ produto: "ELIMS", period_start: "2099-02-07T00:00:00-03:00", period_end: "2099-02-11T00:00:00-03:00", status: "sent", content: makeContent("enviado na quarta seguinte", "2099-02-07", "2099-02-10", "2099-02-11"), overrides: {}, checked_at: stamp, sent_at: stamp });
+      expect("(setup) a sent report that starts on a Saturday and ends the Wednesday after", !error, error ? error.message : "");
+    }
     expect("attach: the report now has that print, after the ones it had", (sentAfter.content.shots ?? []).length === (sentBefore.content.shots ?? []).length + 1 && sentAfter.content.shots.at(-1).issue === 9001);
 
     // The e-mail client fetches the picture with no cookies: the token in the address is the only key.
@@ -411,6 +423,11 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       const w = await smPage.evaluate(() => ({ w: window.innerWidth, sw: document.documentElement.scrollWidth }));
       expect("scrum master -> the week at phone width has no sideways scroll", w.sw <= w.w + 1, `scrollWidth ${w.sw} vs ${w.w}`);
       await smPage.setViewportSize({ width: 1440, height: 900 });
+      // A report belongs to the week it ends in: the one that started on the Saturday is in the NEXT week.
+      const next = await smPage.goto(BASE + NEXT_WEEK_PATH, { waitUntil: "load" });
+      await smPage.locator("[data-week]").waitFor();
+      expect("scrum master -> a report that starts on a Saturday opens in the week it ends in", next.status() === 200, String(next.status()));
+      expect("scrum master -> and that week counts only its own report", (await smPage.locator("[data-week-headline]").innerText()).trim() === NEXT_WEEK_HEADLINE, await smPage.locator("[data-week-headline]").innerText());
     }
     expect("scrum master -> no console errors or failed requests", noise(sm, /\/resumo\//).length === 0, noise(sm, /\/resumo\//).slice(0, 3).join(" | "));
 

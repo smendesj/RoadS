@@ -139,22 +139,24 @@ export function weekStartParam(value: string): string | null {
 }
 
 /**
- * The reports SENT in the week that starts on that Monday (São Paulo time, by the day each period starts),
- * for the week's presentation, of one product: GeoCloud unless the address asks for another (the e2e suite's
- * synthetic reports use another, so real ones are never touched). Drafts never: the query asks for sent ones
- * only, for every role.
+ * The reports SENT in the week that starts on that Monday (São Paulo time, by the day each period ENDS, see
+ * weekOfPeriod), for the week's presentation, of one product: GeoCloud unless the address asks for another (the
+ * e2e suite's synthetic reports use another, so real ones are never touched). Drafts never: the query asks for
+ * sent ones only, for every role.
  */
 export async function loadWeek(start: string, produto: WeekProduct = PRODUCT): Promise<{ rows: WeekReport[]; failed: boolean }> {
   const from = new Date(Date.parse(`${start}T03:00:00Z`)); // Monday 00:00 in São Paulo
   const to = new Date(from.getTime() + 7 * 24 * 60 * 60 * 1000);
   const supabase = await createClient();
+  // The end of a period is exclusive, so its last instant is just before it: that instant in [from, to) is
+  // the end in (from, to]. Two reports can end in the same week without starting in it.
   const { data, error } = await supabase
     .from("progress_reports")
     .select("content, overrides, share_token, pushed_at, period_start")
     .eq("produto", produto)
     .eq("status", "sent")
-    .gte("period_start", from.toISOString())
-    .lt("period_start", to.toISOString())
+    .gt("period_end", from.toISOString())
+    .lte("period_end", to.toISOString())
     .order("period_start", { ascending: true });
   if (failure("week read", error)) return { rows: [], failed: true };
   const rows = ((data ?? []) as unknown as WeekReport[]).map((r) => ({ ...r, content: forScreen({ content: r.content } as ProgressReportRow).content }));

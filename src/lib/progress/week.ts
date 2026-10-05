@@ -1,7 +1,8 @@
 // The week of the Resumo, for the Monday scrum: the reports SENT in one week (Monday to Sunday, São Paulo
-// time, by the day each period starts) put together into one, to present. Calculated on every read, never
-// stored, so it exists the moment a report of the week is marked as sent. Pure on purpose: the screens and the
-// tests use it.
+// time, by the day each period ENDS) put together into one, to present. A period starts where the one before
+// it stopped, so after a late report it may start on the weekend before the week it reports on; the day it
+// ends is the one that says which week it belongs to. Calculated on every read, never stored, so it exists the
+// moment a report of the week is marked as sent. Pure on purpose: the screens and the tests use it.
 //
 // What the week shows: each delivery once, as the latest report of the week that SHOWED it left it
 // (the user's edits applied; a delivery hidden in every report stays out); the difficulties and next steps
@@ -30,11 +31,20 @@ export function weekStartOf(iso: string): string {
 const ddmm = (ymd: string) => `${ymd.slice(8, 10)}/${ymd.slice(5, 7)}`;
 const plusDays = (ymd: string, n: number) => new Date(Date.parse(`${ymd}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
 
+/**
+ * The Monday of the week a report belongs to: the week of the last instant its period holds. The end is
+ * exclusive (a period that stops at Monday 00:00 reported on the week that just ended), so it is the instant
+ * just before it. The week's reads (loadWeek) ask the database for the very same rule.
+ */
+export function weekOfPeriod(period: { period_start: string; period_end: string }): string {
+  return weekStartOf(new Date(Date.parse(period.period_end) - 1).toISOString());
+}
+
 /** The sent list in weeks, in the order it came (newest first), each labelled Monday to Friday. */
-export function groupByWeek<T extends { period_start: string }>(list: T[]): { start: string; label: string; items: T[] }[] {
+export function groupByWeek<T extends { period_start: string; period_end: string }>(list: T[]): { start: string; label: string; items: T[] }[] {
   const groups: { start: string; label: string; items: T[] }[] = [];
   for (const item of list) {
-    const start = weekStartOf(item.period_start);
+    const start = weekOfPeriod(item);
     let group = groups.find((g) => g.start === start);
     if (!group) {
       group = { start, label: `Semana de ${ddmm(start)} a ${ddmm(plusDays(start, 4))}`, items: [] };
