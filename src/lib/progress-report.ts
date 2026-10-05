@@ -130,8 +130,19 @@ export type ConferenceRow = {
 
 /* ---------- The report ---------- */
 
-/** A print of the product itself, already downscaled; at most two per report. */
-export type Shot = { id: string; caption: string; mime: "image/jpeg" | "image/png"; data: string /* base64 */ };
+/**
+ * A print, already downscaled (at most MAX_SHOTS per report, see draft.ts). `issue` ties it to the delivery it
+ * shows; without one it is a general print, at the end of the e-mail. The image lives in the private storage
+ * bucket under `path`; reports pushed before that carry it inline as base64 in `data`.
+ */
+export type Shot = {
+  id: string;
+  caption: string;
+  mime: "image/jpeg" | "image/png";
+  issue?: number;
+  path?: string;
+  data?: string /* base64, older reports only */;
+};
 
 export type ProgressEntry = {
   id: string; // "gc-<issue>": also the key edits are stored under

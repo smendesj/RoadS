@@ -87,7 +87,6 @@ const FONT = "'Segoe UI',Arial,Helvetica,sans-serif";
 const CARD_WIDTH = 600;
 const PAD = 28;
 const SHOT_WIDTH = CARD_WIDTH - 2 * PAD;
-/** The picture has a floor of two shots: the screens only ever hold this many. */
 
 const visibleOf = (content: ProgressContent): ProgressEntry[] =>
   (Array.isArray(content.entries) ? content.entries : []).filter((e) => e && !e.hidden && (clean(e.title) || clean(e.summary)));
@@ -140,6 +139,13 @@ function entryBlock(entry: ProgressEntry): string {
   );
 }
 
+/** One print and its caption; `top` is the space above it (a print under its delivery sits closer). */
+function shotBlock(src: string, caption: string, top: number): string[] {
+  const out = [padded(top, 0, picture(src, SHOT_WIDTH, null, caption || "Tela do GeoCloud"))];
+  if (caption) out.push(padded(6, 0, full(row(cell(font(13, 19, COLOR.muted), body(caption))))));
+  return out;
+}
+
 function bulletBlock(inner: string): string {
   return padded(10, 0, full(row(cell(font(15, 22, COLOR.ink, "width:14px;"), "&bull;", 'width="14" valign="top"'), cell(font(15, 22, COLOR.ink), inner, 'valign="top"'))));
 }
@@ -179,7 +185,18 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   const nextSteps = (Array.isArray(content.nextSteps) ? content.nextSteps : []).filter((s) => clean(s?.text));
   const upcoming = by("proximo");
   const internal = content.internal && content.internal.count > 0 ? clean(content.internal.text) : "";
-  const shots = (Array.isArray(content.shots) ? content.shots : []).slice(0, MAX_SHOTS);
+  // Each print keeps its position in `shots`: that index is the one its link (`shotUrls`) was built for.
+  const shots = (Array.isArray(content.shots) ? content.shots : []).slice(0, MAX_SHOTS).map((shot, i) => ({ shot, src: safeImage(options.shotUrls?.[i]) }));
+  // A print of a delivery that has its own block sits under it; a print of a hidden delivery is left out with
+  // it; every other print (no delivery, or one listed under "Próximos passos") is a general one, at the end.
+  const blocked = new Set(visible.filter((e) => e.status !== "proximo").map((e) => e.issue));
+  const hiddenIssues = new Set((Array.isArray(content.entries) ? content.entries : []).filter((e) => e && !visible.includes(e)).map((e) => e.issue));
+  const shotsOf = (issue: number) => shots.filter((s) => s.shot.issue === issue);
+  const general = shots.filter((s) => s.shot.issue === undefined || (!blocked.has(s.shot.issue) && !hiddenIssues.has(s.shot.issue)));
+  const withShots = (e: ProgressEntry): string[] => [
+    entryBlock(e),
+    ...shotsOf(e.issue).flatMap(({ shot, src }) => (src ? shotBlock(src, clean(shot.caption), 12) : [])),
+  ];
   // The picture's own title (the label from the data, or "AI usage") and numbers, so the text under a
   // blocked image says what the image would have said.
   const drawing = visualModel(content);
@@ -212,7 +229,7 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
 
   for (const status of ["concluido", "em_validacao", "em_andamento"] as const) {
     if (counts[status] === 0) continue;
-    rows.push(heading(STATUS_LABEL[status], SECTION_COLOR[status]), ...by(status).map(entryBlock));
+    rows.push(heading(STATUS_LABEL[status], SECTION_COLOR[status]), ...by(status).flatMap(withShots));
   }
 
   // Blocked entries are blockers by definition, so they live here, and "Nenhum bloqueio." is only true
@@ -221,7 +238,7 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   if (counts.bloqueado === 0 && difficulties.length === 0) {
     rows.push(padded(10, 0, full(row(cell(font(15, 22, COLOR.ink), "Nenhum bloqueio.")))));
   }
-  rows.push(...by("bloqueado").map(entryBlock));
+  rows.push(...by("bloqueado").flatMap(withShots));
   for (const d of difficulties) {
     const needs = clean(d.needs);
     rows.push(
@@ -240,13 +257,7 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
 
   if (internal) rows.push(padded(20, 0, full(row(cell(font(14, 21, COLOR.muted), body(internal))))));
 
-  shots.forEach((shot, i) => {
-    const src = safeImage(options.shotUrls?.[i]);
-    if (!src) return;
-    const caption = clean(shot.caption);
-    rows.push(padded(22, 0, picture(src, SHOT_WIDTH, null, caption || "Tela do GeoCloud")));
-    if (caption) rows.push(padded(6, 0, full(row(cell(font(13, 19, COLOR.muted), body(caption))))));
-  });
+  for (const { shot, src } of general) if (src) rows.push(...shotBlock(src, clean(shot.caption), 22));
 
   // The picture of Claude's work, then its three headline numbers as TEXT: mail clients block images by
   // default, and the CEO should still read what Claude did.
@@ -311,20 +322,22 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   const shownCounters: CounterStatus[] = counts.bloqueado > 0 ? ["concluido", "em_validacao", "em_andamento", "bloqueado"] : ["concluido", "em_validacao", "em_andamento"];
   out.push("", shownCounters.map((s) => `${STATUS_LABEL[s]}: ${counts[s]}`).join(" · "));
   const item = (e: ProgressEntry) => `- ${clean(e.title)}${clean(e.summary) ? `: ${clean(e.summary)}` : ""}`;
+  const printLines = (list: typeof shots) => list.filter((s) => s.src && clean(s.shot.caption)).map((s) => `Print: ${clean(s.shot.caption)}`);
+  const itemWithShots = (e: ProgressEntry) => [item(e), ...printLines(shotsOf(e.issue)).map((l) => `  ${l}`)];
   for (const status of ["concluido", "em_validacao", "em_andamento"] as const) {
-    if (counts[status] > 0) out.push("", STATUS_LABEL[status], ...by(status).map(item));
+    if (counts[status] > 0) out.push("", STATUS_LABEL[status], ...by(status).flatMap(itemWithShots));
   }
   out.push("", "Dificuldades e bloqueios");
   if (counts.bloqueado === 0 && difficulties.length === 0) out.push("Nenhum bloqueio.");
-  out.push(...by("bloqueado").map(item));
+  out.push(...by("bloqueado").flatMap(itemWithShots));
   for (const d of difficulties) {
     out.push(`- ${clean(d.text)}`);
     if (clean(d.needs)) out.push(`  O que precisamos: ${clean(d.needs)}`);
   }
   if (upcoming.length > 0 || nextSteps.length > 0) out.push("", "Próximos passos", ...upcoming.map(item), ...nextSteps.map((s) => `- ${clean(s.text)}`));
   if (internal) out.push("", internal);
-  const captions = shots.map((s, i) => (safeImage(options.shotUrls?.[i]) ? clean(s.caption) : "")).filter(Boolean);
-  if (captions.length > 0) out.push("", ...captions.map((c) => `Print: ${c}`));
+  const loose = printLines(general);
+  if (loose.length > 0) out.push("", ...loose);
   out.push("", drawing.title, numbers.map((n) => `${n.value} ${n.label}`).join(" · "));
   const projects = visualModel(content).products;
   if (projects.length > 0) out.push(`Projetos somados: ${joinNames(projects)}.`);

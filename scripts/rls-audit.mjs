@@ -184,6 +184,35 @@ try {
   await check("admin", "demote an admin (the TEST admin's own row)", "deny", async () => rows(await adm.c.from("profiles").update({ role: "dev" }).eq("id", adm.id).select("id")));
   await svc.from("profiles").update({ role: "admin" }).eq("id", adm.id); // put it back if the demotion went through
 
+  // ===================== PRINTS OF THE RESUMO (storage bucket "progress-shots", migration 0024)
+  // Only the service role touches it: the push route writes each print, the public image link reads it by the
+  // report's share token. Nobody signed in, and nobody anonymous, lists, reads or writes a print.
+  const SHOTS = "progress-shots";
+  const AUDIT_SHOT = `${"0".repeat(64)}.png`;
+  const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const stored = (res) => ({ ok: !res.error && Boolean(res.data), detail: res.error ? String(res.error.message).slice(0, 90) : "ok" });
+  const listed = (res) => ({ ok: !res.error && Array.isArray(res.data) && res.data.length > 0, detail: res.error ? String(res.error.message).slice(0, 90) : `${res.data?.length ?? 0} object(s)` });
+  await check("svc", "store a print (the push route does)", "allow", async () =>
+    stored(await svc.storage.from(SHOTS).upload(AUDIT_SHOT, pngBytes, { contentType: "image/png", upsert: true }))
+  );
+  await check("svc", "read a print (the public image link does)", "allow", async () => stored(await svc.storage.from(SHOTS).download(AUDIT_SHOT)));
+  for (const [who, c] of [["anon", anon], ["dev", dev.c], ["scrum_master", sm.c], ["admin", adm.c]]) {
+    await check(who, "list the prints bucket", "deny", async () => listed(await c.storage.from(SHOTS).list()));
+    await check(who, "read a print from the bucket", "deny", async () => stored(await c.storage.from(SHOTS).download(AUDIT_SHOT)));
+    await check(who, "store a print in the bucket", "deny", async () =>
+      stored(await c.storage.from(SHOTS).upload(`${"1".repeat(64)}.png`, pngBytes, { contentType: "image/png", upsert: true }))
+    );
+    await check(who, "replace a print in the bucket", "deny", async () =>
+      stored(await c.storage.from(SHOTS).update(AUDIT_SHOT, new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9]), { contentType: "image/png" }))
+    );
+    await check(who, "delete a print from the bucket", "deny", async () => listed(await c.storage.from(SHOTS).remove([AUDIT_SHOT])));
+  }
+  await check("svc", "the audit print is still there, untouched", "allow", async () => {
+    const res = await svc.storage.from(SHOTS).download(AUDIT_SHOT);
+    const same = res.data ? Buffer.from(await res.data.arrayBuffer()).equals(Buffer.from(pngBytes)) : false;
+    return { ok: same, detail: same ? "same bytes" : "changed or gone" };
+  });
+
   // ===================== PROGRESS REPORTS ("Resumo para a diretoria")
   // The admin reads and edits every report (the screen's edits live in `overrides`); a scrum_master reads
   // only the SENT ones and edits none; dev and anonymous read nothing. Nobody signed in creates or deletes a
@@ -381,6 +410,7 @@ try {
   await svc.from("roadmap_items").delete().in("created_by", [sm.id, adm.id]);
   await svc.from("roadmap_sync_queue").delete().eq("payload->>zz_test", "true");
   await svc.from("progress_reports").delete().eq("content->>zz_test", "true");
+  await svc.storage.from("progress-shots").remove([`${"0".repeat(64)}.png`, `${"1".repeat(64)}.png`]);
   for (const u of (await svc.auth.admin.listUsers({ page: 1, perPage: 1000 })).data.users.filter((x) => /roads-audit-/.test(x.email ?? ""))) {
     await svc.auth.admin.deleteUser(u.id);
   }

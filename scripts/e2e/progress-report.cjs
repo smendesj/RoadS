@@ -18,6 +18,9 @@ const { BASE, expect, sleep, svc } = L;
 const REPO = path.resolve(__dirname, "..", "..");
 const MARK = "[TESTE]";
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+// A print of this suite: made-up bytes that start like a PNG. Stored under the hash of its bytes, like any print.
+const E2E_SHOT = Buffer.concat([PNG_SIGNATURE, Buffer.from(`${MARK} print do e2e do Resumo`)]);
+const E2E_SHOT_PATH = `${crypto.createHash("sha256").update(E2E_SHOT).digest("hex")}.png`;
 
 // ---------------------------------------------------------------- fixtures (service role)
 function makeContent(kind, d1, d2, end) {
@@ -186,6 +189,31 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     await refusedEverywhere(anon, "nobody signed in", draft, "draft");
     await refusedEverywhere(anon, "nobody signed in", sent, "sent report");
 
+    // ================================================================ FRONTLIGHTS: the prints door
+    // The push script sends each print on its own; only the shared secret opens this door.
+    const shotsDoor = `${BASE}/api/frontlights/progress-report/shots`;
+    const postShot = (body, secret = process.env.FRONTLIGHTS_API_SECRET) =>
+      fetch(shotsDoor, { method: "POST", headers: { "content-type": "application/json", ...(secret ? { authorization: `Bearer ${secret}` } : {}) }, body: JSON.stringify(body) });
+    const noSecret = await postShot({ data: E2E_SHOT.toString("base64") }, null);
+    expect("prints door: without the secret it is a 401", noSecret.status === 401, String(noSecret.status));
+    const wrongSecret = await postShot({ data: E2E_SHOT.toString("base64") }, "segredo-errado");
+    expect("prints door: a wrong secret is a 401", wrongSecret.status === 401, String(wrongSecret.status));
+    const notImage = await postShot({ data: Buffer.from("<svg onload=alert(1)></svg>").toString("base64") });
+    expect("prints door: what is not a JPEG or PNG is a 400", notImage.status === 400, String(notImage.status));
+    const stored = await postShot({ data: E2E_SHOT.toString("base64") });
+    const storedBody = await stored.json().catch(() => ({}));
+    expect("prints door: a print is stored under the hash of its bytes", stored.status === 200 && storedBody.path === E2E_SHOT_PATH && storedBody.mime === "image/png", `${stored.status} ${storedBody.path}`);
+    const again = await postShot({ data: E2E_SHOT.toString("base64") });
+    expect("prints door: the same print again is fine (stored once)", again.status === 200 && (await again.json()).path === E2E_SHOT_PATH, String(again.status));
+    // The draft now shows that print under its first delivery (what a push with captions.json would do).
+    const draftContent = (await row(draft.id)).content;
+    const shotted = await svc
+      .from("progress_reports")
+      .update({ content: { ...draftContent, shots: [{ id: "shot-1", caption: `${MARK} Tela da primeira entrega`, mime: "image/png", issue: 9001, path: E2E_SHOT_PATH }] } })
+      .eq("id", draft.id)
+      .select("id");
+    expect("prints door: the draft names the stored print", !shotted.error && shotted.data?.length === 1, shotted.error?.message ?? "");
+
     // The e-mail client fetches the picture with no cookies: the token in the address is the only key.
     const version = (r) => Date.parse(r.pushed_at).toString(36); // same rule as visualPath() in src/lib/progress-report.ts
     const image = (r, file = "visual.png", token = r.share_token) => grab(`${BASE}/api/progress-report/${token}/${version(r)}/${file}`);
@@ -200,7 +228,11 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     expect("public image: a malformed token is a 404", malformed.status === 404, String(malformed.status));
     const strangeFile = await image(draft, "outra-coisa.png");
     expect("public image: an unknown file under a real token is the very same 404 as an unknown token (nothing tells them apart)", strangeFile.status === 404 && strangeFile.body.equals(invented.body) && strangeFile.type === invented.type, `${strangeFile.status}`);
-    expect("public image: nosniff on every answer", [draftImage, sentImage, invented, malformed, strangeFile].every((r) => r.nosniff === "nosniff"));
+    const storedShot = await image(draft, "shot-1.png");
+    expect("public image: a print kept in the bucket comes back byte for byte, with no cookie", storedShot.status === 200 && storedShot.type === "image/png" && storedShot.body.equals(E2E_SHOT) && !storedShot.cookie, `${storedShot.status} ${storedShot.type}`);
+    const noSecondShot = await image(draft, "shot-2.png");
+    expect("public image: a print the report does not have is the same 404", noSecondShot.status === 404 && noSecondShot.body.equals(invented.body), String(noSecondShot.status));
+    expect("public image: nosniff on every answer", [draftImage, sentImage, invented, malformed, strangeFile, storedShot].every((r) => r.nosniff === "nosniff"));
 
     // ================================================================ DEV
     const dev = await L.newSession(browser, "dev");
@@ -307,6 +339,15 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     const sandbox = await frame.getAttribute("sandbox");
     expect("admin -> the preview frame is sandboxed and runs no scripts", sandbox !== null && !/allow-scripts/.test(sandbox), String(sandbox));
     expect("admin -> the preview is the e-mail built from the draft", (await srcdocNow()).includes("Resumo rascunho") && (await srcdocNow()).includes("Primeira entrega"));
+    {
+      const doc = await srcdocNow();
+      const at = (needle) => doc.indexOf(needle);
+      expect(
+        "admin -> the print of a delivery sits right under it in the preview, with its caption",
+        at("Primeira entrega") >= 0 && at("Primeira entrega") < at("/shot-1.png") && at("/shot-1.png") < at("Segunda entrega") && at("Tela da primeira entrega") > at("/shot-1.png"),
+        `${at("Primeira entrega")} ${at("/shot-1.png")} ${at("Segunda entrega")}`
+      );
+    }
     expect("admin -> the preview is titled just 'Prévia'", (await page.getByRole("heading", { name: "Prévia", exact: true }).count()) === 1 && (await page.getByRole("region", { name: "Prévia", exact: true }).count()) === 1 && (await page.getByText("Prévia do e-mail").count()) === 0);
     expect("admin -> the seal says Rascunho", (await page.locator('[data-seal="draft"]').innerText()) === "Rascunho");
     expect("admin -> 'Marcar como enviado' starts disabled", await sendButton.isDisabled());
@@ -462,6 +503,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     await browser.close();
     try {
       await sweep();
+      await svc.storage.from("progress-shots").remove([E2E_SHOT_PATH]);
     } catch (e) {
       console.log(`cleanup of the synthetic reports failed: ${L.scrub(e && e.message ? e.message : e).slice(0, 120)}`);
     }

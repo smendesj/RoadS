@@ -5,7 +5,7 @@ import { VISUAL_FONT_FAMILY, VISUAL_FONT_FILES, renderVisualPng, type VisualFont
 import { createAssetStore, handleProgressAsset, type AssetQueryClient, type AssetStore } from "@/lib/progress/visual-handler";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-// GET /api/progress-report/<token>/<version>/visual.png | shot-<n>.jpg|png
+// GET /api/progress-report/<token>/<version>/visual.png | shot-<n>.jpg|png (from the report, or the prints bucket)
 //
 // PUBLIC on purpose: the CEO's e-mail client fetches these links with no session, so the unguessable
 // share token in the path is the only credential. src/proxy.ts leaves /api alone (its matcher skips it)
@@ -42,6 +42,7 @@ function loadFonts(): Promise<VisualFont[]> {
 // handler tests pin down.
 const store: AssetStore = {
   findByToken: (token) => createAssetStore(createAdminClient() as unknown as AssetQueryClient).findByToken(token),
+  readShot: (path) => createAssetStore(createAdminClient() as unknown as AssetQueryClient).readShot(path),
 };
 
 export async function GET(_request: Request, { params }: { params: Promise<{ token: string; v: string; file: string }> }) {

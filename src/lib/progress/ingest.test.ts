@@ -31,6 +31,8 @@ function content(headline = "Duas entregas de exemplo foram concluídas.", windo
     internal: { count: 0, text: "" },
     difficulties: [],
     nextSteps: [],
+    // The delivery on show comes with its print (a path in the storage bucket).
+    shots: [{ id: "shot-1", caption: "Tela de exemplo", mime: "image/png", issue: 101, path: `${"a".repeat(64)}.png` }],
     usage: {
       scope: "GeoCloud",
       window,

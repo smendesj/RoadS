@@ -288,15 +288,35 @@ test("pictures come from https, from this site's own path (the preview) or from 
 
 /* ---------- the prints and the Claude picture ---------- */
 
-test("each print is an image with its caption and a filled alt, ten at most", () => {
-  const urls = Array.from({ length: 11 }, (_, i) => `${ORIGIN}/api/progress-report/${TOKEN}/abc/shot-${i + 1}.jpg`);
-  const out = html(rich({ shots: Array.from({ length: 11 }, (_, i) => shot(i + 1)) }), { ...OPTIONS, shotUrls: urls });
+test("each print is an image with its caption and a filled alt, forty at most", () => {
+  const urls = Array.from({ length: 41 }, (_, i) => `${ORIGIN}/api/progress-report/${TOKEN}/abc/shot-${i + 1}.jpg`);
+  const out = html(rich({ shots: Array.from({ length: 41 }, (_, i) => shot(i + 1)) }), { ...OPTIONS, shotUrls: urls });
   assert.match(out, new RegExp(`<img src="${OPTIONS.shotUrls[0].replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}"[^>]*alt="Legenda do print 1"`));
   assert.ok(out.includes('alt="Legenda do print 2"'));
   assert.ok(out.includes(">Legenda do print 1<") && out.includes(">Legenda do print 2<"));
-  assert.ok(out.includes('alt="Legenda do print 10"'));
-  assert.ok(!out.includes("shot-11.jpg") && !out.includes("Legenda do print 11"));
+  assert.ok(out.includes('alt="Legenda do print 40"'));
+  assert.ok(!out.includes("shot-41.jpg") && !out.includes("Legenda do print 41"));
   for (const tag of out.match(/<img\b[^>]*>/g) ?? []) assert.match(tag, /\salt="[^"]+"/);
+});
+
+test("a print of a delivery sits right under that delivery; a print of no delivery stays at the end", () => {
+  const urls = [1, 2, 3].map((n) => `${ORIGIN}/api/progress-report/${TOKEN}/abc/shot-${n}.jpg`);
+  const c = rich({ shots: [{ ...shot(1), issue: 3 }, shot(2), { ...shot(3), issue: 1 }] });
+  const out = html(c, { ...OPTIONS, shotUrls: urls });
+  // Delivery 1, then its print, then delivery 2.
+  assert.ok(at(out, "Entrega de teste 1") < at(out, "shot-3.jpg") && at(out, "shot-3.jpg") < at(out, "Entrega de teste 2"));
+  // Delivery 3 (em validação), then its print, then the next section.
+  assert.ok(at(out, "Entrega de teste 3") < at(out, "shot-1.jpg") && at(out, "shot-1.jpg") < at(out, "Entrega de teste 4"));
+  // The loose print after the internal line, before the Claude picture.
+  assert.ok(at(out, "shot-2.jpg") > at(out, "Dificuldades e bloqueios") && at(out, "shot-2.jpg") < at(out, OPTIONS.visualUrl));
+  // A print of a delivery that is only "próximo" (listed under next steps, no block of its own) is a general one.
+  const upcoming = html(rich({ shots: [{ ...shot(1), issue: 5 }] }), { ...OPTIONS, shotUrls: [urls[0]] });
+  assert.ok(at(upcoming, "Próximos passos") < at(upcoming, "shot-1.jpg") && at(upcoming, "shot-1.jpg") < at(upcoming, OPTIONS.visualUrl));
+  // A print of a hidden delivery is left out with it.
+  const hiddenOut = html(rich({ shots: [{ ...shot(1), issue: 6 }] }), { ...OPTIONS, shotUrls: [urls[0]] });
+  assert.ok(!hiddenOut.includes("shot-1.jpg") && !hiddenOut.includes("Legenda do print 1"));
+  const t = text(c, { ...OPTIONS, shotUrls: urls });
+  assert.ok(at(t, "Entrega de teste 1") < at(t, "Print: Legenda do print 3") && at(t, "Print: Legenda do print 3") < at(t, "Entrega de teste 2"));
 });
 
 test("a print without a link, or a report without prints, leaves no hole", () => {

@@ -56,19 +56,36 @@ sobrescrito por um novo envio.
 
 ## Prints
 
-Opcionais, até **10**, cada um JPEG ou PNG com no máximo **256 KB** (cerca de 1280 px de largura). Ficam na
-pasta de prints (`shotsDir` na configuração) com um `captions.json` que **lista, na ordem do e-mail**, os
-que devem sair:
+Cada entrega que aparece no e-mail e não está em **Próximo** precisa de **pelo menos um print** que a mostre.
+Quando não há uma tela do produto para mostrar, vale uma imagem do que mudou: um trecho de código, uma tabela
+do banco, um diagrama. Sem esse print, a montagem é recusada e a mensagem diz o número da issue que falta (o
+plugin confere antes, e o RoadS confere de novo ao receber).
+
+Até **40** prints por resumo, cada um JPEG ou PNG com no máximo **1 MB** (cerca de 1920 px de largura, para que
+código e tabelas fiquem legíveis em tela cheia). Eles ficam na pasta de prints com um `captions.json` que
+**lista, na ordem do e-mail**, os que devem sair, cada um com a entrega que mostra (`issue`):
 
 ```json
 [
-  { "file": "101-tela.png", "caption": "Uma frase simples sobre o que a tela mostra." }
+  { "file": "101-tela.png", "caption": "Uma frase simples sobre o que a tela mostra.", "issue": 101 },
+  { "file": "102-codigo.jpg", "caption": "O trecho que mudou para a segunda entrega.", "issue": 102 },
+  { "file": "geral.png", "caption": "Uma visão geral, sem entrega." }
 ]
 ```
 
-Só os arquivos listados saem; os demais são ignorados, então prints de períodos anteriores nunca vão por
-engano. Sem `captions.json`, o resumo sai sem prints. Use só dados de teste e recorte a identidade de quem
-estava logado.
+- `issue` é o número inteiro da issue de uma entrega deste resumo. O print sai logo abaixo dessa entrega, no
+  e-mail e no resumo semanal.
+- Sem `issue`, o print é geral e sai no fim, antes do uso do Claude.
+- Só os arquivos listados saem; os demais são ignorados. Use só dados de teste e recorte a identidade de quem
+  estava logado.
+
+Com o Frontlights 0.16 ou mais novo, a pasta de prints é a da semana no OneDrive (`weekShots` na configuração):
+`SCRUM\<ano>\<dd_mm da segunda>\summary`, a segunda-feira **seguinte** ao período do resumo, a da reunião em
+que ele é apresentado. O plugin resolve e confere a pasta e a entrega ao comando de envio em `--shots-dir`.
+Como a quarta e a sexta usam a mesma pasta, o `captions.json` de cada envio lista só os prints daquele resumo.
+
+Cada print sobe sozinho para o RoadS antes do rascunho, que viaja só com o nome de cada print. Os prints ficam
+num armazenamento privado do RoadS; o e-mail os mostra pelo link do resumo, como a imagem de uso.
 
 ## Comandos
 

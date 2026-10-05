@@ -26,7 +26,8 @@ export async function GET(request: Request) {
 }
 
 // POST { produto?, content } -> 200 { id, created, url } | 400 { error } (the draft is invalid; the error
-// names the field, never its value) | 409 { error } (that period was already sent, or two pushes collided).
+// names the field, never its value, except the issue numbers of deliveries that lack a print) | 409 { error }
+// (that period was already sent, or two pushes collided).
 // Pushing again refreshes `content` and keeps the user's edits (`overrides`) and the image link.
 export async function POST(request: Request) {
   if (!checkFrontlightsAuth(request)) {

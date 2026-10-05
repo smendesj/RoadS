@@ -83,7 +83,11 @@ function validBody(): Body {
         ],
         notes: [{ date: "2026-03-02", text: "Parte do trabalho de exemplo foi feita fora do computador." }],
       },
-      shots: [{ id: "shot-1", caption: "Tela de exemplo", mime: "image/jpeg", data: jpeg(2048) }],
+      // One print per delivery that is not "próximo": one already in the storage bucket, one inline (older form).
+      shots: [
+        { id: "shot-1", caption: "Tela de exemplo", mime: "image/png", issue: 101, path: `${"a".repeat(64)}.png` },
+        { id: "shot-2", caption: "Outra tela de exemplo", mime: "image/jpeg", issue: 102, data: jpeg(2048) },
+      ],
       gaps: [{ at: "2026-03-02T20:00:00-03:00", ref: "PR 12", nearestMessageMinutes: 120 }],
       access: { account: "reader@example.test", password: "Tmp-pass-1234" },
     },
@@ -124,7 +128,8 @@ test("every field of the contract survives, and the list of kept fields is compl
   assert.deepEqual(keys(content.usage.byModel[0]), [...KEPT_FIELDS.byModel].sort());
   assert.deepEqual(keys(content.usage.days[0]), [...KEPT_FIELDS.day].sort());
   assert.deepEqual(keys(content.usage.days[0].sessions[0]), [...KEPT_FIELDS.session].sort());
-  assert.deepEqual(keys(content.shots![0]), [...KEPT_FIELDS.shot].sort());
+  // A print carries either `path` or `data`: the two sample prints together use every field.
+  assert.deepEqual([...new Set(content.shots!.flatMap(keys))].sort(), [...KEPT_FIELDS.shot].sort());
   assert.deepEqual(keys(content.gaps![0]), [...KEPT_FIELDS.gap].sort());
   // ...and the parser hands every one of them back.
   const r = parseDraft(validBody());
@@ -207,27 +212,47 @@ test("the hourly strip has exactly 24 buckets of whole, non-negative message cou
   assert.equal(parseBent((b) => (b.content.usage.days[0].hourly = hourly(24))).ok, true);
 });
 
-test("at most ten prints, each a real jpeg or png in valid base64", () => {
-  const shot = (n: number) => ({ id: `shot-${n}`, caption: "Tela", mime: "image/png" as const, data: png(1024) });
+test("at most forty prints, each a real jpeg or png in valid base64 or a path in the storage bucket", () => {
+  const shot = (n: number) => ({ id: `shot-${n}`, caption: "Tela", mime: "image/png" as const, issue: 101 + (n % 2), path: `${String(n % 10).repeat(64)}.png` });
   const many = (n: number) => Array.from({ length: n }, (_, i) => shot(i + 1));
-  refused((b) => (b.content.shots = many(11)), /content\.shots/);
-  assert.equal(parseBent((b) => (b.content.shots = many(10))).ok, true);
-  assert.equal(parseBent((b) => delete b.content.shots).ok, true);
-  refused((b) => (b.content.shots![0].mime = unsafe("image/gif")), /content\.shots\[0\]\.mime/);
-  refused((b) => (b.content.shots![0].data = "isto não é base64!"), /content\.shots\[0\]\.data/);
-  refused((b) => (b.content.shots![0].data = "data:image/png;base64," + png(64)), /content\.shots\[0\]\.data/);
+  refused((b) => (b.content.shots = many(41)), /content\.shots/);
+  assert.equal(parseBent((b) => (b.content.shots = many(40))).ok, true);
+  refused((b) => (b.content.shots![1].mime = unsafe("image/gif")), /content\.shots\[1\]\.mime/);
+  // A path is a content hash with the extension of its type; nothing else (no folders, no other names).
+  refused((b) => (b.content.shots![0].path = "../segredo.png"), /content\.shots\[0\]\.path/);
+  refused((b) => (b.content.shots![0].path = `${"a".repeat(64)}.jpg`), /content\.shots\[0\]\.path/);
+  refused((b) => (b.content.shots![0].path = `pasta/${"a".repeat(64)}.png`), /content\.shots\[0\]\.path/);
+  // Exactly one of the two: a path, or the inline image.
+  refused((b) => (b.content.shots![0].data = png(1024)), /content\.shots\[0\]/);
+  refused((b) => delete b.content.shots![1].data, /content\.shots\[1\]/);
+  refused((b) => (b.content.shots![1].data = "isto não é base64!"), /content\.shots\[1\]\.data/);
+  refused((b) => (b.content.shots![1].data = "data:image/png;base64," + png(64)), /content\.shots\[1\]\.data/);
   // Bytes that do not start like the declared image type (a png sent as a jpeg, or plain text).
-  refused((b) => (b.content.shots![0].data = png(1024)), /content\.shots\[0\]\.data/);
-  refused((b) => (b.content.shots![0].data = Buffer.from("<svg onload=alert(1)></svg>").toString("base64")), /content\.shots\[0\]\.data/);
-  refused((b) => (b.content.shots![0].data = ""), /content\.shots\[0\]\.data/);
+  refused((b) => (b.content.shots![1].data = png(1024)), /content\.shots\[1\]\.data/);
+  refused((b) => (b.content.shots![1].data = Buffer.from("<svg onload=alert(1)></svg>").toString("base64")), /content\.shots\[1\]\.data/);
+  refused((b) => (b.content.shots![1].data = ""), /content\.shots\[1\]\.data/);
 });
 
-test("a print is refused above 256 KB decoded and accepted right at the limit", () => {
-  assert.equal(MAX_SHOT_BYTES, 256 * 1024);
-  assert.equal(parseBent((b) => (b.content.shots![0].data = jpeg(MAX_SHOT_BYTES))).ok, true);
-  refused((b) => (b.content.shots![0].data = jpeg(MAX_SHOT_BYTES + 1)), /content\.shots\[0\].*256 KB/);
+test("every delivery on show that is not 'próximo' needs a print of its own, and a print names a delivery of the report", () => {
+  // Delivery 102 loses its print: refused, naming the issue.
+  refused((b) => b.content.shots!.splice(1, 1), /#102/);
+  refused((b) => delete b.content.shots, /#101, #102/);
+  // A hidden delivery, or one that is only "próximo", needs none.
+  assert.equal(parseBent((b) => { b.content.shots!.splice(1, 1); b.content.entries[1].hidden = true; }).ok, true);
+  assert.equal(parseBent((b) => { b.content.shots!.splice(1, 1); b.content.entries[1].status = "proximo"; }).ok, true);
+  // A general print (no delivery) is fine, on top of the required ones.
+  assert.equal(parseBent((b) => b.content.shots!.push({ id: "shot-3", caption: "Visão geral", mime: "image/png", path: `${"b".repeat(64)}.png` })).ok, true);
+  // A print that names a delivery the report does not have, or not a whole issue number, is refused.
+  refused((b) => (b.content.shots![0].issue = 999), /content\.shots\[0\]\.issue.*#999/);
+  refused((b) => (b.content.shots![0].issue = unsafe("101")), /content\.shots\[0\]\.issue/);
+});
+
+test("an inline print is refused above 1 MB decoded and accepted right at the limit", () => {
+  assert.equal(MAX_SHOT_BYTES, 1024 * 1024);
+  assert.equal(parseBent((b) => (b.content.shots![1].data = jpeg(MAX_SHOT_BYTES))).ok, true);
+  refused((b) => (b.content.shots![1].data = jpeg(MAX_SHOT_BYTES + 1)), /content\.shots\[1\].*1024 KB/);
   // Far above every limit: never accepted.
-  assert.equal(parseBent((b) => (b.content.shots![0].data = jpeg(2 * 1024 * 1024))).ok, false);
+  assert.equal(parseBent((b) => (b.content.shots![1].data = jpeg(5 * 1024 * 1024))).ok, false);
 });
 
 test("a payload above 4096 KB is refused before anything else is looked at", () => {
@@ -276,7 +301,7 @@ test("fields the contract does not know are dropped: prompts, paths and the like
     at<Record<string, unknown>>(b.content.entries[0]).transcript = SENTINEL;
     at<Record<string, unknown>>(b.content.usage.days[0]).project = SENTINEL;
     at<Record<string, unknown>>(b.content.usage.days[0].sessions[0]).firstMessage = SENTINEL;
-    at<Record<string, unknown>>(b.content.shots![0]).path = SENTINEL;
+    at<Record<string, unknown>>(b.content.shots![0]).file = SENTINEL;
     at<Record<string, unknown>>(b)[SENTINEL] = SENTINEL;
   });
   assert.equal(r.ok, true);
@@ -409,7 +434,9 @@ test("what a collector may leave out gets its default", () => {
   const r = parseBent((b) => {
     const entry = b.content.entries[0] as unknown as Record<string, unknown>;
     for (const key of ["deliveredAt", "subIssues", "hidden", "edited", "sources"]) delete entry[key];
+    // Without prints, only deliveries that are still "próximo" may be on show.
     delete b.content.shots;
+    b.content.entries.forEach((e) => (e.status = "proximo"));
     delete b.content.gaps;
     delete b.content.usage.notes;
   });
@@ -418,7 +445,7 @@ test("what a collector may leave out gets its default", () => {
     assert.deepEqual(r.content.entries[0], {
       id: "gc-101",
       issue: 101,
-      status: "concluido",
+      status: "proximo",
       title: "Entrega de exemplo A",
       summary: "Uma frase simples que descreve a primeira entrega de exemplo.",
       deliveredAt: null,

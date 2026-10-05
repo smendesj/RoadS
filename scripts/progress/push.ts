@@ -2,13 +2,19 @@
 // collectors (Claude usage, GitHub facts) and the plain-language text written by Claude are in one JSON file.
 //
 //   node --experimental-strip-types scripts/progress/push.ts --draft .frontlights/progress/draft.json
-//        [--produto GeoCloud] [--shot print.jpg --caption "Tela de exemplo"]... (at most 10)
+//        [--produto GeoCloud] [--shot print.jpg --caption "Tela de exemplo" [--issue 101]]... (at most 40)
 //        [--endpoint https://.../api/frontlights] [--dry-run]
 //        [--assemble [--facts f.json] [--usage u.json] [--local config.json] [--shots-dir dir]]
 //
 // With --assemble the file given to --draft is the short TEXTS file written in plain language (shape in
 // docs/progress-draft.md); the script joins it with the collected facts and usage, the sign-in details of the
-// local progress config and the prints listed in <shots-dir>/captions.json, and sends the result.
+// local progress config and the prints listed in <shots-dir>/captions.json, and sends the result. The
+// Frontlights plugin passes --shots-dir as the folder of the week (an absolute path it has already checked).
+//
+// Every delivery on show that is not "próximo" needs at least one print of its own. Each print is sent on its
+// own to <endpoint>/progress-report/shots, which keeps it in the private prints bucket; then the draft goes,
+// carrying only the prints' paths. Nothing is sent when a check fails, and the draft is not sent when an
+// upload fails.
 //
 // The secret comes only from FRONTLIGHTS_API_SECRET (.env.local is loaded when it exists). Nothing printed
 // ever contains the secret or the text of the draft: only counts, dates, the HTTP status and the report id.
@@ -17,6 +23,7 @@ import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assembleDraft } from "../../src/lib/progress/assemble.ts";
 import { MAX_PAYLOAD_BYTES, MAX_SHOTS, MAX_SHOT_BYTES, parseDraft } from "../../src/lib/progress/draft.ts";
+import { checkShotBytes } from "../../src/lib/progress/shot-store.ts";
 import type { ProgressContent, Shot } from "../../src/lib/progress-report.ts";
 
 /** Everything the script touches in the world, so a test can hand it a fake one. */
@@ -33,15 +40,16 @@ const USAGE = [
   "Uso: node --experimental-strip-types scripts/progress/push.ts --draft <arquivo.json> [opções]",
   "  --draft <arquivo>     o rascunho (um ProgressContent em JSON)",
   "  --produto <nome>      padrão: GeoCloud",
-  '  --shot <imagem>       um print JPEG ou PNG de até 256 KB; repita para cada print (no máximo 10)',
+  '  --shot <imagem>       um print JPEG ou PNG de até 1024 KB; repita para cada print (no máximo 40)',
   '  --caption "<texto>"   a legenda do print que vem logo antes',
+  "  --issue <número>      a entrega que o print mostra (o número da issue); sem ele, é um print geral",
   "  --endpoint <url>      base da API (padrão: roadmapSync.endpoint de .frontlights/config.json)",
   "  --dry-run             só valida e mostra um resumo; não envia nada",
   "  --assemble            o --draft é o arquivo de textos; junta com os fatos, o uso, a conta local e os prints",
   "  --facts <arquivo>     fatos do GitHub (padrão: .frontlights/progress/facts.json)",
   "  --usage <arquivo>     uso do Claude (padrão: .frontlights/progress/usage.json)",
   "  --local <arquivo>     configuração local com a conta de acesso (padrão: .frontlights/progress/config.json)",
-  "  --shots-dir <pasta>   pasta dos prints, com captions.json listando arquivo e legenda na ordem do e-mail",
+  "  --shots-dir <pasta>   pasta dos prints, com captions.json listando arquivo, legenda e entrega na ordem do e-mail",
 ];
 
 const DEFAULT_FACTS = ".frontlights/progress/facts.json";
@@ -51,7 +59,9 @@ const DEFAULT_LOCAL = ".frontlights/progress/config.json";
 type Args = {
   draft: string;
   produto: string;
-  shots: { file: string; caption: string | null }[];
+  shots: { file: string; caption: string | null; issue?: number }[];
+  /** A command line --issue that is not a whole issue number, or that came before any --shot. */
+  badIssue: string | null;
   endpoint: string | null;
   dryRun: boolean;
   assemble: boolean;
@@ -63,7 +73,7 @@ type Args = {
 
 /** null when the command line itself is wrong (unknown option, option without its value, no --draft). */
 function parseArgs(argv: string[]): Args | null {
-  const args: Args = { draft: "", produto: "GeoCloud", shots: [], endpoint: null, dryRun: false, assemble: false, facts: DEFAULT_FACTS, usage: DEFAULT_USAGE, local: DEFAULT_LOCAL, shotsDir: null };
+  const args: Args = { draft: "", produto: "GeoCloud", shots: [], badIssue: null, endpoint: null, dryRun: false, assemble: false, facts: DEFAULT_FACTS, usage: DEFAULT_USAGE, local: DEFAULT_LOCAL, shotsDir: null };
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     if (flag === "--dry-run") {
@@ -74,7 +84,7 @@ function parseArgs(argv: string[]): Args | null {
       args.assemble = true;
       continue;
     }
-    if (!["--draft", "--produto", "--shot", "--caption", "--endpoint", "--facts", "--usage", "--local", "--shots-dir"].includes(flag)) return null;
+    if (!["--draft", "--produto", "--shot", "--caption", "--issue", "--endpoint", "--facts", "--usage", "--local", "--shots-dir"].includes(flag)) return null;
     const value = argv[++i];
     if (value === undefined || value.startsWith("--")) return null;
     if (flag === "--draft") args.draft = value;
@@ -85,7 +95,15 @@ function parseArgs(argv: string[]): Args | null {
     else if (flag === "--local") args.local = value;
     else if (flag === "--shots-dir") args.shotsDir = value;
     else if (flag === "--shot") args.shots.push({ file: value, caption: null });
-    else {
+    else if (flag === "--issue") {
+      // An issue belongs to the print right before it.
+      const last = args.shots[args.shots.length - 1];
+      const n = /^[1-9][0-9]{0,8}$/.test(value) ? Number(value) : null;
+      if (!last || !last.file) args.badIssue ??= "Um --issue veio sem o print (--shot) a que pertence.";
+      else if (last.issue !== undefined) args.badIssue ??= "Um print recebeu mais de um --issue; cada print mostra uma entrega só.";
+      else if (n === null) args.badIssue ??= "O --issue precisa ser o número inteiro de uma issue (por exemplo, --issue 101).";
+      else last.issue = n;
+    } else {
       // A caption belongs to the print right before it.
       const last = args.shots[args.shots.length - 1];
       if (!last || last.caption !== null) args.shots.push({ file: "", caption: value });
@@ -97,18 +115,15 @@ function parseArgs(argv: string[]): Args | null {
 
 const kb = (bytes: number) => Math.ceil(bytes / 1024);
 
-function imageType(bytes: Buffer): Shot["mime"] | null {
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
-  const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  if (bytes.length >= 8 && png.every((byte, i) => bytes[i] === byte)) return "image/png";
-  return null;
-}
+/** A print ready to go: the contract Shot the draft carries (with the path it will have) and its bytes. */
+type LoadedShot = { shot: Shot; name: string; bytes: Buffer };
 
-/** The prints named on the command line as contract Shots, or the sentence that says what is wrong with them. */
-function loadShots(args: Args, deps: PushDeps): Shot[] | string {
+/** The prints named on the command line or in captions.json, checked, or the sentence that says what is wrong. */
+async function loadShots(args: Args, deps: PushDeps): Promise<LoadedShot[] | string> {
+  if (args.badIssue) return args.badIssue;
   if (args.shots.length > MAX_SHOTS) return `São aceitos no máximo ${MAX_SHOTS} prints (--shot).`;
-  const shots: Shot[] = [];
-  for (const [i, { file, caption }] of args.shots.entries()) {
+  const shots: LoadedShot[] = [];
+  for (const [i, { file, caption, issue }] of args.shots.entries()) {
     if (!file) return "Uma legenda (--caption) veio sem o print (--shot) a que pertence.";
     const name = basename(file);
     if (caption === null) return `O print «${name}» precisa de uma legenda: acrescente --caption "<texto>" logo depois dele.`;
@@ -118,12 +133,17 @@ function loadShots(args: Args, deps: PushDeps): Shot[] | string {
     } catch {
       return `Não consegui ler o print «${name}».`;
     }
-    const mime = imageType(bytes);
-    if (!mime) return `O print «${name}» precisa ser uma imagem JPEG ou PNG.`;
     if (bytes.length > MAX_SHOT_BYTES) {
-      return `O print «${name}» tem ${kb(bytes.length)} KB e o limite é ${kb(MAX_SHOT_BYTES)} KB. Reduza a imagem (por exemplo, 1280 px de largura em JPEG) e tente de novo.`;
+      return `O print «${name}» tem ${kb(bytes.length)} KB e o limite é ${kb(MAX_SHOT_BYTES)} KB. Reduza a imagem (por exemplo, 1920 px de largura em JPEG) e tente de novo.`;
     }
-    shots.push({ id: `shot-${i + 1}`, caption, mime, data: bytes.toString("base64") });
+    // The same check the server runs: the type from the bytes, and the path is the hash of the bytes.
+    const checked = await checkShotBytes(new Uint8Array(bytes));
+    if (!checked.ok) return `O print «${name}» precisa ser uma imagem JPEG ou PNG.`;
+    shots.push({
+      shot: { id: `shot-${i + 1}`, caption, mime: checked.mime, ...(issue === undefined ? {} : { issue }), path: checked.path },
+      name,
+      bytes,
+    });
   }
   return shots;
 }
@@ -152,7 +172,7 @@ function localAccess(value: unknown): { account: string; password: string } | nu
 const SHOT_NAME = /^[\w.-]+\.(png|jpe?g)$/i;
 
 /** The prints a folder's captions.json lists, in that order, as the shots the loader reads; or what is wrong. */
-function dirShots(dir: string, deps: PushDeps): { file: string; caption: string }[] | string {
+function dirShots(dir: string, deps: PushDeps): { file: string; caption: string; issue?: number }[] | string {
   const base = dir.replace(/[\\/]+$/, "");
   let raw: Buffer;
   try {
@@ -166,13 +186,16 @@ function dirShots(dir: string, deps: PushDeps): { file: string; caption: string 
   } catch {
     return "O arquivo captions.json da pasta de prints não é um JSON válido.";
   }
-  if (!Array.isArray(list)) return "O captions.json deve ser uma lista de {file, caption}.";
-  const shots: { file: string; caption: string }[] = [];
+  if (!Array.isArray(list)) return "O captions.json deve ser uma lista de {file, caption, issue}.";
+  const shots: { file: string; caption: string; issue?: number }[] = [];
   for (const item of list) {
-    const { file, caption } = (item ?? {}) as { file?: unknown; caption?: unknown };
+    const { file, caption, issue } = (item ?? {}) as { file?: unknown; caption?: unknown; issue?: unknown };
     if (typeof file !== "string" || !SHOT_NAME.test(file)) return "Cada item do captions.json precisa de um «file» que seja só o nome de um PNG ou JPEG da pasta.";
     if (typeof caption !== "string" || caption.trim() === "") return `O print «${file}» precisa de uma legenda no captions.json.`;
-    shots.push({ file: `${base}/${file}`, caption: caption.trim() });
+    if (issue !== undefined && !(typeof issue === "number" && Number.isInteger(issue) && issue > 0)) {
+      return `O print «${file}» tem um «issue» que não é o número inteiro de uma issue no captions.json.`;
+    }
+    shots.push({ file: `${base}/${file}`, caption: caption.trim(), ...(issue === undefined ? {} : { issue }) });
   }
   return shots;
 }
@@ -187,7 +210,7 @@ function summary(produto: string, content: ProgressContent, payloadBytes: number
     `Entradas: ${content.entries.length} (${hidden} oculta${hidden === 1 ? "" : "s"})`,
     `Dificuldades: ${content.difficulties.length} · Próximos passos: ${content.nextSteps.length}`,
     `Uso do Claude: ${content.usage.days.length} dia(s), ${sessions} sessão(ões)`,
-    `Prints: ${content.shots?.length ?? 0}`,
+    `Prints: ${content.shots?.length ?? 0} (cada um sobe sozinho antes do rascunho)`,
     `Tamanho do envio: ${kb(payloadBytes)} KB de ${kb(MAX_PAYLOAD_BYTES)} KB`,
   ];
 }
@@ -241,10 +264,18 @@ export async function runPush(argv: string[], deps: PushDeps): Promise<number> {
     }
   }
 
-  if (args.shots.length > 0) {
-    const shots = loadShots(args, deps);
+  // Prints only come through --shot or the prints folder, where they are checked and uploaded: a print written
+  // inside the draft file would travel inline, or name a file the bucket never received.
+  if (typeof content === "object" && content !== null && (content as { shots?: unknown }).shots !== undefined) {
+    return fail("O arquivo do rascunho não pode trazer prints («shots»): use --shot/--caption/--issue ou a pasta de prints (--shots-dir).");
+  }
+
+  let loaded: LoadedShot[] = [];
+  if (args.shots.length > 0 || args.badIssue) {
+    const shots = await loadShots(args, deps);
     if (typeof shots === "string") return fail(shots);
-    if (typeof content === "object" && content !== null) content = { ...content, shots };
+    loaded = shots;
+    if (typeof content === "object" && content !== null) content = { ...content, shots: shots.map((s) => s.shot) };
   }
 
   // The very check the server runs: what passes here is not refused there for its shape.
@@ -262,11 +293,39 @@ export async function runPush(argv: string[], deps: PushDeps): Promise<number> {
   const base = args.endpoint ?? configuredEndpoint(deps.readConfig());
   if (!base) return fail("Sem endereço: informe --endpoint <url base> ou configure roadmapSync.endpoint em .frontlights/config.json.");
 
+  const root = base.replace(/\/+$/, "");
+  const headers = { authorization: `Bearer ${secret}`, "content-type": "application/json" };
+
+  // Each print first, on its own, so the draft that names them never points at a print the bucket lacks.
+  for (const { shot, name, bytes } of loaded) {
+    let uploaded: Response;
+    try {
+      uploaded = await deps.fetch(`${root}/progress-report/shots`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ data: bytes.toString("base64") }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch {
+      return fail(`Não consegui falar com o servidor ao enviar o print «${name}» (confira a internet e o endereço). O rascunho não foi enviado.`);
+    }
+    const stored = (await uploaded.json().catch(() => null)) as { path?: unknown; error?: unknown } | null;
+    const status = `HTTP ${uploaded.status}`;
+    if (uploaded.status === 401) return fail(`O servidor recusou o segredo (${status}). Confira FRONTLIGHTS_API_SECRET.`);
+    if (uploaded.status === 400) {
+      const why = typeof stored?.error === "string" && stored.error.length <= 300 ? stored.error.replace(/[\u0000-\u001F]/g, " ") : "motivo não informado";
+      return fail(`O servidor recusou o print «${name}» (${status}): ${why}. O rascunho não foi enviado.`);
+    }
+    if (uploaded.status !== 200 || stored?.path !== shot.path) {
+      return fail(`O servidor respondeu ${status} ao print «${name}». O rascunho não foi enviado; tente de novo em instantes.`);
+    }
+  }
+
   let response: Response;
   try {
-    response = await deps.fetch(`${base.replace(/\/+$/, "")}/progress-report`, {
+    response = await deps.fetch(`${root}/progress-report`, {
       method: "POST",
-      headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
+      headers,
       body,
       signal: AbortSignal.timeout(30_000),
     });

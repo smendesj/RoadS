@@ -15,8 +15,9 @@ const PRODUCT: Produto = "GeoCloud";
 
 const ROW_COLUMNS = "id, produto, period_start, period_end, status, content, overrides, share_token, checked_at, sent_at, pushed_at, rev";
 
-// The Dashboard card only counts entries, so it reads the report without its screenshots (base64, the
-// heavy part of `content`) and without the coverage gaps: PostgREST can pick keys out of the jsonb.
+// The Dashboard card only counts entries, so it reads the report without its prints (older reports carry
+// them inline as base64, the heavy part of `content`) and without the coverage gaps: PostgREST can pick
+// keys out of the jsonb.
 const CARD_COLUMNS =
   "id, produto, period_start, period_end, status, overrides, share_token, checked_at, sent_at, pushed_at, rev, " +
   "window:content->window, headline:content->headline, entries:content->entries, internal:content->internal, " +
@@ -36,11 +37,11 @@ export async function requireReportViewer(): Promise<Viewer> {
   return viewer;
 }
 
-// The screen never needs a screenshot's bytes: the preview points at the public image route instead.
-// Dropping them keeps the page payload small (a report can carry close to a megabyte of images).
+// The screen never needs a print's bytes: the preview points at the public image route instead. Dropping
+// the inline ones of older reports keeps the page payload small; a print kept in the bucket has none.
 function forScreen(row: ProgressReportRow): ProgressReportRow {
   const shots = row.content.shots;
-  return shots ? { ...row, content: { ...row.content, shots: shots.map((s) => ({ ...s, data: "" })) } } : row;
+  return shots ? { ...row, content: { ...row.content, shots: shots.map((s) => (s.data === undefined ? s : { ...s, data: "" })) } } : row;
 }
 
 function failure(what: string, error: { code?: string } | null): boolean {

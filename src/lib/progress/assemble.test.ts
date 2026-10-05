@@ -60,7 +60,9 @@ test("the draft joins the collected facts with the written texts, and passes the
   assert.deepEqual([one.id, one.issue, one.status, one.title, one.hidden], ["gc-1", 1, "concluido", "Entrega de exemplo um", false]);
   assert.equal(one.deliveredAt, "2026-09-28T15:00:00-03:00");
   assert.equal(two.status, "em_validacao");
-  assert.equal(parseDraft({ produto: "GeoCloud", content }).ok, true);
+  // The prints are attached by the push script, one per delivery on show; with them, the server takes it.
+  const shots = [1, 2].map((issue) => ({ id: `shot-${issue}`, caption: "Tela de exemplo", mime: "image/png" as const, issue, path: `${String(issue).repeat(64)}.png` }));
+  assert.equal(parseDraft({ produto: "GeoCloud", content: { ...content, shots } }).ok, true);
 });
 
 test("a status is whatever the facts say: a text can never change it", () => {

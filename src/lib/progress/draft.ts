@@ -22,13 +22,18 @@ import type {
 import type { Produto } from "../types.ts";
 
 /**
- * The whole serialized body, prints included: the content is stored in one row the screen loads each time.
- * Kept under the 4.5 MB request cap of the host, with room for ten full-size prints (see MAX_SHOT_BYTES).
+ * The whole serialized body: the content is stored in one row the screen loads each time. Kept under the
+ * 4.5 MB request cap of the host. Prints travel apart (each uploaded to the storage bucket on its own, see
+ * the shots route), so a draft normally carries only their paths; an inline print still counts here.
  */
 export const MAX_PAYLOAD_BYTES = 4096 * 1024;
-/** One print, decoded. Ten of them are about 3.4 MB once base64: they fit the payload limit with the report. */
-export const MAX_SHOT_BYTES = 256 * 1024;
-export const MAX_SHOTS = 10;
+/** One print, decoded: about 1920 px wide, enough to read code or a table on a projected screen. */
+export const MAX_SHOT_BYTES = 1024 * 1024;
+/** Every delivery on show needs one print, so a busy week needs room for two or three each. */
+export const MAX_SHOTS = 40;
+/** A print in the storage bucket: the SHA-256 of its bytes, with the extension of its type. */
+export const SHOT_PATH = /^[0-9a-f]{64}\.(png|jpg)$/;
+export const shotExtension = (mime: Shot["mime"]): "png" | "jpg" => (mime === "image/png" ? "png" : "jpg");
 
 /**
  * Every field of the contract this parser keeps. The mapped type turns a field added to the contract into
@@ -44,7 +49,7 @@ export const KEPT_FIELDS = {
   byModel: fieldsOf<UsageModel["byModel"][number]>({ input: true, output: true, cacheRead: true, cacheWrite: true, model: true, messages: true }),
   day: fieldsOf<DayUsage>({ date: true, sessions: true, firstPromptAt: true, lastPromptAt: true, messages: true, humanPrompts: true, tokens: true, otherMethodTokens: true, hourly: true }),
   session: fieldsOf<DayUsage["sessions"][number]>({ start: true, end: true, messages: true, tokens: true }),
-  shot: fieldsOf<Shot>({ id: true, caption: true, mime: true, data: true }),
+  shot: fieldsOf<Shot>({ id: true, caption: true, mime: true, issue: true, path: true, data: true }),
   gap: fieldsOf<CoverageGap>({ at: true, ref: true, nearestMessageMinutes: true }),
 };
 
@@ -316,10 +321,21 @@ const IMAGE_SIGNATURE: Record<Shot["mime"], number[]> = {
   "image/png": [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
 };
 
-function shot(value: unknown, path: string): Shot {
+function shot(value: unknown, path: string, issues: Set<number>): Shot {
   const s = record(value, path);
   const mime = s.mime;
   if (mime !== "image/jpeg" && mime !== "image/png") return refuse(`${path}.mime`, "esperado image/jpeg ou image/png");
+  const issue = s.issue === undefined ? undefined : whole(s.issue, `${path}.issue`, 1e9);
+  if (issue !== undefined && !issues.has(issue)) refuse(`${path}.issue`, `a entrega #${issue} não está neste resumo`);
+  const base = { id: id(s.id, `${path}.id`), caption: text(s.caption, `${path}.caption`, 200), mime: mime as Shot["mime"], ...maybe("issue", issue) };
+  if ((s.path === undefined) === (s.data === undefined)) return refuse(path, "esperado o caminho do print no armazenamento (path) ou a imagem (data), um dos dois");
+  if (s.path !== undefined) {
+    const stored = s.path;
+    if (typeof stored !== "string" || !SHOT_PATH.test(stored) || !stored.endsWith(`.${shotExtension(mime)}`)) {
+      return refuse(`${path}.path`, "esperado o nome do print no armazenamento (hash e extensão do tipo)");
+    }
+    return { ...base, path: stored };
+  }
   const data = s.data;
   if (typeof data !== "string" || data.length % 4 !== 0 || !BASE64.test(data)) {
     return refuse(`${path}.data`, "esperada a imagem em base64 puro, sem prefixo data:");
@@ -329,7 +345,7 @@ function shot(value: unknown, path: string): Shot {
   // The first bytes must be the ones of the declared type: a mislabelled file is served to a mail client as an image.
   const head = atob(data.slice(0, 12));
   if (!IMAGE_SIGNATURE[mime].every((byte, i) => head.charCodeAt(i) === byte)) return refuse(`${path}.data`, "o arquivo não é uma imagem do tipo informado");
-  return { id: id(s.id, `${path}.id`), caption: text(s.caption, `${path}.caption`, 200), mime, data };
+  return { ...base, data };
 }
 
 function gap(value: unknown, path: string): CoverageGap {
@@ -376,11 +392,14 @@ function content(value: unknown, path: string): ProgressContent {
     nextSteps,
     usage: usage(c.usage, `${path}.usage`),
   };
-  if (c.shots !== undefined) {
-    const shots = list(c.shots, `${path}.shots`, MAX_SHOTS).map((s, i) => shot(s, `${path}.shots[${i}]`));
-    ids(shots.map((s) => s.id), `${path}.shots`);
-    result.shots = shots;
-  }
+  const issues = new Set(entries.map((e) => e.issue));
+  const shots = c.shots === undefined ? [] : list(c.shots, `${path}.shots`, MAX_SHOTS).map((s, i) => shot(s, `${path}.shots[${i}]`, issues));
+  ids(shots.map((s) => s.id), `${path}.shots`);
+  // Every delivery on show that has something to show (anything but "próximo") comes with its own print.
+  const shown = new Set(shots.map((s) => s.issue));
+  const missing = entries.filter((e) => !e.hidden && e.status !== "proximo" && !shown.has(e.issue)).map((e) => `#${e.issue}`);
+  if (missing.length > 0) refuse(`${path}.shots`, `falta print destas entregas: ${missing.join(", ")}`);
+  if (c.shots !== undefined) result.shots = shots;
   if (c.gaps !== undefined) result.gaps = list(c.gaps, `${path}.gaps`, 200).map((g, i) => gap(g, `${path}.gaps[${i}]`));
   if (c.access !== undefined) result.access = access(c.access, `${path}.access`);
   return result;

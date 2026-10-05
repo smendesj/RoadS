@@ -4,7 +4,9 @@
 //
 // It first prints the conferência table (the numbers to check against what the person remembers) and
 // writes nothing until it is run again with --confirm. Pictures are embedded as data URIs so the file
-// opens anywhere: open it in a browser, select all, copy and paste into a new Outlook message.
+// opens anywhere: open it in a browser, select all, copy and paste into a new Outlook message. Prints kept
+// in the storage bucket (every report pushed since the prints went there) cannot be embedded here: the
+// tool says how many were left out, so they can be pasted by hand.
 // Without `--out` the file goes to .frontlights/progress/ (ignored by git).
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -62,16 +64,19 @@ async function main(): Promise<number> {
     }
 
     const png = await renderVisualPng(content, { ImageResponse: loadImageResponse(), fonts: await loadVisualFonts() });
-    const shots = (content.shots ?? []).slice(0, 2);
+    // Only inline prints can be embedded here; a print kept in the storage bucket is left out of this file.
+    const shots = content.shots ?? [];
     const { html } = buildEmail(content, {
       visualUrl: dataUri("image/png", Buffer.from(png).toString("base64")),
-      shotUrls: shots.map((shot) => dataUri(shot.mime, shot.data)),
+      shotUrls: shots.map((shot) => (shot.data ? dataUri(shot.mime, shot.data) : "")),
       roadsUrl: `${PRODUCTION_ORIGIN}/resumo`,
     });
     const out = resolve(values.out ?? ".frontlights/progress/email.html");
     await mkdir(dirname(out), { recursive: true });
     await writeFile(out, html, "utf8");
     console.log(`E-mail gravado em ${out}.`);
+    const stored = shots.filter((shot) => !shot.data).length;
+    if (stored > 0) console.log(`Atenção: ${stored} print(s) guardado(s) no armazenamento do RoadS não entram neste arquivo; cole-os à mão.`);
     console.log(`Assunto: ${emailSubject(content)}`);
     console.log("Abra o arquivo no navegador, selecione tudo (Ctrl+A), copie (Ctrl+C) e cole numa mensagem nova do Outlook.");
     return 0;

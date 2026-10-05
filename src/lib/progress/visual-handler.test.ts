@@ -29,19 +29,30 @@ const row = (patch: Partial<AssetReport> = {}, content: ProgressContent = sample
   ...patch,
 });
 
-/** A store that remembers every token it was asked about. */
-function fakeStore(rows: Record<string, AssetReport | Error>) {
+/** A store that remembers every token it was asked about, and every print it was asked to read from the bucket. */
+function fakeStore(rows: Record<string, AssetReport | Error>, bucket: Record<string, number[] | Error> = {}) {
   const asked: string[] = [];
+  const read: string[] = [];
   return {
     asked,
+    read,
     async findByToken(token: string) {
       asked.push(token);
       const found = rows[token];
       if (found instanceof Error) throw found;
       return found ?? null;
     },
+    async readShot(path: string) {
+      read.push(path);
+      const found = bucket[path];
+      if (found instanceof Error) throw found;
+      return found ? new Uint8Array(found) : null;
+    },
   };
 }
+
+const STORED = `${"c".repeat(64)}.png`;
+const stored = (path = STORED, caption = "Tela guardada"): Shot => ({ id: "s-stored", caption, mime: "image/png", issue: 1, path });
 
 /** A renderer that remembers the content it was given instead of drawing it. */
 function fakeRenderer() {
@@ -129,6 +140,39 @@ test("the lookup is by token alone: any product's report answers", async () => {
 });
 
 /* ---------- the prints ---------- */
+
+test("a print kept in the storage bucket comes back byte for byte, next to an older inline one", async () => {
+  const content = sampleContent(2, { shots: [stored(), shot("image/jpeg", JPEG_BYTES)] });
+  const store = fakeStore({ [TOKEN]: row({ status: "sent" }, content) }, { [STORED]: PNG_SHOT_BYTES });
+  const { render } = fakeRenderer();
+
+  const fromBucket = await handleProgressAsset({ token: TOKEN, file: "shot-1.png" }, store, render);
+  assert.equal(fromBucket.status, 200);
+  assert.equal(header(fromBucket, "Content-Type"), "image/png");
+  assert.deepEqual(bytesOf(fromBucket), PNG_SHOT_BYTES);
+  assert.equal(header(fromBucket, "Cache-Control"), "public, max-age=31536000, immutable");
+  assert.deepEqual(store.read, [STORED]);
+
+  const inline = await handleProgressAsset({ token: TOKEN, file: "shot-2.jpg" }, store, render);
+  assert.deepEqual(bytesOf(inline), JPEG_BYTES);
+  assert.deepEqual(store.read, [STORED]); // the inline one never touches the bucket
+});
+
+test("a stored print that is gone, or a path that is not a print's, is the same 404; a bucket failure is a 500", async () => {
+  const { render } = fakeRenderer();
+  const gone = fakeStore({ [TOKEN]: row({}, sampleContent(2, { shots: [stored()] })) });
+  const missing = await handleProgressAsset({ token: TOKEN, file: "shot-1.png" }, gone, render);
+  assert.equal(missing.status, 404);
+
+  const odd = fakeStore({ [TOKEN]: row({}, sampleContent(2, { shots: [stored("../../segredo.png")] })) }, { "../../segredo.png": PNG_SHOT_BYTES });
+  assert.equal((await handleProgressAsset({ token: TOKEN, file: "shot-1.png" }, odd, render)).status, 404);
+  assert.deepEqual(odd.read, []); // a path that is not a print's never reaches the bucket
+
+  const broken = fakeStore({ [TOKEN]: row({}, sampleContent(2, { shots: [stored()] })) }, { [STORED]: new Error(`bucket down for ${TOKEN}`) });
+  const failedRes = await handleProgressAsset({ token: TOKEN, file: "shot-1.png" }, broken, render);
+  assert.equal(failedRes.status, 500);
+  assert.ok(!new TextDecoder().decode(failedRes.body ?? new Uint8Array()).includes(TOKEN));
+});
 
 test("a print comes back byte for byte with its own content type, counted from 1", async () => {
   const content = sampleContent(2, { shots: [shot("image/jpeg", JPEG_BYTES), shot("image/png", PNG_SHOT_BYTES)] });
@@ -218,9 +262,22 @@ test("a drawing failure is a plain 500, never a half-sent picture", async () => 
 
 /* ---------- the database side: one query, by token ---------- */
 
-function fakeClient(result: { data: unknown; error: { code?: string; message?: string } | null }) {
+type Download = { data: Blob | null; error: { message?: string; statusCode?: string } | null };
+
+function fakeClient(result: { data: unknown; error: { code?: string; message?: string } | null }, download: Download = { data: null, error: null }) {
   const seen: unknown[][] = [];
   const client: AssetQueryClient = {
+    storage: {
+      from(bucket) {
+        seen.push(["storage", bucket]);
+        return {
+          download: async (path) => {
+            seen.push(["download", path]);
+            return download;
+          },
+        };
+      },
+    },
     from(table) {
       seen.push(["from", table]);
       return {
@@ -248,6 +305,19 @@ test("the store reads one row of progress_reports by its share token", async () 
     ["select", "status, rev, content, overrides, pushed_at"],
     ["eq", "share_token", TOKEN],
   ]);
+});
+
+test("a stored print is read from the private prints bucket; a missing one is null, any other failure throws", async () => {
+  const bytes = new Uint8Array(PNG_SHOT_BYTES);
+  const { client, seen } = fakeClient({ data: null, error: null }, { data: new Blob([bytes]), error: null });
+  assert.deepEqual([...((await createAssetStore(client).readShot(STORED)) ?? [])], PNG_SHOT_BYTES);
+  assert.deepEqual(seen, [["storage", "progress-shots"], ["download", STORED]]);
+  const missing = fakeClient({ data: null, error: null }, { data: null, error: { statusCode: "404", message: "Object not found" } }).client;
+  assert.equal(await createAssetStore(missing).readShot(STORED), null);
+  const noBucket = fakeClient({ data: null, error: null }, { data: null, error: { statusCode: "404", message: "Bucket not found" } }).client;
+  await assert.rejects(createAssetStore(noBucket).readShot(STORED));
+  const down = fakeClient({ data: null, error: null }, { data: null, error: { statusCode: "500", message: `secret ${TOKEN}` } }).client;
+  await assert.rejects(createAssetStore(down).readShot(STORED), (e: Error) => !e.message.includes(TOKEN));
 });
 
 test("no row is null, and a database error is thrown without its message", async () => {
