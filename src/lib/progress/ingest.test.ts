@@ -47,8 +47,6 @@ function content(headline = "Duas entregas de exemplo foram concluídas.", windo
 }
 
 const T1 = new Date("2026-03-04T15:00:00Z");
-const T2 = new Date("2026-03-04T18:30:00Z");
-const T3 = new Date("2026-03-05T11:00:00Z");
 
 /** What the database keeps per report, as far as these tests care. */
 type Stored = StoredReport & { content: ProgressContent; overrides: Overrides; share_token: string; checked_by: string | null };
@@ -61,6 +59,12 @@ function fakeDatabase() {
   const summary = (r: Stored | undefined): StoredReport | null =>
     r ? { id: r.id, produto: r.produto, period_start: r.period_start, period_end: r.period_end, status: r.status, rev: r.rev, pushed_at: r.pushed_at, checked_at: r.checked_at } : null;
   const calls: string[] = [];
+  // What each write carried, as sent: the push time is not the application's to give (see below).
+  const writes: Record<string, unknown>[] = [];
+  // The database's clock: like the real table (migration 0025), it stamps pushed_at itself on every new
+  // draft and every refresh of a draft's content, whatever the write carried.
+  let dbClock = Date.parse("2026-03-04T12:00:00.000Z");
+  const dbNow = () => new Date((dbClock += 1000)).toISOString();
   const store: ReportStore = {
     async findDraft(produto: Produto) {
       calls.push(`findDraft ${produto}`);
@@ -81,16 +85,19 @@ function fakeDatabase() {
       calls.push("insert");
       hooks.beforeInsert?.();
       if (rows.some((r) => r.produto === row.produto && (r.status === "draft" || r.period_start === row.period_start))) return null;
+      writes.push({ ...row });
       seq += 1;
-      rows.push({ ...row, id: `id-${seq}`, status: "draft", rev: 0, overrides: {}, share_token: `token-${seq}`, checked_at: null, checked_by: null });
+      rows.push({ ...row, pushed_at: dbNow(), id: `id-${seq}`, status: "draft", rev: 0, overrides: {}, share_token: `token-${seq}`, checked_at: null, checked_by: null } as Stored);
       return { id: `id-${seq}` };
     },
     async updateDraft(id: string, patch: DraftPatch) {
       calls.push("updateDraft");
       hooks.beforeUpdate?.();
+      writes.push({ ...patch });
       const row = rows.find((r) => r.id === id && r.status === "draft");
       if (!row) return false;
-      Object.assign(row, patch);
+      const changed = JSON.stringify(row.content) !== JSON.stringify(patch.content);
+      Object.assign(row, patch, changed ? { pushed_at: dbNow() } : {});
       return true;
     },
   };
@@ -102,18 +109,19 @@ function fakeDatabase() {
     });
     return rows[rows.length - 1];
   };
-  return { rows, store, hooks, calls, addSent };
+  return { rows, store, hooks, calls, writes, addSent };
 }
 
 test("the first push creates the draft", async () => {
   const db = fakeDatabase();
-  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T1 });
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   assert.deepEqual(result, { status: 200, id: "id-1", created: true });
   assert.equal(db.rows.length, 1);
   const row = db.rows[0];
   assert.equal(row.status, "draft");
   assert.equal(row.produto, "GeoCloud");
-  assert.equal(row.pushed_at, T1.toISOString());
+  // The push time is the database's, never the clock of whoever pushed: the write does not carry one.
+  assert.ok(!("pushed_at" in db.writes[0]));
   assert.equal(row.rev, 0);
   assert.deepEqual(row.content, content());
   // The period is stored as UTC instants, whatever offset the content was written with.
@@ -123,21 +131,23 @@ test("the first push creates the draft", async () => {
 
 test("pushing again refreshes the draft and keeps what the user did to it", async () => {
   const db = fakeDatabase();
-  await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T1 });
+  await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   // Meanwhile the user edited a sentence and ticked "numbers checked".
   const row = db.rows[0];
+  const firstPushedAt = row.pushed_at;
   row.overrides = { headline: { value: "Minha frase", base: "Duas entregas de exemplo foram concluídas." } };
   row.checked_at = "2026-03-04T16:00:00.000Z";
   row.checked_by = "a-user";
   const token = row.share_token;
 
   const next = content("Uma frase nova sugerida pelo Claude.", { start: WINDOW.start, end: "2026-03-05T00:00:00-03:00" });
-  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: next, now: T2 });
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: next });
 
   assert.deepEqual(result, { status: 200, id: "id-1", created: false });
   assert.equal(db.rows.length, 1);
   assert.deepEqual(row.content, next);
-  assert.equal(row.pushed_at, T2.toISOString());
+  assert.ok(!("pushed_at" in db.writes[1]));
+  assert.ok(Date.parse(row.pushed_at) > Date.parse(firstPushedAt));
   assert.equal(row.period_end, "2026-03-05T03:00:00.000Z");
   // The edits and the link of the image survive...
   assert.deepEqual(row.overrides, { headline: { value: "Minha frase", base: "Duas entregas de exemplo foram concluídas." } });
@@ -149,18 +159,26 @@ test("pushing again refreshes the draft and keeps what the user did to it", asyn
 
 test("every push moves the revision up by one", async () => {
   const db = fakeDatabase();
-  await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T1 });
+  await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   assert.equal(db.rows[0].rev, 0);
-  await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T2 });
+  await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   assert.equal(db.rows[0].rev, 1);
-  await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T3 });
+  await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   assert.equal(db.rows[0].rev, 2);
 });
 
-test("sending the very same draft again changes nothing but the push time and revision", async () => {
+test("sending the very same draft again changes nothing but the revision (and voids the check)", async () => {
   const db = fakeDatabase();
-  const first = await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T1 });
-  const again = await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T1 });
+  const first = await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
+  const pushedAt = db.rows[0].pushed_at;
+  db.rows[0].checked_at = "2026-03-04T16:00:00.000Z";
+  db.rows[0].checked_by = "a-user";
+  const again = await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
+  assert.equal(db.rows[0].checked_at, null);
+  assert.equal(db.rows[0].rev, 1);
+  // The database stamps a push only when the content changed: the very same content keeps its time.
+  assert.equal(db.rows[0].pushed_at, pushedAt);
+  assert.ok(!("pushed_at" in db.writes[1]));
   assert.equal(first.status === 200 && first.id, again.status === 200 && again.id);
   assert.equal(db.rows.length, 1);
   assert.deepEqual(db.rows[0].content, content());
@@ -170,7 +188,7 @@ test("sending the very same draft again changes nothing but the push time and re
 test("a period that was already sent answers 409 and nothing is written", async () => {
   const db = fakeDatabase();
   db.addSent(WINDOW.start, WINDOW.end);
-  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T1 });
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   assert.deepEqual(result, { status: 409, error: "period_already_sent" });
   assert.ok(!db.calls.includes("insert") && !db.calls.includes("updateDraft"));
   assert.equal(db.rows.length, 1);
@@ -180,9 +198,9 @@ test("a period that was already sent answers 409 and nothing is written", async 
 test("a sent period blocks the push even when there is a newer draft", async () => {
   const db = fakeDatabase();
   db.addSent("2026-02-27T00:00:00-03:00", WINDOW.start);
-  await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T1 });
+  await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   const draft = db.rows[1];
-  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content("x", { start: "2026-02-27T00:00:00-03:00", end: WINDOW.start }), now: T2 });
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content("x", { start: "2026-02-27T00:00:00-03:00", end: WINDOW.start }) });
   assert.deepEqual(result, { status: 409, error: "period_already_sent" });
   assert.deepEqual(draft.content, content());
 });
@@ -190,7 +208,7 @@ test("a sent period blocks the push even when there is a newer draft", async () 
 test("after a report is sent, the next push starts a new draft", async () => {
   const db = fakeDatabase();
   db.addSent(WINDOW.start, WINDOW.end);
-  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content("Próximo período.", { start: WINDOW.end, end: "2026-03-06T00:00:00-03:00" }), now: T3 });
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content("Próximo período.", { start: WINDOW.end, end: "2026-03-06T00:00:00-03:00" }) });
   assert.deepEqual(result, { status: 200, id: "id-2", created: true });
   assert.equal(db.rows.length, 2);
 });
@@ -201,7 +219,7 @@ test("if another push creates the draft first, this push is applied to that draf
     db.hooks.beforeInsert = undefined;
     db.rows.push({ id: "id-rival", produto: "GeoCloud", period_start: "2026-03-02T03:00:00.000Z", period_end: "2026-03-03T03:00:00.000Z", status: "draft", rev: 0, pushed_at: T1.toISOString(), checked_at: null, content: content("rival"), overrides: {}, share_token: "token-rival", checked_by: null });
   };
-  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content("a minha"), now: T2 });
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content("a minha") });
   assert.deepEqual(result, { status: 200, id: "id-rival", created: false });
   assert.equal(db.rows.length, 1);
   assert.equal(db.rows[0].content.headline, "a minha");
@@ -209,12 +227,12 @@ test("if another push creates the draft first, this push is applied to that draf
 
 test("if the draft gets sent between the read and the write, the push is refused, not written over it", async () => {
   const db = fakeDatabase();
-  await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T1 });
+  await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   db.hooks.beforeUpdate = () => {
     db.hooks.beforeUpdate = undefined;
     db.rows[0].status = "sent";
   };
-  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content("tarde demais"), now: T2 });
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content("tarde demais") });
   assert.deepEqual(result, { status: 409, error: "period_already_sent" });
   assert.deepEqual(db.rows[0].content, content());
 });
@@ -222,7 +240,7 @@ test("if the draft gets sent between the read and the write, the push is refused
 test("it gives up with a clear answer when the race does not settle", async () => {
   const db = fakeDatabase();
   db.store.insert = async () => null; // the database keeps saying "already there", yet no draft is ever found
-  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T1 });
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   assert.deepEqual(result, { status: 409, error: "concurrent_push" });
 });
 
@@ -232,9 +250,9 @@ const body = (c: ProgressContent = content()) => ({ produto: "GeoCloud", content
 
 test("a good request answers 200 with the id, whether it was created, and the link to the screen", async () => {
   const db = fakeDatabase();
-  const out = await receiveDraft(db.store, body(), T1);
+  const out = await receiveDraft(db.store, body());
   assert.deepEqual(out, { status: 200, body: { id: "id-1", created: true, url: "https://roads-psi.vercel.app/resumo" } });
-  const again = await receiveDraft(db.store, body(), T2);
+  const again = await receiveDraft(db.store, body());
   assert.deepEqual(again.body, { id: "id-1", created: false, url: "https://roads-psi.vercel.app/resumo" });
 });
 
@@ -242,7 +260,7 @@ test("a bad request answers 400 with the reason and stores nothing", async () =>
   const db = fakeDatabase();
   const bad = body();
   bad.content.entries[0].status = "quase" as never;
-  const out = await receiveDraft(db.store, bad, T1);
+  const out = await receiveDraft(db.store, bad);
   assert.equal(out.status, 400);
   assert.match((out.body as { error: string }).error, /content\.entries\[0\]\.status/);
   assert.equal(db.rows.length, 0);
@@ -252,14 +270,14 @@ test("a bad request answers 400 with the reason and stores nothing", async () =>
 test("a request for a period already sent answers 409", async () => {
   const db = fakeDatabase();
   db.addSent(WINDOW.start, WINDOW.end);
-  const out = await receiveDraft(db.store, body(), T1);
+  const out = await receiveDraft(db.store, body());
   assert.deepEqual(out, { status: 409, body: { error: "period_already_sent" } });
 });
 
 test("the state starts the next window where the last sent report ended, and lists draft and last sent briefly", async () => {
   const db = fakeDatabase();
   const sent = db.addSent("2026-02-27T00:00:00-03:00", WINDOW.start);
-  await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T1 });
+  await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   const state = await reportState(db.store, "GeoCloud", new Date("2026-03-05T15:00:00Z"));
   assert.deepEqual(state.window, { start: sent.period_end, end: "2026-03-05T00:00:00-03:00" });
   assert.deepEqual(state.lastSent, {
@@ -267,7 +285,7 @@ test("the state starts the next window where the last sent report ended, and lis
     entries: [{ id: "gc-101", status: "concluido" }],
   });
   assert.deepEqual(state.draft, {
-    id: "id-2", period_start: "2026-03-02T03:00:00.000Z", period_end: "2026-03-04T03:00:00.000Z", pushed_at: T1.toISOString(), rev: 0, checked_at: null,
+    id: "id-2", period_start: "2026-03-02T03:00:00.000Z", period_end: "2026-03-04T03:00:00.000Z", pushed_at: db.rows.find((r) => r.id === "id-2")!.pushed_at, rev: 0, checked_at: null,
   });
   // Nothing else about the reports leaks: no content, edits or link token.
   assert.deepEqual(Object.keys(state.draft ?? {}).sort(), ["checked_at", "id", "period_end", "period_start", "pushed_at", "rev"]);
@@ -332,7 +350,7 @@ test("an edit that makes no sense is ignored, and so is an edit of an entry that
 test("with no sent report there is nothing already reported", async () => {
   assert.deepEqual(reportedEntries(null), []);
   const db = fakeDatabase();
-  await ingestDraft(db.store, { produto: "GeoCloud", content: content(), now: T1 });
+  await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   const state = await reportState(db.store, "GeoCloud", NOW);
   assert.equal(state.lastSent, null);
 });

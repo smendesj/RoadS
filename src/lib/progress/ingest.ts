@@ -17,12 +17,13 @@ export type StoredReport = Pick<ProgressReportRow, "id" | "produto" | "period_st
 /** The last sent report, with what "already reported" needs: its entries as pushed, and the user's edits of them. */
 export type SentReport = StoredReport & { entries: Pick<ProgressEntry, "id" | "status" | "hidden">[]; overrides: Overrides };
 
-export type NewReport = { produto: Produto; period_start: string; period_end: string; content: ProgressContent; pushed_at: string };
+// No pushed_at in either: the database stamps it with its own clock (migration 0025), the clock that also
+// stamps "numbers checked", so a check made right after a push is never taken for one made before it.
+export type NewReport = { produto: Produto; period_start: string; period_end: string; content: ProgressContent };
 export type DraftPatch = {
   content: ProgressContent;
   period_start: string;
   period_end: string;
-  pushed_at: string;
   rev: number;
   checked_at: null;
   checked_by: null;
@@ -39,7 +40,7 @@ export type ReportStore = {
   updateDraft(id: string, patch: DraftPatch): Promise<boolean>;
 };
 
-export type IngestInput = { produto: Produto; content: ProgressContent; now?: Date };
+export type IngestInput = { produto: Produto; content: ProgressContent };
 export type IngestResult = { status: 200; id: string; created: boolean } | { status: 409; error: "period_already_sent" | "concurrent_push" };
 
 export async function ingestDraft(
@@ -47,7 +48,6 @@ export async function ingestDraft(
   input: IngestInput
 ): Promise<IngestResult> {
   const { produto, content } = input;
-  const pushedAt = (input.now ?? new Date()).toISOString();
   // Stored as UTC instants, so "the same period" compares equal whatever offset the content was written with.
   const period = { period_start: new Date(content.window.start).toISOString(), period_end: new Date(content.window.end).toISOString() };
 
@@ -61,12 +61,12 @@ export async function ingestDraft(
     const draft = await store.findDraft(produto);
     if (draft) {
       // The numbers may have changed, so the user must check them again: a new push voids the conference.
-      const patch: DraftPatch = { content, ...period, pushed_at: pushedAt, rev: draft.rev + 1, checked_at: null, checked_by: null };
+      const patch: DraftPatch = { content, ...period, rev: draft.rev + 1, checked_at: null, checked_by: null };
       if (await store.updateDraft(draft.id, patch)) return { status: 200, id: draft.id, created: false };
       continue;
     }
 
-    const created = await store.insert({ produto, ...period, content, pushed_at: pushedAt });
+    const created = await store.insert({ produto, ...period, content });
     if (created) return { status: 200, id: created.id, created: true };
   }
   return { status: 409, error: "concurrent_push" };
@@ -79,10 +79,10 @@ export type ReceiveResult =
   | { status: 400 | 409; body: { error: string } };
 
 /** POST: validate the body, then ingest it. Everything but the secret check and the HTTP plumbing. */
-export async function receiveDraft(store: Pick<ReportStore, "findDraft" | "findByPeriod" | "insert" | "updateDraft">, body: unknown, now?: Date): Promise<ReceiveResult> {
+export async function receiveDraft(store: Pick<ReportStore, "findDraft" | "findByPeriod" | "insert" | "updateDraft">, body: unknown): Promise<ReceiveResult> {
   const parsed = parseDraft(body);
   if (!parsed.ok) return { status: 400, body: { error: parsed.error } };
-  const result = await ingestDraft(store, { produto: parsed.produto, content: parsed.content, now });
+  const result = await ingestDraft(store, { produto: parsed.produto, content: parsed.content });
   if (result.status === 409) return { status: 409, body: { error: result.error } };
   return { status: 200, body: { id: result.id, created: result.created, url: `${PRODUCTION_ORIGIN}/resumo` } };
 }

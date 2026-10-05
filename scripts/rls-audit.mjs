@@ -326,7 +326,6 @@ try {
           headline,
           entries: [{ id: "zz-1", status: "em_validacao", hidden: false }, { id: "zz-2", status: "concluido", hidden: true }],
         },
-        now: new Date(),
       });
     const first = await push("[TESTE] primeira", 21);
     await check("ingest", "the first push creates the draft", "allow", async () => ({ ok: first.status === 200 && first.created === true, detail: `status ${first.status}` }));
@@ -343,6 +342,8 @@ try {
       const fresh = after.content.headline === "[TESTE] segunda" && after.rev > before.rev;
       return { ok: second.status === 200 && second.created === false && second.id === first.id && kept && voided && fresh, detail: `kept ${kept}, voided ${voided}, fresh ${fresh}` };
     });
+    // Checked right after the push, then sent (issue #6): the push time is the database's own, so a check made
+    // a moment later is never taken for one made before it, however far ahead this machine's clock runs.
     await edit(adm.c, first.id, { checked_at: new Date().toISOString() });
     await edit(adm.c, first.id, { status: "sent" });
     const late = await push("[TESTE] tarde demais", 22);

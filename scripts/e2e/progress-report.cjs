@@ -437,11 +437,8 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       const current = await row(draft.id);
       const next = JSON.parse(JSON.stringify(current.content));
       next.entries[0].summary = "A primeira entrega de teste ganhou um texto novo do Claude.";
-      const checkedMs = current.checked_at ? Date.parse(current.checked_at) : Date.now();
-      // Just after the check, by the database's own clock, and well before the next one (the steps in between
-      // take seconds): a wider gap made the second check race the stamp when the page got faster.
-      const pushedAt = new Date(checkedMs + 300).toISOString();
-      const { error } = await svc.from("progress_reports").update({ content: next, pushed_at: pushedAt, rev: current.rev + 1 }).eq("id", draft.id);
+      // The database stamps the push time itself when the content changes (migration 0025), like the route's push.
+      const { error } = await svc.from("progress_reports").update({ content: next, rev: current.rev + 1 }).eq("id", draft.id);
       expect("(setup) the draft was pushed again", !error, error ? error.message : "");
     }
     await page.reload({ waitUntil: "load" });
