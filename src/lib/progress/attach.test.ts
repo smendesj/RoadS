@@ -70,11 +70,33 @@ test("sending the same prints again adds nothing: the run can be repeated", asyn
   assert.equal(db.writes.length, 1); // nothing to write the second time
 });
 
-test("a print must name a delivery of that report and be one already uploaded; otherwise nothing is written", async () => {
+test("a print with no delivery is a general print: added after the others, once, and apart from the same file under a delivery", async () => {
+  const db = fakeStore(sent(), [path("a"), path("b")]);
+  const before = structuredClone(db.now()!.content);
+  const out = await attachShots(db.store, ID, { shots: [shotOf(undefined, path("a"), "Plano geral"), shotOf(1, path("a"), "A mesma imagem numa entrega"), shotOf(undefined, path("b"), "Outro desenho geral")] });
+  assert.deepEqual(out, { status: 200, body: { added: 3, existing: 0 } });
+  const after = db.now()!.content;
+  assert.deepEqual(after.shots, [
+    before.shots![0],
+    { id: "shot-2", caption: "Plano geral", mime: "image/png", path: path("a") },
+    { id: "shot-3", caption: "A mesma imagem numa entrega", mime: "image/png", issue: 1, path: path("a") },
+    { id: "shot-4", caption: "Outro desenho geral", mime: "image/png", path: path("b") },
+  ]);
+  assert.ok(!("issue" in after.shots![1]), "a general print carries no issue key at all");
+  assert.deepEqual({ ...after, shots: undefined }, { ...before, shots: undefined }); // text, statuses, numbers untouched
+  const again = await attachShots(db.store, ID, { shots: [shotOf(undefined, path("a"), "Plano geral"), shotOf(undefined, path("b"))] });
+  assert.deepEqual(again, { status: 200, body: { added: 0, existing: 2 } });
+  assert.equal(db.writes.length, 1);
+});
+
+test("a print must name a delivery of that report (or none, for a general print) and be one already uploaded; otherwise nothing is written", async () => {
   const cases: [unknown, RegExp][] = [
     [{ shots: [shotOf(99, path("a"))] }, /#99/],
-    [{ shots: [shotOf(undefined, path("a"))] }, /issue/],
+    [{ shots: [{ ...shotOf(1, path("a")), issue: "1" }] }, /issue/], // a delivery that is not a whole number is no delivery
+    [{ shots: [{ ...shotOf(1, path("a")), issue: 0 }] }, /issue/],
+    [{ shots: [{ ...shotOf(1, path("a")), issue: null }] }, /issue/],
     [{ shots: [shotOf(1, path("c"))] }, /não foi enviado/],
+    [{ shots: [shotOf(undefined, path("c"))] }, /não foi enviado/], // a general print must be uploaded too
     [{ shots: [shotOf(1, "../segredo.png")] }, /path/],
     [{ shots: [{ ...shotOf(1, path("a")), path: path("a", "jpg") }] }, /path/], // extension of another type
     [{ shots: [shotOf(1, path("a"), "")] }, /caption/],

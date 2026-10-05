@@ -27,6 +27,8 @@ const WEEK = "2099-02-02";
 const WEEK_PATH = `/resumo/semana/${WEEK}?produto=ELIMS`;
 const WEEK_USAGE = `/resumo/semana/${WEEK}/uso?produto=ELIMS`;
 const WEEK_HEADLINE = "Na semana, 2 entregas concluídas e 1 em andamento.";
+// The caption of the general print (no delivery) added to the synthetic sent report.
+const GENERAL_CAPTION = `${MARK} Plano geral da semana`;
 // The next Monday: the week of a synthetic report that starts on the Saturday before it and ends on its Wednesday.
 const NEXT_WEEK_PATH = "/resumo/semana/2099-02-09?produto=ELIMS";
 const NEXT_WEEK_HEADLINE = "Na semana, 1 entrega concluída, 1 em validação e 1 em andamento.";
@@ -279,6 +281,20 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       expect("(setup) a sent report that starts on a Saturday and ends the Wednesday after", !error, error ? error.message : "");
     }
     expect("attach: the report now has that print, after the ones it had", (sentAfter.content.shots ?? []).length === (sentBefore.content.shots ?? []).length + 1 && sentAfter.content.shots.at(-1).issue === 9001);
+    // A general print, of no delivery (a plan for the week, say): the same door adds it, once, at the end.
+    const crookedIssue = await postAttach(sent.id, { shots: [{ caption: `${MARK} Entrega torta`, mime: "image/png", issue: "9001", path: E2E_SHOT_PATH }] });
+    expect("attach: an issue that is not a whole number is a 400, not a general print", crookedIssue.status === 400 && /issue/.test((await crookedIssue.json().catch(() => ({}))).error ?? ""), String(crookedIssue.status));
+    const generalBody = { shots: [{ caption: GENERAL_CAPTION, mime: "image/png", path: E2E_SHOT_PATH }] };
+    const generalAdded = await postAttach(sent.id, generalBody);
+    const generalAddedBody = await generalAdded.json().catch(() => ({}));
+    expect("attach: a print with no delivery is added as a general print", generalAdded.status === 200 && generalAddedBody.added === 1 && generalAddedBody.existing === 0, `${generalAdded.status} ${JSON.stringify(generalAddedBody)}`);
+    const generalTwice = await postAttach(sent.id, generalBody);
+    expect("attach: the same general print again adds nothing", generalTwice.status === 200 && (await generalTwice.json()).existing === 1, String(generalTwice.status));
+    const withGeneral = await row(sent.id);
+    expect(
+      "attach: the general print is the last one, carries no delivery, and the rest of the sent report is untouched",
+      withGeneral.content.shots.at(-1).caption === GENERAL_CAPTION && withGeneral.content.shots.at(-1).issue === undefined && keep(withGeneral) === keep(sentBefore)
+    );
 
     // The e-mail client fetches the picture with no cookies: the token in the address is the only key.
     const version = (r) => Date.parse(r.pushed_at).toString(36); // same rule as visualPath() in src/lib/progress-report.ts
@@ -384,6 +400,10 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
         (await smPage.locator('[data-entry="9001"]').innerText()).includes("Primeira entrega") && !(await smPage.locator('[data-entry="9001"]').innerText()).includes("escondida na sexta")
       );
       expect("scrum master -> the print of a delivery sits under it", (await smPage.locator('[data-entry="9001"] [data-print]').count()) === 1);
+      expect(
+        "scrum master -> a general print added after the send shows among the other prints, with its caption",
+        (await smPage.locator('section[aria-label="Outros prints"]').innerText()).includes(GENERAL_CAPTION)
+      );
       const fridaySrc = (await smPage.locator('[data-entry="9003"] [data-print] img').getAttribute("src")) ?? "";
       expect("scrum master -> a print of the Friday report comes by that report's own link", Boolean(fridayToken) && fridaySrc.includes(`/api/progress-report/${fridayToken}/`), fridaySrc);
       const numbers = await smPage.locator("#uso dd").allInnerTexts();

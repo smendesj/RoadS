@@ -1,12 +1,15 @@
-// Adds prints of deliveries to a Resumo that was already SENT, so the week can be presented with them. The
-// door the attach script uses (scripts/progress/attach.ts), after it uploaded each print to the prints bucket.
+// Adds prints to a Resumo that was already SENT, so the week can be presented with them: prints of its
+// deliveries, and general prints that belong to no delivery (a plan for the week, say). The door the attach
+// script uses (scripts/progress/attach.ts), after it uploaded each print to the prints bucket.
 // Pure, with the table and the bucket injected: the route wires the admin client, the tests a fake.
 //
-//   { shots: [{ caption, mime, issue, path }] } -> 200 { added, existing } | 400 { error } | 404 | 409
+//   { shots: [{ caption, mime, issue?, path }] } -> 200 { added, existing } | 400 { error } | 404 | 409
 //
 // Only prints are ever added: the text, the statuses, the numbers, the user's edits and the prints the report
 // already had stay exactly as they were (the e-mail already went out). A print already there (same file, same
-// delivery) is skipped, so the run can be repeated. The write is made over the revision that was read.
+// delivery, or both general) is skipped, so the run can be repeated. A general print has no `issue` at all,
+// so the e-mail and the week place it at the end, like the ones a push carries without a delivery.
+// The write is made over the revision that was read.
 import type { ProgressContent, ProgressReportRow, Shot } from "../progress-report.ts";
 import { MAX_SHOTS, SHOT_PATH, shotExtension } from "./draft.ts";
 import { isUuid } from "./report-view.ts";
@@ -28,7 +31,11 @@ export type AttachAnswer = { status: 200; body: { added: number; existing: numbe
 const refuse = (error: string): AttachAnswer => ({ status: 400, body: { error } });
 const CONTROL = /[\u0000-\u001F\u007F-\u009F]/g;
 
-type Incoming = { caption: string; mime: Shot["mime"]; issue: number; path: string };
+/** `issue` is absent for a general print. */
+type Incoming = { caption: string; mime: Shot["mime"]; issue?: number; path: string };
+
+/** The same print twice means the same file under the same delivery, or the same file twice as a general print. */
+const printKey = (issue: number | undefined, path: string) => `${issue ?? "geral"}:${path}`;
 
 /** One incoming print, checked, or the sentence that says what is wrong with it. */
 function incoming(value: unknown, at: string, issues: Set<number>, hidden: Set<number>): Incoming | string {
@@ -37,16 +44,20 @@ function incoming(value: unknown, at: string, issues: Set<number>, hidden: Set<n
   if (mime !== "image/png" && mime !== "image/jpeg") return `${at}.mime: esperado image/jpeg ou image/png`;
   const caption = typeof s.caption === "string" ? s.caption.replace(CONTROL, " ").replace(/\s+/g, " ").trim() : "";
   if (caption === "" || caption.length > 200) return `${at}.caption: esperada uma legenda de 1 a 200 caracteres`;
+  // No `issue` key is a general print; a key that is there must be a delivery (null or "1" is not "none").
+  const general = !("issue" in s) || s.issue === undefined;
   const issue = s.issue;
-  if (typeof issue !== "number" || !Number.isInteger(issue) || issue <= 0) return `${at}.issue: esperado o número da issue da entrega`;
-  if (!issues.has(issue)) return `${at}.issue: a entrega #${issue} não está neste resumo`;
-  // The e-mail leaves a hidden delivery out, and its prints with it: a print there would never be seen.
-  if (hidden.has(issue)) return `${at}.issue: a entrega #${issue} está escondida neste resumo`;
+  if (!general) {
+    if (typeof issue !== "number" || !Number.isInteger(issue) || issue <= 0) return `${at}.issue: esperado o número da issue da entrega`;
+    if (!issues.has(issue)) return `${at}.issue: a entrega #${issue} não está neste resumo`;
+    // The e-mail leaves a hidden delivery out, and its prints with it: a print there would never be seen.
+    if (hidden.has(issue)) return `${at}.issue: a entrega #${issue} está escondida neste resumo`;
+  }
   const path = s.path;
   if (typeof path !== "string" || !SHOT_PATH.test(path) || !path.endsWith(`.${shotExtension(mime)}`)) {
     return `${at}.path: esperado o nome do print no armazenamento (hash e extensão do tipo)`;
   }
-  return { caption, mime, issue, path };
+  return { caption, mime, ...(general ? {} : { issue: issue as number }), path };
 }
 
 export async function attachShots(store: AttachStore, id: string, body: unknown): Promise<AttachAnswer> {
@@ -72,10 +83,10 @@ export async function attachShots(store: AttachStore, id: string, body: unknown)
   }
 
   const had = report.content.shots ?? [];
-  const known = new Set(had.map((s) => `${s.issue}:${s.path}`));
+  const known = new Set(had.map((s) => printKey(s.issue, s.path ?? "")));
   const fresh: Incoming[] = [];
   for (const shot of checked) {
-    const key = `${shot.issue}:${shot.path}`;
+    const key = printKey(shot.issue, shot.path);
     if (known.has(key)) continue;
     known.add(key);
     fresh.push(shot);
@@ -83,12 +94,14 @@ export async function attachShots(store: AttachStore, id: string, body: unknown)
   if (fresh.length === 0) return { status: 200, body: { added: 0, existing: checked.length } };
   if (had.length + fresh.length > MAX_SHOTS) return refuse(`shots: o resumo passaria de ${MAX_SHOTS} prints`);
   for (const shot of fresh) {
-    if (!(await store.shotExists(shot.path))) return refuse(`shots: o print da entrega #${shot.issue} não foi enviado ao armazenamento`);
+    if (!(await store.shotExists(shot.path))) {
+      return refuse(`shots: o print ${shot.issue === undefined ? "geral" : `da entrega #${shot.issue}`} não foi enviado ao armazenamento`);
+    }
   }
 
   // New ids follow the highest "shot-<n>" already there, so the public links of the old prints never move.
   const top = had.reduce((max, s) => Math.max(max, Number(/^shot-(\d+)$/.exec(s.id)?.[1] ?? 0)), 0);
-  const added: Shot[] = fresh.map((s, i) => ({ id: `shot-${top + i + 1}`, caption: s.caption, mime: s.mime, issue: s.issue, path: s.path }));
+  const added: Shot[] = fresh.map((s, i) => ({ id: `shot-${top + i + 1}`, caption: s.caption, mime: s.mime, ...(s.issue === undefined ? {} : { issue: s.issue }), path: s.path }));
   const content: ProgressContent = { ...report.content, shots: [...had, ...added] };
   if (!(await store.writeShots(id, report.rev, content))) return { status: 409, body: { error: "concurrent_change" } };
   return { status: 200, body: { added: added.length, existing: checked.length - added.length } };

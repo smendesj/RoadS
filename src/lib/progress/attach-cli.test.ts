@@ -90,9 +90,28 @@ test("the dry run checks the folder and touches no network", async () => {
   assert.match(w.output(), /Prints: 2/);
 });
 
-test("every print here must name its delivery; a bad folder or id stops before any request", async () => {
+test("a print without a delivery goes up as a general print of the week, and the dry run says so", async () => {
+  const files = {
+    [`${WEEK}/captions.json`]: JSON.stringify([
+      { file: "1-tela.png", caption: "Tela da entrega 1.", issue: 1 },
+      { file: "2-codigo.jpg", caption: "Plano geral da semana." },
+    ]),
+  };
+  const dry = world({ env: {}, files });
+  assert.equal(await dry.run("--report", ID, "--shots-dir", WEEK, "--dry-run"), 0, dry.output());
+  assert.equal(dry.requests.length, 0);
+  assert.match(dry.output(), /Prints: 2 \(#1, geral\)/);
+
+  const w = world({ files });
+  assert.equal(await w.run("--report", ID, "--shots-dir", WEEK), 0, w.output());
+  const shots = w.report().content.shots ?? [];
+  assert.deepEqual(shots.map((s) => [s.issue, s.caption]), [[1, "Tela da entrega 1."], [undefined, "Plano geral da semana."]]);
+  assert.match(w.output(), /acrescentados: 2/i);
+});
+
+test("a bad folder, id or issue stops before any request", async () => {
   const cases: [string[], Record<string, string | Buffer>, RegExp][] = [
-    [["--report", ID, "--shots-dir", WEEK], { [`${WEEK}/captions.json`]: JSON.stringify([{ file: "1-tela.png", caption: "Sem entrega." }]) }, /entrega|issue/],
+    [["--report", ID, "--shots-dir", WEEK], { [`${WEEK}/captions.json`]: JSON.stringify([{ file: "1-tela.png", caption: "Entrega torta.", issue: "um" }]) }, /issue/],
     [["--report", ID, "--shots-dir", WEEK], { [`${WEEK}/captions.json`]: JSON.stringify([{ file: "sumiu.png", caption: "X.", issue: 1 }]) }, /sumiu\.png/],
     [["--report", ID, "--shots-dir", WEEK], { [`${WEEK}/captions.json`]: "[]" }, /nenhum print/i],
     [["--report", ID, "--shots-dir", WEEK], { [`${WEEK}/captions.json`]: JSON.stringify([{ file: "1-tela.png", caption: "x".repeat(201), issue: 1 }]) }, /200 caracteres/],

@@ -1,12 +1,13 @@
-// Adds prints of deliveries to a Resumo that was already SENT, so the week can be presented with them.
+// Adds prints to a Resumo that was already SENT, so the week can be presented with them.
 //
 //   node --experimental-strip-types scripts/progress/attach.ts --report <id> --shots-dir <pasta>
 //        [--endpoint https://.../api/frontlights] [--dry-run]
 //
-// The folder holds the prints and a captions.json listing [{ file, caption, issue }], like the push's; here
-// every print must name the delivery it shows. Each print is uploaded on its own (the same door the push
-// uses), then the report receives the list. Only prints are added: the text, the numbers and the prints the
-// report already had stay as they were, and a print already there is skipped, so the run can be repeated.
+// The folder holds the prints and a captions.json listing [{ file, caption, issue? }], like the push's. A print
+// names the delivery it shows (`issue`), or none: a general print, which the e-mail and the week place at the
+// end (a plan for the week, say). Each print is uploaded on its own (the same door the push uses), then the
+// report receives the list. Only prints are added: the text, the numbers and the prints the report already had
+// stay as they were, and a print already there is skipped, so the run can be repeated.
 //
 // The secret comes only from FRONTLIGHTS_API_SECRET (.env.local is loaded when it exists). Nothing printed
 // ever contains the secret: only counts, the HTTP status and the names of the files.
@@ -19,7 +20,7 @@ import { configuredEndpoint, dirShots, loadShots, uploadShots, type PushDeps } f
 const USAGE = [
   "Uso: node --experimental-strip-types scripts/progress/attach.ts --report <id> --shots-dir <pasta> [opções]",
   "  --report <id>         o id do resumo já enviado (o endereço /resumo/<id> mostra)",
-  "  --shots-dir <pasta>   pasta dos prints, com captions.json listando arquivo, legenda e entrega (issue)",
+  "  --shots-dir <pasta>   pasta dos prints, com captions.json listando arquivo, legenda e, se houver, a entrega (issue); sem issue, o print é geral",
   "  --endpoint <url>      base da API (padrão: roadmapSync.endpoint de .frontlights/config.json)",
   "  --dry-run             só confere a pasta e os prints; não envia nada",
 ];
@@ -60,15 +61,13 @@ export async function runAttach(argv: string[], deps: PushDeps): Promise<number>
   const listed = dirShots(args.shotsDir, deps);
   if (typeof listed === "string") return fail(listed);
   if (listed.length === 0) return fail("Nenhum print listado: a pasta precisa de um captions.json com os prints a acrescentar.");
-  const loose = listed.find((s) => s.issue === undefined);
-  if (loose) return fail(`O print «${loose.file.split("/").pop()}» precisa dizer a entrega que mostra («issue» no captions.json).`);
   const loaded = await loadShots({ shots: listed, badIssue: null }, deps);
   if (typeof loaded === "string") return fail(loaded);
 
   if (args.dryRun) {
     deps.print("Simulação: a pasta está válida e nada foi enviado.");
     deps.print(`Resumo: ${args.report}`);
-    deps.print(`Prints: ${loaded.length} (${[...new Set(loaded.map((s) => `#${s.shot.issue}`))].join(", ")})`);
+    deps.print(`Prints: ${loaded.length} (${[...new Set(loaded.map((s) => (s.shot.issue === undefined ? "geral" : `#${s.shot.issue}`)))].join(", ")})`);
     return 0;
   }
 
