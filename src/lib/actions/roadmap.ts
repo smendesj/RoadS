@@ -4,6 +4,7 @@ import { getLatestBoardSnapshot } from "@/lib/actions/sync";
 import { withIssueStatus } from "@/lib/board";
 import { createGeoCloudIssue } from "@/lib/github";
 import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
+import { moveLanePayload } from "@/lib/move-payload";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { NEW_ITEM_TITLE, type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
@@ -297,5 +298,6 @@ export async function moveRoadmapItemLane(itemId: string, targetLaneId: string):
   if (error) throw error;
   if (!moved?.length) throw new Error("forbidden");
 
-  await queueChange(itemId, "move_lane", { lane_id: targetLaneId });
+  // Both lanes, like every other move_lane: Frontlights writes the departure into the sprint the item left.
+  await queueChange(itemId, "move_lane", moveLanePayload({ from: access.item.lane_id, to: targetLaneId, title: access.item.title }));
 }

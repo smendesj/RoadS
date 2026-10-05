@@ -113,6 +113,14 @@ const { BASE, expect, sleep, svc } = L;
     await sleep(2000);
     const { data: movedS } = await svc.from("roadmap_items").select("lane_id").eq("id", L.ids.seeded).single();
     expect("move (drag and drop): the seeded item can be moved too", movedS.lane_id === "zz-test-b", movedS.lane_id);
+    // The sync queue says where the item went AND where it came from (Frontlights writes the departure into the
+    // sprint file the item left; docs/frontlights-contract.md promises both lanes in every move_lane).
+    const { data: movedQueue } = await svc.from("roadmap_sync_queue").select("payload").eq("item_id", L.ids.seeded).eq("action", "move_lane");
+    expect(
+      "move (drag and drop): the queue row names the lane it went to and the lane it came from",
+      (movedQueue ?? []).some((r) => r.payload?.lane_id === "zz-test-b" && r.payload?.from_lane_id === "zz-test-sprint"),
+      JSON.stringify((movedQueue ?? []).map((r) => Object.keys(r.payload ?? {}).sort()))
+    );
     await mouseDrag(adminItem, groupBox("[TESTE] lane B (apagar)"));
     await sleep(1500);
     const { data: movedAdmin } = await svc.from("roadmap_items").select("lane_id").eq("id", L.ids.adminItem).single();

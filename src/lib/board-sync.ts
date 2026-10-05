@@ -24,6 +24,7 @@ import { createGeoCloudIssue, GEOCLOUD_REPO } from "@/lib/github";
 import { BOARD_REPO, boardCard } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
 import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
+import { moveLanePayload } from "@/lib/move-payload";
 import { planRotation, SPRINT_IDS, type SprintDates, type SprintId } from "@/lib/sprint-rotation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NEW_ITEM_TITLE } from "@/lib/types";
@@ -206,7 +207,7 @@ async function rotateSprints(doneUrls: Set<string>): Promise<void> {
       await admin.from("roadmap_sync_queue").insert({
         item_id: p.id,
         action: "move_lane",
-        payload: { lane_id: p.to, from_lane_id: p.from, title: byId.get(p.id)!.title, reason: "sprints rotated" },
+        payload: moveLanePayload({ from: p.from, to: p.to, title: byId.get(p.id)!.title, reason: "sprints rotated" }),
       });
     }
   }
@@ -326,7 +327,7 @@ async function reconcileRoadmapWithIssues(token: string, onProject: Set<number>)
     await admin.from("roadmap_sync_queue").insert({
       item_id: item.id,
       action: "move_lane",
-      payload: { lane_id: target, from_lane_id: item.lane_id, title: item.title, reason: "filed by type label" },
+      payload: moveLanePayload({ from: item.lane_id, to: target, title: item.title, reason: "filed by type label" }),
     });
   }
 
