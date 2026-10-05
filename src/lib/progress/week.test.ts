@@ -83,14 +83,15 @@ function report(kind: "quarta" | "sexta", patch: Partial<ProgressContent> = {}, 
   return { content, overrides, share_token: wed ? "token-quarta" : "token-sexta", pushed_at: wed ? "2026-09-30T20:00:00Z" : "2026-10-02T20:00:00Z", period_start: new Date(window.start).toISOString() };
 }
 
-test("each delivery appears once, as the latest report of the week left it, edits included", () => {
+test("each delivery appears once, as the latest report of the week that showed it left it, edits included", () => {
   const week = combineWeek([report("sexta", {}, { "entry:gc-4:title": { value: "Entrega quatro, editada" } }), report("quarta")]);
   const byIssue = Object.fromEntries(week.content.entries.map((e) => [e.issue, e]));
   assert.deepEqual(Object.keys(byIssue).map(Number).sort(), [1, 2, 3, 4]);
   assert.equal(byIssue[1].status, "concluido"); // em andamento on Wednesday, done on Friday
   assert.equal(byIssue[1].title, "Entrega um na sexta");
   assert.equal(byIssue[2].status, "concluido"); // only on Wednesday: kept as it was
-  assert.equal(byIssue[3].hidden, true); // hidden on Friday wins
+  assert.equal(byIssue[3].hidden, false); // shown on Wednesday: hidden on Friday does not take it out of the week
+  assert.equal(byIssue[3].title, "Entrega três"); // ...and it is Wednesday's copy
   assert.equal(byIssue[4].title, "Entrega quatro, editada");
 });
 
@@ -134,13 +135,32 @@ test("the internal work of a report whose line the user removed from the e-mail 
 test("a delivery with neither title nor sentence is not on show, as in the e-mail", () => {
   const blank = report("sexta");
   blank.content.entries.push(entry(5, "concluido", { title: "", summary: "" }));
-  assert.equal(combineWeek([report("quarta"), blank]).content.headline, "Na semana, 2 entregas concluídas e 1 em andamento.");
+  assert.equal(combineWeek([report("quarta"), blank]).content.headline, "Na semana, 2 entregas concluídas, 1 em validação e 1 em andamento.");
+});
+
+test("a delivery shown in any report of the week is on show, as the latest report that showed it left it", () => {
+  // The collector puts on Friday, hidden, what was delivered before Friday's period: Wednesday showed it.
+  const fri = report("sexta");
+  fri.content.entries.push(entry(2, "concluido", { title: "Entrega dois, escondida na sexta", hidden: true }));
+  const week = combineWeek([report("quarta"), fri]);
+  const two = week.content.entries.find((e) => e.issue === 2);
+  assert.equal(two?.hidden, false);
+  assert.equal(two?.title, "Entrega dois");
+  // Hidden in every report of the week: left out.
+  const wed = report("quarta");
+  wed.content.entries[2].hidden = true; // #3, hidden on Wednesday too (it is hidden on Friday already)
+  assert.equal(combineWeek([wed, report("sexta")]).content.entries.find((e) => e.issue === 3)?.hidden, true);
+  // Blank on Friday (no title, no sentence): not shown there either, so Wednesday's copy wins.
+  const blankFriday = report("sexta");
+  blankFriday.content.entries[0] = entry(1, "concluido", { title: "", summary: "" });
+  const blank = combineWeek([report("quarta"), blankFriday]);
+  assert.equal(blank.content.entries.find((e) => e.issue === 1)?.title, "Entrega um na quarta");
 });
 
 test("the opening line is generated from the deliveries on show, never taken from one of the e-mails", () => {
   const week = combineWeek([report("quarta"), report("sexta")]);
-  // On show: 1 and 2 done, 4 under way (3 is hidden).
-  assert.equal(week.content.headline, "Na semana, 2 entregas concluídas e 1 em andamento.");
+  // On show: 1 and 2 done, 3 in validation (shown on Wednesday), 4 under way.
+  assert.equal(week.content.headline, "Na semana, 2 entregas concluídas, 1 em validação e 1 em andamento.");
 });
 
 test("the prints of both reports come along, each with the link of its own report, and no sign-in details", () => {

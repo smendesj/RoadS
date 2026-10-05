@@ -253,6 +253,9 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       const friday = makeContent("enviado na sexta", "2099-02-05", "2099-02-06", "2099-02-07");
       friday.entries[1].status = "concluido";
       friday.entries[1].title = `${MARK} Segunda entrega, pronta na sexta`;
+      // As the collector does: what was delivered before Friday's period comes along hidden.
+      friday.entries[0].hidden = true;
+      friday.entries[0].title = `${MARK} Primeira entrega, escondida na sexta`;
       friday.shots = [{ id: "shot-1", caption: `${MARK} Tela da terceira entrega, na sexta`, mime: "image/png", issue: 9003, path: E2E_SHOT_PATH }];
       const stamp = new Date().toISOString();
       const { data, error } = await svc
@@ -364,6 +367,10 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       const once = await Promise.all([9001, 9002, 9003].map((n) => smPage.locator(`[data-entry="${n}"]`).count()));
       expect("scrum master -> each delivery appears once", once.every((c) => c === 1), once.join(","));
       expect("scrum master -> a delivery shows as the latest report of the week left it", (await smPage.locator('[data-entry="9002"]').innerText()).includes("pronta na sexta"));
+      expect(
+        "scrum master -> a delivery Wednesday showed stays, as Wednesday showed it, though Friday carries it hidden",
+        (await smPage.locator('[data-entry="9001"]').innerText()).includes("Primeira entrega") && !(await smPage.locator('[data-entry="9001"]').innerText()).includes("escondida na sexta")
+      );
       expect("scrum master -> the print of a delivery sits under it", (await smPage.locator('[data-entry="9001"] [data-print]').count()) === 1);
       const fridaySrc = (await smPage.locator('[data-entry="9003"] [data-print] img').getAttribute("src")) ?? "";
       expect("scrum master -> a print of the Friday report comes by that report's own link", Boolean(fridayToken) && fridaySrc.includes(`/api/progress-report/${fridayToken}/`), fridaySrc);

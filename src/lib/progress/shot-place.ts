@@ -6,9 +6,11 @@ import { MAX_SHOTS } from "./draft.ts";
 
 const clean = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
-/** The deliveries the reader sees: not hidden, and with a title or a sentence to show. */
-export const visibleOf = (content: ProgressContent): ProgressEntry[] =>
-  (Array.isArray(content.entries) ? content.entries : []).filter((e) => e && !e.hidden && (clean(e.title) || clean(e.summary)));
+/** Whether the reader sees a delivery: not hidden, and with a title or a sentence to show. */
+export const isShown = (e: ProgressEntry | null | undefined): boolean => Boolean(e && !e.hidden && (clean(e.title) || clean(e.summary)));
+
+/** The deliveries the reader sees. */
+export const visibleOf = (content: ProgressContent): ProgressEntry[] => (Array.isArray(content.entries) ? content.entries : []).filter(isShown);
 
 export type PlacedShot = { shot: Shot; src: string | null };
 

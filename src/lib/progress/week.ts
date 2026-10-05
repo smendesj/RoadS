@@ -3,13 +3,14 @@
 // stored, so it exists the moment a report of the week is marked as sent. Pure on purpose: the screens and the
 // tests use it.
 //
-// What the week shows: each delivery once, as the latest report of the week left it (the user's edits
-// applied); the difficulties and next steps of the latest report; the internal work and Claude's usage added
-// up; an opening line made from the counts; the prints of every report, each served by the link of its own
-// report. Nothing the e-mails do not have, and none of their sign-in details.
+// What the week shows: each delivery once, as the latest report of the week that SHOWED it left it
+// (the user's edits applied; a delivery hidden in every report stays out); the difficulties and next steps
+// of the latest report; the internal work and Claude's usage added up; an opening line made from the
+// counts; the prints of every report, each served by the link of its own report. Nothing the e-mails do not
+// have, and none of their sign-in details.
 import type { DayUsage, EntryStatus, Overrides, ProgressContent, ProgressEntry, Shot, TokenCount, UsageModel } from "../progress-report.ts";
 import { resolveContent } from "./resolve.ts";
-import { visibleOf } from "./shot-place.ts";
+import { isShown, visibleOf } from "./shot-place.ts";
 
 export type WeekReport = { content: ProgressContent; overrides: Overrides; share_token: string; pushed_at: string; period_start: string };
 /** Where a print of the week is served from: its own report's public link, by its position there. */
@@ -118,14 +119,20 @@ export function combineWeek(rows: WeekReport[]): Week {
   const shown = ordered.map((r) => resolveContent({ content: r.content, overrides: r.overrides ?? {} }));
   const latest = shown[shown.length - 1];
 
-  // Each delivery once, as the latest report that has it left it; the latest report's deliveries lead.
+  // Each delivery once, as the latest report that showed it left it; the latest report's deliveries lead. A
+  // later report may carry it hidden (the collector hides what was delivered before that report's period), and
+  // that does not take out of the week what an earlier e-mail showed. Hidden in every report: it stays hidden.
   const entries: ProgressEntry[] = [];
-  const seen = new Set<number>();
+  const at = new Map<number, number>();
   for (const report of [...shown].reverse()) {
     for (const e of report.entries) {
-      if (seen.has(e.issue)) continue;
-      seen.add(e.issue);
-      entries.push(e);
+      const i = at.get(e.issue);
+      if (i === undefined) {
+        at.set(e.issue, entries.length);
+        entries.push(e);
+      } else if (!isShown(entries[i]) && isShown(e)) {
+        entries[i] = e;
+      }
     }
   }
 
