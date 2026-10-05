@@ -2,7 +2,9 @@
 
 Dashboard e roadmap colaborativo da Essencis Labs — substitui o SCRUM síncrono por um board em tempo
 real e priorização assíncrona, sincronizada com `ROADMAP.md`/`SPRINT.md` via IA (`/update-roads` no
-FrontlightS, que lê `/api/frontlights/pending-changes` e confirma em `/api/frontlights/ack`).
+FrontlightS, que lê `/api/frontlights/pending-changes` e confirma em `/api/frontlights/ack`). O que o RoadS
+promete ao FrontlightS (rotas, formatos, versão do contrato e regra de aviso de quebra) está em
+`docs/frontlights-contract.md`.
 
 Protótipo interativo (referência de design, dados reais do board): https://claude.ai/artifact/HKN2kCFBESPSJibARZ56Jn
 
@@ -34,9 +36,10 @@ npm install
 npm run dev
 ```
 
-Precisa de um `.env.local` (veja `NEXT_STEPS.md` — não é gerado automaticamente por design: o
-hook de segurança do agente bloqueia gravação de arquivos `.env*`). A variável que autentica o
-`/update-roads` do FrontlightS é `FRONTLIGHTS_API_SECRET`.
+Precisa de um `.env.local` (não é gerado automaticamente por design: o hook de segurança do agente
+bloqueia gravação de arquivos `.env*`) com `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
+`SUPABASE_SECRET_KEY`, `GITHUB_TOKEN`, `CRON_SECRET` (autentica o cron diário) e `FRONTLIGHTS_API_SECRET`
+(autentica o `/update-roads` do FrontlightS e os scripts de envio do resumo).
 
 ## Setup do banco
 
@@ -46,7 +49,7 @@ npx supabase link --project-ref ctovfklkdmqrvpukrliv
 npx supabase db push        # aplica tudo em supabase/migrations/
 ```
 
-Veja `NEXT_STEPS.md` para o que falta e o que cada passo precisa.
+A migração nova entra sempre com o `db push`: as políticas e os gatilhos dela são a trava real de segurança.
 
 ## Testes
 
@@ -54,7 +57,7 @@ Veja `NEXT_STEPS.md` para o que falta e o que cada passo precisa.
 npm test                # unitários (lógica pura, sem rede)
 npm run audit:rls       # permissões no banco: anônimo, Dev, Scrum Master e admin contra cada tabela
 npm run scan:secrets    # segredos no bundle do cliente, no build do servidor e no histórico do git
-npm run e2e             # as telas de cada papel, num Chrome de verdade (precisa do servidor local, abaixo)
+npm run e2e             # as portas do FrontlightS e as telas de cada papel, num Chrome de verdade (precisa do servidor local, abaixo)
 npm run e2e -- reset    # idem, mais o fluxo de redefinição de senha (envia 1 e-mail real; E2E_NO_EMAIL=1 pula esse passo)
 npm run e2e:prod        # só leitura: um passeio por papel na produção
 npm run e2e:prod -- recovery   # idem, e termina um link de recuperação pela página de produção (troca e restaura a senha da conta Dev de teste)
