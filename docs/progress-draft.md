@@ -102,3 +102,17 @@ conta de acesso do campo `access` de `.frontlights/progress/config.json` (arquiv
 ```json
 { "usageLabel": "Título da imagem de uso", "access": { "account": "pessoa@exemplo.com", "password": "senha-temporária" } }
 ```
+
+## Prints depois do envio
+
+Um resumo enviado fica congelado, mas pode **ganhar** prints de entrega depois, para a apresentação da semana.
+Nada mais muda: o texto, as situações, os números e os prints que ele já tinha continuam iguais. O e-mail que
+já saiu não é reenviado.
+
+```powershell
+node --experimental-strip-types scripts/progress/attach.ts --report <id do resumo> --shots-dir <pasta> --dry-run
+node --experimental-strip-types scripts/progress/attach.ts --report <id do resumo> --shots-dir <pasta>
+```
+
+O id é o que aparece no endereço `/resumo/<id>`. A pasta segue as regras dos prints acima, e aqui **todo**
+print do `captions.json` precisa de `issue`. Rodar de novo não duplica nada: o que já estava lá é pulado.

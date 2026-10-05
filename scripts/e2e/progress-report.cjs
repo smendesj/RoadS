@@ -214,6 +214,33 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       .select("id");
     expect("prints door: the draft names the stored print", !shotted.error && shotted.data?.length === 1, shotted.error?.message ?? "");
 
+    // ================================================================ FRONTLIGHTS: adding prints to a SENT report
+    // Only prints are added; the e-mail already went out, so everything else must stay exactly as it was.
+    const attachDoor = (id) => `${BASE}/api/frontlights/progress-report/${id}/shots`;
+    const postAttach = (id, body, secret = process.env.FRONTLIGHTS_API_SECRET) =>
+      fetch(attachDoor(id), { method: "POST", headers: { "content-type": "application/json", ...(secret ? { authorization: `Bearer ${secret}` } : {}) }, body: JSON.stringify(body) });
+    const attachBody = (issue = 9001) => ({ shots: [{ caption: `${MARK} Tela da primeira entrega, depois do envio`, mime: "image/png", issue, path: E2E_SHOT_PATH }] });
+    const sentBefore = await row(sent.id);
+    const keep = (r) => JSON.stringify([r.status, r.overrides, r.checked_at, r.sent_at, r.sent_by, r.pushed_at, r.share_token, { ...r.content, shots: undefined }]);
+    expect("attach: without the secret it is a 401", (await postAttach(sent.id, attachBody(), null)).status === 401);
+    const toDraft = await postAttach(draft.id, attachBody());
+    expect("attach: a draft is a 409 (its prints come with the push)", toDraft.status === 409 && (await toDraft.json()).error === "not_sent", String(toDraft.status));
+    const otherIssue = await postAttach(sent.id, attachBody(4242));
+    expect("attach: a delivery the report does not have is a 400, naming it", otherIssue.status === 400 && /#4242/.test((await otherIssue.json()).error ?? ""), String(otherIssue.status));
+    const neverUploaded = await postAttach(sent.id, { shots: [{ caption: `${MARK} Nunca enviado`, mime: "image/png", issue: 9001, path: `${"e".repeat(64)}.png` }] });
+    const neverUploadedBody = await neverUploaded.json().catch(() => ({}));
+    expect("attach: a print that was never uploaded is a 400, naming its delivery", neverUploaded.status === 400 && /#9001/.test(neverUploadedBody.error ?? ""), `${neverUploaded.status} ${neverUploadedBody.error}`);
+    const ghost = await postAttach(crypto.randomUUID(), attachBody());
+    expect("attach: an unknown report is a 404", ghost.status === 404, String(ghost.status));
+    const attached = await postAttach(sent.id, attachBody());
+    const attachedBody = await attached.json().catch(() => ({}));
+    expect("attach: the print is added to the sent report", attached.status === 200 && attachedBody.added === 1 && attachedBody.existing === 0, `${attached.status} ${JSON.stringify(attachedBody)}`);
+    const twice = await postAttach(sent.id, attachBody());
+    expect("attach: the same print again adds nothing", twice.status === 200 && (await twice.json()).existing === 1, String(twice.status));
+    const sentAfter = await row(sent.id);
+    expect("attach: text, statuses, numbers, edits, stamps and link of the sent report are untouched", keep(sentAfter) === keep(sentBefore));
+    expect("attach: the report now has that print, after the ones it had", (sentAfter.content.shots ?? []).length === (sentBefore.content.shots ?? []).length + 1 && sentAfter.content.shots.at(-1).issue === 9001);
+
     // The e-mail client fetches the picture with no cookies: the token in the address is the only key.
     const version = (r) => Date.parse(r.pushed_at).toString(36); // same rule as visualPath() in src/lib/progress-report.ts
     const image = (r, file = "visual.png", token = r.share_token) => grab(`${BASE}/api/progress-report/${token}/${version(r)}/${file}`);
@@ -271,6 +298,14 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     await smFrame.waitFor();
     const smSrcdoc = (await smFrame.getAttribute("srcdoc")) ?? "";
     const smSandbox = await smFrame.getAttribute("sandbox");
+    {
+      const at = (needle) => smSrcdoc.indexOf(needle);
+      expect(
+        "scrum master -> the print added after sending sits under its delivery",
+        at("Primeira entrega") >= 0 && at("Primeira entrega") < at("/shot-1.png") && at("/shot-1.png") < at("Segunda entrega"),
+        `${at("Primeira entrega")} ${at("/shot-1.png")} ${at("Segunda entrega")}`
+      );
+    }
     expect("scrum master -> a sent report opens as a preview of the e-mail", smSrcdoc.includes("Resumo enviado"), `srcdoc has ${smSrcdoc.length} chars`);
     expect("scrum master -> the preview frame is sandboxed and runs no scripts", smSandbox !== null && !/allow-scripts/.test(smSandbox), String(smSandbox));
     expect("scrum master -> the preview is titled just 'Prévia'", (await smPage.getByRole("heading", { name: "Prévia", exact: true }).count()) === 1 && (await smPage.getByRole("region", { name: "Prévia", exact: true }).count()) === 1 && (await smPage.getByText("Prévia do e-mail").count()) === 0);

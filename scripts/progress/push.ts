@@ -116,10 +116,10 @@ function parseArgs(argv: string[]): Args | null {
 const kb = (bytes: number) => Math.ceil(bytes / 1024);
 
 /** A print ready to go: the contract Shot the draft carries (with the path it will have) and its bytes. */
-type LoadedShot = { shot: Shot; name: string; bytes: Buffer };
+export type LoadedShot = { shot: Shot; name: string; bytes: Buffer };
 
 /** The prints named on the command line or in captions.json, checked, or the sentence that says what is wrong. */
-async function loadShots(args: Args, deps: PushDeps): Promise<LoadedShot[] | string> {
+export async function loadShots(args: Pick<Args, "shots" | "badIssue">, deps: PushDeps): Promise<LoadedShot[] | string> {
   if (args.badIssue) return args.badIssue;
   if (args.shots.length > MAX_SHOTS) return `São aceitos no máximo ${MAX_SHOTS} prints (--shot).`;
   const shots: LoadedShot[] = [];
@@ -172,7 +172,7 @@ function localAccess(value: unknown): { account: string; password: string } | nu
 const SHOT_NAME = /^[\w.-]+\.(png|jpe?g)$/i;
 
 /** The prints a folder's captions.json lists, in that order, as the shots the loader reads; or what is wrong. */
-function dirShots(dir: string, deps: PushDeps): { file: string; caption: string; issue?: number }[] | string {
+export function dirShots(dir: string, deps: PushDeps): { file: string; caption: string; issue?: number }[] | string {
   const base = dir.replace(/[\\/]+$/, "");
   let raw: Buffer;
   try {
@@ -192,6 +192,7 @@ function dirShots(dir: string, deps: PushDeps): { file: string; caption: string;
     const { file, caption, issue } = (item ?? {}) as { file?: unknown; caption?: unknown; issue?: unknown };
     if (typeof file !== "string" || !SHOT_NAME.test(file)) return "Cada item do captions.json precisa de um «file» que seja só o nome de um PNG ou JPEG da pasta.";
     if (typeof caption !== "string" || caption.trim() === "") return `O print «${file}» precisa de uma legenda no captions.json.`;
+    if (caption.trim().length > 200) return `A legenda do print «${file}» passa de 200 caracteres no captions.json.`;
     if (issue !== undefined && !(typeof issue === "number" && Number.isInteger(issue) && issue > 0)) {
       return `O print «${file}» tem um «issue» que não é o número inteiro de uma issue no captions.json.`;
     }
@@ -215,9 +216,39 @@ function summary(produto: string, content: ProgressContent, payloadBytes: number
   ];
 }
 
-function configuredEndpoint(config: unknown): string | null {
+export function configuredEndpoint(config: unknown): string | null {
   const endpoint = (config as { roadmapSync?: { endpoint?: unknown } } | null)?.roadmapSync?.endpoint;
   return typeof endpoint === "string" && endpoint ? endpoint : null;
+}
+
+/**
+ * Sends each print on its own to <root>/progress-report/shots, in order; null when all went up under the path
+ * computed here, or the sentence that says which one failed and why (never the secret, never the server's text
+ * beyond a short reason).
+ */
+export async function uploadShots(root: string, headers: Record<string, string>, loaded: LoadedShot[], deps: PushDeps): Promise<string | null> {
+  for (const { shot, name, bytes } of loaded) {
+    let uploaded: Response;
+    try {
+      uploaded = await deps.fetch(`${root}/progress-report/shots`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ data: bytes.toString("base64") }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch {
+      return `Não consegui falar com o servidor ao enviar o print «${name}» (confira a internet e o endereço).`;
+    }
+    const stored = (await uploaded.json().catch(() => null)) as { path?: unknown; error?: unknown } | null;
+    const status = `HTTP ${uploaded.status}`;
+    if (uploaded.status === 401) return `O servidor recusou o segredo (${status}). Confira FRONTLIGHTS_API_SECRET.`;
+    if (uploaded.status === 400) {
+      const why = typeof stored?.error === "string" && stored.error.length <= 300 ? stored.error.replace(/[\u0000-\u001F]/g, " ") : "motivo não informado";
+      return `O servidor recusou o print «${name}» (${status}): ${why}.`;
+    }
+    if (uploaded.status !== 200 || stored?.path !== shot.path) return `O servidor respondeu ${status} ao print «${name}»; tente de novo em instantes.`;
+  }
+  return null;
 }
 
 /** Runs the command line; returns the exit code (0 sent or valid, 1 refused or failed, 2 wrong command line). */
@@ -297,29 +328,8 @@ export async function runPush(argv: string[], deps: PushDeps): Promise<number> {
   const headers = { authorization: `Bearer ${secret}`, "content-type": "application/json" };
 
   // Each print first, on its own, so the draft that names them never points at a print the bucket lacks.
-  for (const { shot, name, bytes } of loaded) {
-    let uploaded: Response;
-    try {
-      uploaded = await deps.fetch(`${root}/progress-report/shots`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ data: bytes.toString("base64") }),
-        signal: AbortSignal.timeout(30_000),
-      });
-    } catch {
-      return fail(`Não consegui falar com o servidor ao enviar o print «${name}» (confira a internet e o endereço). O rascunho não foi enviado.`);
-    }
-    const stored = (await uploaded.json().catch(() => null)) as { path?: unknown; error?: unknown } | null;
-    const status = `HTTP ${uploaded.status}`;
-    if (uploaded.status === 401) return fail(`O servidor recusou o segredo (${status}). Confira FRONTLIGHTS_API_SECRET.`);
-    if (uploaded.status === 400) {
-      const why = typeof stored?.error === "string" && stored.error.length <= 300 ? stored.error.replace(/[\u0000-\u001F]/g, " ") : "motivo não informado";
-      return fail(`O servidor recusou o print «${name}» (${status}): ${why}. O rascunho não foi enviado.`);
-    }
-    if (uploaded.status !== 200 || stored?.path !== shot.path) {
-      return fail(`O servidor respondeu ${status} ao print «${name}». O rascunho não foi enviado; tente de novo em instantes.`);
-    }
-  }
+  const upload = await uploadShots(root, headers, loaded, deps);
+  if (upload) return fail(`${upload} O rascunho não foi enviado.`);
 
   let response: Response;
   try {
