@@ -4,6 +4,7 @@ import { getViewerOrReset } from "@/lib/get-viewer";
 import type { ProgressReportRow } from "@/lib/progress-report";
 import { createClient } from "@/lib/supabase/server";
 import type { Produto, Role } from "@/lib/types";
+import { weekStartOf, type WeekReport } from "@/lib/progress/week";
 import type { Viewer } from "@/lib/viewer";
 
 // Everything on the Resumo screens is read with the signed-in user's own client, so Row Level Security
@@ -117,4 +118,45 @@ export async function loadSentList(): Promise<{ list: SentSummary[]; failed: boo
     .limit(30);
   if (failure("sent list read", error)) return { list: [], failed: true };
   return { list: (data ?? []) as SentSummary[], failed: false };
+}
+
+/**
+ * The products a week can be of: the database's, GeoCloud being the only one the app writes now (the e2e
+ * suite's synthetic reports are the other).
+ */
+export type WeekProduct = "GeoCloud" | "ELIMS";
+
+/** The product a week's address asks for (?produto=), GeoCloud when it asks for none; null when it is unknown. */
+export function weekProduct(value: string | string[] | undefined): WeekProduct | null {
+  if (value === undefined) return PRODUCT;
+  return value === "GeoCloud" || value === "ELIMS" ? value : null;
+}
+
+/** "YYYY-MM-DD" of a Monday (the address of a week), or null. */
+export function weekStartParam(value: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T12:00:00Z`))) return null;
+  return weekStartOf(`${value}T15:00:00Z`) === value ? value : null;
+}
+
+/**
+ * The reports SENT in the week that starts on that Monday (São Paulo time, by the day each period starts),
+ * for the week's presentation, of one product: GeoCloud unless the address asks for another (the e2e suite's
+ * synthetic reports use another, so real ones are never touched). Drafts never: the query asks for sent ones
+ * only, for every role.
+ */
+export async function loadWeek(start: string, produto: WeekProduct = PRODUCT): Promise<{ rows: WeekReport[]; failed: boolean }> {
+  const from = new Date(Date.parse(`${start}T03:00:00Z`)); // Monday 00:00 in São Paulo
+  const to = new Date(from.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("progress_reports")
+    .select("content, overrides, share_token, pushed_at, period_start")
+    .eq("produto", produto)
+    .eq("status", "sent")
+    .gte("period_start", from.toISOString())
+    .lt("period_start", to.toISOString())
+    .order("period_start", { ascending: true });
+  if (failure("week read", error)) return { rows: [], failed: true };
+  const rows = ((data ?? []) as unknown as WeekReport[]).map((r) => ({ ...r, content: forScreen({ content: r.content } as ProgressReportRow).content }));
+  return { rows, failed: false };
 }

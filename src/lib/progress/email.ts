@@ -8,7 +8,7 @@
 // links are https ones.
 import { STATUS_LABEL } from "../progress-report.ts";
 import type { EmailBuild, EmailOptions, EntryStatus, ProgressContent, ProgressEntry } from "../progress-report.ts";
-import { MAX_SHOTS } from "./draft.ts";
+import { placeShots, visibleOf, type PlacedShot } from "./shot-place.ts";
 import { joinNames, visualAlt, visualModel, visualSize, windowDays } from "./visual.ts";
 
 /* ---------- escaping and URLs ---------- */
@@ -87,9 +87,6 @@ const FONT = "'Segoe UI',Arial,Helvetica,sans-serif";
 const CARD_WIDTH = 600;
 const PAD = 28;
 const SHOT_WIDTH = CARD_WIDTH - 2 * PAD;
-
-const visibleOf = (content: ProgressContent): ProgressEntry[] =>
-  (Array.isArray(content.entries) ? content.entries : []).filter((e) => e && !e.hidden && (clean(e.title) || clean(e.summary)));
 
 /* ---------- HTML pieces (tables, inline styles) ---------- */
 
@@ -186,13 +183,7 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   const upcoming = by("proximo");
   const internal = content.internal && content.internal.count > 0 ? clean(content.internal.text) : "";
   // Each print keeps its position in `shots`: that index is the one its link (`shotUrls`) was built for.
-  const shots = (Array.isArray(content.shots) ? content.shots : []).slice(0, MAX_SHOTS).map((shot, i) => ({ shot, src: safeImage(options.shotUrls?.[i]) }));
-  // A print of a delivery that has its own block sits under it; a print of a hidden delivery is left out with
-  // it; every other print (no delivery, or one listed under "Próximos passos") is a general one, at the end.
-  const blocked = new Set(visible.filter((e) => e.status !== "proximo").map((e) => e.issue));
-  const hiddenIssues = new Set((Array.isArray(content.entries) ? content.entries : []).filter((e) => e && !visible.includes(e)).map((e) => e.issue));
-  const shotsOf = (issue: number) => shots.filter((s) => s.shot.issue === issue);
-  const general = shots.filter((s) => s.shot.issue === undefined || (!blocked.has(s.shot.issue) && !hiddenIssues.has(s.shot.issue)));
+  const { shotsOf, general } = placeShots(content, options.shotUrls, safeImage);
   const withShots = (e: ProgressEntry): string[] => [
     entryBlock(e),
     ...shotsOf(e.issue).flatMap(({ shot, src }) => (src ? shotBlock(src, clean(shot.caption), 12) : [])),
@@ -322,7 +313,7 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   const shownCounters: CounterStatus[] = counts.bloqueado > 0 ? ["concluido", "em_validacao", "em_andamento", "bloqueado"] : ["concluido", "em_validacao", "em_andamento"];
   out.push("", shownCounters.map((s) => `${STATUS_LABEL[s]}: ${counts[s]}`).join(" · "));
   const item = (e: ProgressEntry) => `- ${clean(e.title)}${clean(e.summary) ? `: ${clean(e.summary)}` : ""}`;
-  const printLines = (list: typeof shots) => list.filter((s) => s.src && clean(s.shot.caption)).map((s) => `Print: ${clean(s.shot.caption)}`);
+  const printLines = (list: PlacedShot[]) => list.filter((s) => s.src && clean(s.shot.caption)).map((s) => `Print: ${clean(s.shot.caption)}`);
   const itemWithShots = (e: ProgressEntry) => [item(e), ...printLines(shotsOf(e.issue)).map((l) => `  ${l}`)];
   for (const status of ["concluido", "em_validacao", "em_andamento"] as const) {
     if (counts[status] > 0) out.push("", STATUS_LABEL[status], ...by(status).flatMap(itemWithShots));
@@ -347,3 +338,6 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
 
   return { html, text: out.join("\n") };
 }
+
+// The placement rule lives in shot-place.ts; re-exported for whoever imports it from the e-mail.
+export { placeShots } from "./shot-place.ts";

@@ -319,6 +319,14 @@ test("a print of a delivery sits right under that delivery; a print of no delive
   assert.ok(at(t, "Entrega de teste 1") < at(t, "Print: Legenda do print 3") && at(t, "Print: Legenda do print 3") < at(t, "Entrega de teste 2"));
 });
 
+test("the placement rule is shared, and the week can lift the cap of forty", async () => {
+  const { placeShots } = await import("./shot-place.ts");
+  const many = Array.from({ length: 45 }, (_, i) => ({ ...shot(i + 1), issue: 1 }));
+  const urls = many.map((_, i) => `u${i}`);
+  assert.equal(placeShots(rich({ shots: many }), urls, (u) => u ?? null).shotsOf(1).length, 40);
+  assert.equal(placeShots(rich({ shots: many }), urls, (u) => u ?? null, Infinity).shotsOf(1).length, 45);
+});
+
 test("a print without a link, or a report without prints, leaves no hole", () => {
   assert.ok(!html(rich(), { ...OPTIONS, shotUrls: [] }).includes("Legenda do print"));
   assert.ok(!html(rich({ shots: [] })).includes("shot-1.jpg"));

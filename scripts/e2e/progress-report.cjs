@@ -21,6 +21,12 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 // A print of this suite: made-up bytes that start like a PNG. Stored under the hash of its bytes, like any print.
 const E2E_SHOT = Buffer.concat([PNG_SIGNATURE, Buffer.from(`${MARK} print do e2e do Resumo`)]);
 const E2E_SHOT_PATH = `${crypto.createHash("sha256").update(E2E_SHOT).digest("hex")}.png`;
+// The week of the synthetic sent report (2099-02-02 is a Monday); the presentation puts it together.
+const WEEK = "2099-02-02";
+// The synthetic reports are of another product, so the week's address names it (GeoCloud is the default).
+const WEEK_PATH = `/resumo/semana/${WEEK}?produto=ELIMS`;
+const WEEK_USAGE = `/resumo/semana/${WEEK}/uso?produto=ELIMS`;
+const WEEK_HEADLINE = "Na semana, 2 entregas concluídas e 1 em andamento.";
 
 // ---------------------------------------------------------------- fixtures (service role)
 function makeContent(kind, d1, d2, end) {
@@ -182,10 +188,12 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     // ================================================================ nobody signed in
     const anon = await browser.newContext({ locale: "pt-BR" });
     const anonPage = await anon.newPage();
-    for (const [name, p] of [["/resumo", "/resumo"], ["/resumo/<draft>", `/resumo/${draft.id}`], ["/resumo/<sent>", `/resumo/${sent.id}`]]) {
+    for (const [name, p] of [["/resumo", "/resumo"], ["/resumo/<draft>", `/resumo/${draft.id}`], ["/resumo/<sent>", `/resumo/${sent.id}`], ["/resumo/semana/<week>", WEEK_PATH]]) {
       await anonPage.goto(BASE + p, { waitUntil: "load" });
       expect(`nobody signed in -> ${name} goes to /login`, new URL(anonPage.url()).pathname === "/login", anonPage.url());
     }
+    const anonUsage = await grab(`${BASE}${WEEK_USAGE}`);
+    expect("nobody signed in -> the week's usage picture is not served", anonUsage.status !== 200 || !/image\/png/.test(anonUsage.type ?? ""), `${anonUsage.status} ${anonUsage.type}`);
     await refusedEverywhere(anon, "nobody signed in", draft, "draft");
     await refusedEverywhere(anon, "nobody signed in", sent, "sent report");
 
@@ -239,6 +247,22 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     expect("attach: the same print again adds nothing", twice.status === 200 && (await twice.json()).existing === 1, String(twice.status));
     const sentAfter = await row(sent.id);
     expect("attach: text, statuses, numbers, edits, stamps and link of the sent report are untouched", keep(sentAfter) === keep(sentBefore));
+    // A second sent report in the same week (Thursday to Friday): the second delivery got done on Friday.
+    let fridayToken = null;
+    {
+      const friday = makeContent("enviado na sexta", "2099-02-05", "2099-02-06", "2099-02-07");
+      friday.entries[1].status = "concluido";
+      friday.entries[1].title = `${MARK} Segunda entrega, pronta na sexta`;
+      friday.shots = [{ id: "shot-1", caption: `${MARK} Tela da terceira entrega, na sexta`, mime: "image/png", issue: 9003, path: E2E_SHOT_PATH }];
+      const stamp = new Date().toISOString();
+      const { data, error } = await svc
+        .from("progress_reports")
+        .insert({ produto: "ELIMS", period_start: "2099-02-05T00:00:00-03:00", period_end: "2099-02-07T00:00:00-03:00", status: "sent", content: friday, overrides: {}, checked_at: stamp, sent_at: stamp })
+        .select("share_token")
+        .single();
+      fridayToken = data?.share_token ?? null;
+      expect("(setup) a second sent report in the same week", !error && Boolean(fridayToken), error ? error.message : "");
+    }
     expect("attach: the report now has that print, after the ones it had", (sentAfter.content.shots ?? []).length === (sentBefore.content.shots ?? []).length + 1 && sentAfter.content.shots.at(-1).issue === 9001);
 
     // The e-mail client fetches the picture with no cookies: the token in the address is the only key.
@@ -267,10 +291,12 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     await L.menuButton(dev.page).waitFor();
     expect("dev -> no Resumo tab", (await dev.page.locator('a[href="/resumo"]').count()) === 0);
     expect("dev -> no Resumo card on the Dashboard", (await dev.page.locator("[data-report-card]").count()) === 0);
-    for (const [name, p] of [["/resumo", "/resumo"], ["/resumo/<draft>", `/resumo/${draft.id}`], ["/resumo/<sent>", `/resumo/${sent.id}`]]) {
+    for (const [name, p] of [["/resumo", "/resumo"], ["/resumo/<draft>", `/resumo/${draft.id}`], ["/resumo/<sent>", `/resumo/${sent.id}`], ["/resumo/semana/<week>", WEEK_PATH]]) {
       await dev.page.goto(BASE + p, { waitUntil: "load" });
       expect(`dev -> ${name} goes back to /dashboard`, dev.page.url().endsWith("/dashboard"), dev.page.url());
     }
+    const devUsage = await dev.context.request.get(`${BASE}${WEEK_USAGE}`);
+    expect("dev -> the week's usage picture is a 404", devUsage.status() === 404, String(devUsage.status()));
     await refusedEverywhere(dev.context, "dev", draft, "draft");
     await refusedEverywhere(dev.context, "dev", sent, "sent report");
     expect("dev -> no console errors or failed requests", noise(dev).length === 0, noise(dev).slice(0, 3).join(" | "));
@@ -328,6 +354,57 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     await smPage.locator('iframe[title="Prévia"]').waitFor();
     const smWidth = await smPage.evaluate(() => ({ w: window.innerWidth, sw: document.documentElement.scrollWidth }));
     expect("scrum master -> /resumo/<sent> at phone width has no sideways scroll", smWidth.sw <= smWidth.w + 1, `scrollWidth ${smWidth.sw} vs ${smWidth.w}`);
+    // ---- the week, to present at the scrum (on a wide screen, like the meeting's)
+    {
+      await smPage.setViewportSize({ width: 1440, height: 900 });
+      const visit = await smPage.goto(BASE + WEEK_PATH, { waitUntil: "load" });
+      await smPage.locator("[data-week]").waitFor();
+      expect("scrum master -> the week opens", visit.status() === 200, String(visit.status()));
+      expect("scrum master -> the week's opening line comes from the counts", (await smPage.locator("[data-week-headline]").innerText()).trim() === WEEK_HEADLINE, await smPage.locator("[data-week-headline]").innerText());
+      const once = await Promise.all([9001, 9002, 9003].map((n) => smPage.locator(`[data-entry="${n}"]`).count()));
+      expect("scrum master -> each delivery appears once", once.every((c) => c === 1), once.join(","));
+      expect("scrum master -> a delivery shows as the latest report of the week left it", (await smPage.locator('[data-entry="9002"]').innerText()).includes("pronta na sexta"));
+      expect("scrum master -> the print of a delivery sits under it", (await smPage.locator('[data-entry="9001"] [data-print]').count()) === 1);
+      const fridaySrc = (await smPage.locator('[data-entry="9003"] [data-print] img').getAttribute("src")) ?? "";
+      expect("scrum master -> a print of the Friday report comes by that report's own link", Boolean(fridayToken) && fridaySrc.includes(`/api/progress-report/${fridayToken}/`), fridaySrc);
+      const numbers = await smPage.locator("#uso dd").allInnerTexts();
+      expect("scrum master -> the week's numbers add up the e-mails' (4 sessions, 320 messages, 2 delivered)", JSON.stringify(numbers) === JSON.stringify(["4", "320", "2"]), JSON.stringify(numbers));
+      // Optional pictures of the presentation, for a person to look at (E2E_SCREENSHOTS=<folder>).
+      if (process.env.E2E_SCREENSHOTS) {
+        fs.mkdirSync(process.env.E2E_SCREENSHOTS, { recursive: true });
+        await smPage.screenshot({ path: path.join(process.env.E2E_SCREENSHOTS, "semana-topo.png") });
+        await smPage.screenshot({ path: path.join(process.env.E2E_SCREENSHOTS, "semana-inteira.png"), fullPage: true });
+      }
+      expect("scrum master -> no navigation bar, nothing to check, edit, copy or send", (await smPage.locator(reviewControls).count()) === 0 && (await noReviewButtons(smPage)) && (await smPage.locator("[data-conference-table]").count()) === 0 && (await smPage.getByRole("link", { name: "Config", exact: true }).count()) === 0);
+      expect("scrum master -> a 'Tela cheia' button and an index of the sections", (await smPage.getByRole("button", { name: "Tela cheia" }).count()) === 1 && (await smPage.getByRole("navigation", { name: "Seções da semana" }).locator('a[href^="#"]').count()) >= 4);
+      await smPage.locator('[data-entry="9001"] [data-print]').click();
+      expect("scrum master -> a print opens large over everything", await smPage.locator("[data-zoom]").isVisible());
+      expect("scrum master -> the focus goes to its 'Fechar' button", await smPage.evaluate(() => document.activeElement?.textContent === "Fechar"));
+      if (process.env.E2E_SCREENSHOTS) await smPage.screenshot({ path: path.join(process.env.E2E_SCREENSHOTS, "semana-print-ampliado.png") });
+      await smPage.keyboard.press("Escape");
+      await smPage.locator("[data-zoom]").waitFor({ state: "detached" });
+      expect("scrum master -> Esc closes it", (await smPage.locator("[data-zoom]").count()) === 0);
+      expect("scrum master -> and the focus is back on the print", await smPage.evaluate(() => document.activeElement?.hasAttribute("data-print") ?? false));
+      const usage = await sm.context.request.get(`${BASE}${WEEK_USAGE}`);
+      const usageBody = Buffer.from(await usage.body());
+      expect("scrum master -> the week's usage picture is a PNG, cached only in this browser", usage.status() === 200 && usageBody.subarray(0, 8).equals(PNG_SIGNATURE) && /^private/.test(usage.headers()["cache-control"] ?? ""), `${usage.status()} ${usage.headers()["cache-control"]}`);
+      for (const [label, path] of [
+        ["a day that is not a Monday", "2099-02-03?produto=ELIMS"],
+        ["a malformed date", "semana-x"],
+        ["a week with nothing sent", "2099-03-02?produto=ELIMS"],
+        ["the same week of another product (GeoCloud, the default)", WEEK],
+        ["an unknown product", `${WEEK}?produto=Outro`],
+      ]) {
+        const r = await smPage.goto(BASE + `/resumo/semana/${path}`, { waitUntil: "load" });
+        expect(`scrum master -> ${label} is a 404`, r.status() === 404, String(r.status()));
+      }
+      await smPage.setViewportSize({ width: 390, height: 800 });
+      await smPage.goto(BASE + WEEK_PATH, { waitUntil: "load" });
+      await smPage.locator("[data-week]").waitFor();
+      const w = await smPage.evaluate(() => ({ w: window.innerWidth, sw: document.documentElement.scrollWidth }));
+      expect("scrum master -> the week at phone width has no sideways scroll", w.sw <= w.w + 1, `scrollWidth ${w.sw} vs ${w.w}`);
+      await smPage.setViewportSize({ width: 1440, height: 900 });
+    }
     expect("scrum master -> no console errors or failed requests", noise(sm, /\/resumo\//).length === 0, noise(sm, /\/resumo\//).slice(0, 3).join(" | "));
 
     // ================================================================ ADMIN: the whole review
@@ -528,6 +605,24 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     expect("admin -> a sent report's preview is titled just 'Prévia' too", (await page.getByRole("heading", { name: "Prévia", exact: true }).count()) === 1 && (await page.getByRole("region", { name: "Prévia", exact: true }).count()) === 1);
     expect("admin -> an older sent report opens read-only, with its seal", (await page.locator('[data-seal="sent"]').count()) === 1 && !(await field("entry:gc-9001:summary").isEditable()) && (await sendButton.count()) === 0);
 
+    // ---- the Enviados list in weeks (the real GeoCloud list, only read) and the week's presentation
+    {
+      await page.goto(BASE + "/resumo", { waitUntil: "load" });
+      const groups = await page.locator("[data-week-group]").evaluateAll((els) =>
+        els.map((g) => {
+          const lis = [...g.querySelectorAll("ul > li")];
+          return { items: lis.filter((li) => !li.querySelector("[data-present-week]")).length, at: lis.findIndex((li) => li.querySelector("[data-present-week]")), links: g.querySelectorAll("[data-present-week]").length };
+        })
+      );
+      expect(
+        "admin -> each week of Enviados has one 'Apresentar a semana', centred between its reports",
+        groups.length > 0 && groups.every((g) => g.links === 1 && g.at === Math.ceil(g.items / 2)),
+        JSON.stringify(groups.slice(0, 4))
+      );
+      const visit = await page.goto(BASE + WEEK_PATH, { waitUntil: "load" });
+      await page.locator("[data-week]").waitFor();
+      expect("admin -> the week opens for the admin too, with nothing to edit", visit.status() === 200 && (await page.locator(reviewControls).count()) === 0, String(visit.status()));
+    }
     expect("admin -> no console errors, hydration errors or failed requests during the whole run", noise(adm).length === 0, noise(adm).slice(0, 3).join(" | "));
   } catch (e) {
     expect("run completed without an exception", false, L.scrub(e && e.message ? e.message : e).slice(0, 300));
