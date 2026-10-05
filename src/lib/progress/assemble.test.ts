@@ -4,6 +4,7 @@ import { assembleDraft } from "./assemble.ts";
 import type { AssembleInput } from "./assemble.ts";
 import { parseDraft } from "./draft.ts";
 import { usageFor } from "./visual-fixture.ts";
+import type { ProgressContent } from "../progress-report.ts";
 
 // Made-up data only: the repository is public.
 
@@ -47,8 +48,8 @@ const input = (over: Partial<AssembleInput> = {}): AssembleInput => ({ texts: te
 
 function assembled(over: Partial<AssembleInput> = {}) {
   const r = assembleDraft(input(over));
-  assert.equal(r.ok, true, r.ok ? "" : r.error);
-  return r.ok ? (r.content as Record<string, any>) : {};
+  assert.ok(r.ok, r.ok ? "" : r.error);
+  return r.content as ProgressContent;
 }
 
 test("the draft joins the collected facts with the written texts, and passes the very check the server runs", () => {
@@ -81,7 +82,8 @@ test("a text for an issue the facts do not have is refused, naming it", () => {
 
 test("an entry the collector hides stays hidden, with a neutral line instead of its technical title", () => {
   const content = assembled();
-  const hidden = content.entries.find((e: any) => e.issue === 3);
+  const hidden = content.entries.find((e) => e.issue === 3);
+  assert.ok(hidden);
   assert.equal(hidden.hidden, true);
   assert.doesNotMatch(`${hidden.title} ${hidden.summary}`, /técnico/);
   assert.ok(hidden.title.length > 0 && hidden.summary.length > 0);
@@ -94,12 +96,12 @@ test("a text may hide an entry, and may show one the collector hid", () => {
     { issue: 3, title: "E", summary: "F.", hidden: false },
   ];
   const content = assembled({ texts: texts({ entries }) });
-  assert.deepEqual(content.entries.map((e: any) => e.hidden), [true, false, false]);
+  assert.deepEqual(content.entries.map((e) => e.hidden), [true, false, false]);
 });
 
 test("next steps may be plain strings or objects; difficulties get an empty 'needs' when none is given", () => {
   const content = assembled({ texts: texts({ difficulties: [{ text: "Sem necessidade informada." }] }) });
-  assert.deepEqual(content.nextSteps.map((n: any) => n.text), ["Primeiro passo de exemplo.", "Segundo passo de exemplo."]);
+  assert.deepEqual(content.nextSteps.map((n) => n.text), ["Primeiro passo de exemplo.", "Segundo passo de exemplo."]);
   assert.equal(content.difficulties[0].needs, "");
 });
 

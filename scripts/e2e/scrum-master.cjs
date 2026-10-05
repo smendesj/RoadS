@@ -50,9 +50,11 @@ const { BASE, expect, sleep, svc } = L;
     expect("create: the new item opens straight into edit mode", (await count(fresh)) === 1);
     await fresh.locator("input").first().fill("[TESTE] criado pelo Scrum Master");
     await fresh.locator("textarea").fill("descrição escrita no teste");
-    const selects = fresh.locator("select");
-    await selects.nth(1).selectOption("High"); // prioridade (0 = produto)
-    await selects.nth(2).selectOption("Low"); // effort
+    // By their visible labels, not their position: the card gained and lost selects (Tipo, Stack) over time.
+    // The select sits inside its <label>, so the label's accessible name also carries every option: match its caption.
+    const labelled = (scope, caption) => scope.locator("label").filter({ has: page.getByText(caption, { exact: true }) }).locator("select");
+    await labelled(fresh, "Prioridade").selectOption("High");
+    await labelled(fresh, "Effort").selectOption("Low");
     await fresh.getByPlaceholder("Escrever nota (opcional)...").fill("[TESTE] primeira nota");
     await btn(fresh, "Salvar").click();
     await page.getByText("[TESTE] criado pelo Scrum Master").first().waitFor({ timeout: 15000 });
@@ -79,7 +81,7 @@ const { BASE, expect, sleep, svc } = L;
     await btn(seeded, "+ nota").click();
     const noting = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
     expect("seeded item: the edit panel has NO title/description/produto fields", (await count(noting.getByText("Título", { exact: true }))) === 0 && (await count(noting.getByText("Descrição", { exact: true }))) === 0);
-    await noting.locator("select").first().selectOption("Critical"); // prioridade
+    await labelled(noting, "Prioridade").selectOption("Critical");
     await noting.getByPlaceholder("Escrever nota (opcional)...").fill("[TESTE] nota no item semeado");
     await btn(noting, "Salvar").click();
     await page.getByText("[TESTE] nota no item semeado").waitFor({ timeout: 15000 });
@@ -90,9 +92,8 @@ const { BASE, expect, sleep, svc } = L;
 
     // ------------------------------------------------ move: drag and drop on desktop, the select on a narrow screen
     const groupBox = (title) => page.getByText(title, { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-2xl')][1]");
-    // A tall window keeps source and drop target on screen together (a drop can't land off-screen).
-    await page.setViewportSize({ width: 1440, height: 3600 });
-    await sleep(600);
+    // A window as tall as the page keeps source and drop target on screen together (a drop can't land off-screen).
+    await L.fitWholePage(page);
     // Native HTML5 drag: Playwright's dragTo doesn't start one here, so move the mouse in steps, like a person.
     const mouseDrag = async (source, target) => {
       await source.scrollIntoViewIfNeeded();

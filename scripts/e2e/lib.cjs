@@ -115,6 +115,14 @@ async function ensureFixtures() {
   return ids;
 }
 
+// A native HTML5 drop only lands on screen: grow the window to the whole page, so source and target are both
+// visible however long the Roadmap gets (its blocks grow with the real board).
+async function fitWholePage(page, width = 1440) {
+  const height = await page.evaluate(() => document.documentElement.scrollHeight);
+  await page.setViewportSize({ width, height: Math.max(900, height + 200) });
+  await sleep(600);
+}
+
 // Removes everything a run can create and puts the test accounts back as they were.
 async function cleanup(since) {
   // Queue rows first, while the items they point to still exist: a row for an item that is already gone
@@ -142,4 +150,4 @@ async function cleanup(since) {
   await svc.from("profiles").update({ role: "dev", must_reset_password: false }).eq("id", ids.dev);
 }
 
-module.exports = { BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, scrub };
+module.exports = { BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, scrub, fitWholePage };

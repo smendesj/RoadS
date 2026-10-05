@@ -80,6 +80,7 @@ const { BASE, expect, sleep, svc } = L;
 
     // drag the Scrum Master's item into a group lane, and it must stay on screen
     const groupBox = (t) => page.getByText(t, { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-2xl')][1]");
+    await L.fitWholePage(page);
     const source = card("[TESTE] SM item, renomeado pelo admin");
     await source.scrollIntoViewIfNeeded();
     const c = await source.boundingBox();
@@ -93,6 +94,7 @@ const { BASE, expect, sleep, svc } = L;
     const { data: moved } = await svc.from("roadmap_items").select("lane_id").eq("id", L.ids.smItem).single();
     expect("admin drags another user's item into a group lane: saved", moved.lane_id === "zz-test-a", moved.lane_id);
     expect("…and the card stays on screen (it used to vanish until a reload)", (await count(card("[TESTE] SM item, renomeado pelo admin"))) === 1);
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     // delete other people's items
     await btn(card("[TESTE] semeado, renomeado pelo admin"), "Excluir").click();
