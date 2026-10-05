@@ -5,6 +5,11 @@ scripts de envio e de anexo deste repositório (`scripts/progress/`). Este docum
 plugin tem o seu, escrito do ponto de vista de quem consome; **se os dois divergirem, o RoadS não decide sozinho:
 abre-se uma issue no repositório do plugin** e o texto só muda depois da resposta.
 
+**Plugin que entende este contrato:** a primeira versão do Frontlights que o cumpre como está aqui é a **0.18.0**
+(confere a `schemaVersion`, se declara no `User-Agent`, lê `lane_id` e `from_lane_id` de `move_lane`, usa o
+`weekMeeting` e a subpasta do último dia do período). Uma quebra futura só é publicada pelo RoadS depois de uma
+versão do plugin que a entenda (seção 2).
+
 Este repositório é público: aqui só há placeholders (`<origem>`), nunca endereço real, segredo, nome de pessoa ou
 de cliente. O código que garante cada ponto está nos arquivos citados e é testado sem servidor.
 
@@ -103,6 +108,9 @@ O que mudou e ainda não foi escrito nos arquivos. Quem monta: `src/lib/frontlig
   seja o move de uma pessoa no app, a rotação dos sprints ou a separação por etiqueta de tipo (`title` e `reason`
   vêm junto, informativos). Os `move_lane` que já estavam na fila antes de 2026-10-05 podem não ter
   `from_lane_id` quando foram feitos por uma pessoa. O estado atual do item está em `item`.
+- O `id` de cada mudança é um UUID gerado pelo banco. O prefixo `done-` é **reservado ao plugin** (ele monta ids
+  próprios para registrar conclusões, que nunca são confirmadas ao RoadS): o RoadS nunca emite um id assim, e o
+  plugin recusa a busca inteira se vier um.
 - Em ordem de criação, só o que não teve ack; com `since`, só o criado **depois** dele. `since` que não é um
   ISO com fuso: `400 { "error": "since must be an ISO timestamp string" }`.
 - Uma `remove` chega com `item` e `itemId` `null` (a linha sumiu); o `payload` traz `item_id`, `lane_id` e
@@ -221,5 +229,7 @@ repositório, `roads-script/push` e `roads-script/attach`.
   ser obrigatório no rascunho (uma quebra do resumo, anterior a este documento).
 - **2026-10-05 (aditivo):** `schemaVersion: 1` em toda resposta e campo opcional nos pedidos de `ack` e do
   rascunho; `weekMeeting` no `GET /progress-report`; registro das chamadas e `User-Agent` dos scripts.
+- **2026-10-05:** o plugin **0.18.0** é publicado e passa a cumprir este contrato. Ele registra nos arquivos as
+  conclusões (item de sprint com `done: true` em `roadmap-state`) a partir do estado, sem confirmá-las ao RoadS.
 - **2026-10-05 (aditivo):** todo `move_lane` novo traz `from_lane_id` além de `lane_id`, inclusive o feito por uma
   pessoa no app (antes só vinha nos moves do sistema).
