@@ -123,8 +123,16 @@ async function fitWholePage(page, width = 1440) {
   await sleep(600);
 }
 
+// The Frontlights doors write down every call that got through the secret; the suites that call them say
+// they are e2e in their User-Agent, so their rows are told apart from the real ones and removed.
+const E2E_UA = "roads-e2e";
+async function cleanupCalls() {
+  await svc.from("frontlights_calls").delete().like("user_agent", `${E2E_UA}%`);
+}
+
 // Removes everything a run can create and puts the test accounts back as they were.
 async function cleanup(since) {
+  await cleanupCalls();
   // Queue rows first, while the items they point to still exist: a row for an item that is already gone
   // (item_id null) can only be told apart by its action, so those orphans are removed too.
   if (since) {
@@ -150,4 +158,4 @@ async function cleanup(since) {
   await svc.from("profiles").update({ role: "dev", must_reset_password: false }).eq("id", ids.dev);
 }
 
-module.exports = { BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, scrub, fitWholePage };
+module.exports = { E2E_UA, cleanupCalls, BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, scrub, fitWholePage };

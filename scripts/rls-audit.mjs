@@ -392,6 +392,30 @@ try {
     return { ok: !r.error, detail: r.error ? r.error.message.slice(0, 90) : "e-mail changed" };
   });
 
+  // ===================== FRONTLIGHTS CALL LOG (table frontlights_calls, migration 0026)
+  // Written by the Frontlights doors and swept by the daily cron, both with the service role. The table has RLS
+  // on and no policy, and anon/authenticated lost their privileges: nobody else reads, writes, edits or deletes.
+  const C = "frontlights_calls";
+  const callRow = (extra = {}) => ({ method: "GET", route: "/zz-audit", status: 200, user_agent: "roads-audit", duration_ms: 12, ...extra });
+  await svc.from(C).delete().eq("user_agent", "roads-audit"); // leftovers of a run that died halfway
+  const logged = await svc.from(C).insert(callRow()).select("id").single();
+  await check("svc", "write a call (the doors do)", "allow", async () => ({ ok: Boolean(logged.data?.id), detail: logged.error?.message.slice(0, 90) ?? "written" }));
+  await check("svc", "read it back", "allow", async () => rows(await svc.from(C).select("id").eq("id", logged.data?.id ?? -1)));
+  await check("svc", "a status that is not an HTTP status", "deny", async () => rows(await svc.from(C).insert(callRow({ status: 999 })).select("id")));
+  await check("svc", "a route that is empty", "deny", async () => rows(await svc.from(C).insert(callRow({ route: "" })).select("id")));
+  await check("svc", "a client name past 200 characters", "deny", async () => rows(await svc.from(C).insert(callRow({ user_agent: "a".repeat(201) })).select("id")));
+  await check("svc", "a negative duration", "deny", async () => rows(await svc.from(C).insert(callRow({ duration_ms: -1 })).select("id")));
+  for (const [who, c] of [["anon", anon], ["dev", dev.c], ["sm", sm.c], ["admin", adm.c]]) {
+    await check(who, "read the call log", "deny", async () => rows(await c.from(C).select("id").eq("id", logged.data?.id ?? -1)));
+    await check(who, "write a call", "deny", async () => rows(await c.from(C).insert(callRow()).select("id")));
+    await check(who, "edit a call", "deny", async () => rows(await c.from(C).update({ status: 500 }).eq("id", logged.data?.id ?? -1).select("id")));
+    await check(who, "delete a call", "deny", async () => rows(await c.from(C).delete().eq("id", logged.data?.id ?? -1).select("id")));
+  }
+  await check("svc", "the audit call is still there, untouched", "allow", async () => {
+    const row = (await svc.from(C).select("status").eq("id", logged.data?.id ?? -1).single()).data;
+    return { ok: row?.status === 200, detail: row ? `status ${row.status}` : "gone" };
+  });
+
   // ===================== AUTH CONFIG (a warning: it's a dashboard setting, code can't fix it)
   // Auth e-mails (password reset, signup confirmation) only link to the production site if it is the
   // project's Site URL / an allowed redirect. generateLink sends no e-mail.
@@ -411,6 +435,7 @@ try {
   await svc.from("roadmap_items").delete().in("created_by", [sm.id, adm.id]);
   await svc.from("roadmap_sync_queue").delete().eq("payload->>zz_test", "true");
   await svc.from("progress_reports").delete().eq("content->>zz_test", "true");
+  await svc.from("frontlights_calls").delete().eq("user_agent", "roads-audit");
   await svc.storage.from("progress-shots").remove([`${"0".repeat(64)}.png`, `${"1".repeat(64)}.png`]);
   for (const u of (await svc.auth.admin.listUsers({ page: 1, perPage: 1000 })).data.users.filter((x) => /roads-audit-/.test(x.email ?? ""))) {
     await svc.auth.admin.deleteUser(u.id);

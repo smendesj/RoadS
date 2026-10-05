@@ -206,7 +206,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     // The push script sends each print on its own; only the shared secret opens this door.
     const shotsDoor = `${BASE}/api/frontlights/progress-report/shots`;
     const postShot = (body, secret = process.env.FRONTLIGHTS_API_SECRET) =>
-      fetch(shotsDoor, { method: "POST", headers: { "content-type": "application/json", ...(secret ? { authorization: `Bearer ${secret}` } : {}) }, body: JSON.stringify(body) });
+      fetch(shotsDoor, { method: "POST", headers: { "content-type": "application/json", "user-agent": `${L.E2E_UA}/progress-report`, ...(secret ? { authorization: `Bearer ${secret}` } : {}) }, body: JSON.stringify(body) });
     const noSecret = await postShot({ data: E2E_SHOT.toString("base64") }, null);
     expect("prints door: without the secret it is a 401", noSecret.status === 401, String(noSecret.status));
     const wrongSecret = await postShot({ data: E2E_SHOT.toString("base64") }, "segredo-errado");
@@ -231,7 +231,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     // Only prints are added; the e-mail already went out, so everything else must stay exactly as it was.
     const attachDoor = (id) => `${BASE}/api/frontlights/progress-report/${id}/shots`;
     const postAttach = (id, body, secret = process.env.FRONTLIGHTS_API_SECRET) =>
-      fetch(attachDoor(id), { method: "POST", headers: { "content-type": "application/json", ...(secret ? { authorization: `Bearer ${secret}` } : {}) }, body: JSON.stringify(body) });
+      fetch(attachDoor(id), { method: "POST", headers: { "content-type": "application/json", "user-agent": `${L.E2E_UA}/progress-report`, ...(secret ? { authorization: `Bearer ${secret}` } : {}) }, body: JSON.stringify(body) });
     const attachBody = (issue = 9001) => ({ shots: [{ caption: `${MARK} Tela da primeira entrega, depois do envio`, mime: "image/png", issue, path: E2E_SHOT_PATH }] });
     const sentBefore = await row(sent.id);
     const keep = (r) => JSON.stringify([r.status, r.overrides, r.checked_at, r.sent_at, r.sent_by, r.pushed_at, r.share_token, { ...r.content, shots: undefined }]);

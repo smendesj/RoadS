@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { DayUsage, ProgressContent } from "../progress-report.ts";
-import { combineWeek, groupByWeek, weekHeadline, weekOfPeriod, weekStartOf, type WeekReport } from "./week.ts";
+import { combineWeek, groupByWeek, weekHeadline, weekMeetingOf, weekOfPeriod, weekStartOf, type WeekReport } from "./week.ts";
 import { entry, sampleContent } from "./visual-fixture.ts";
 
 // Made-up data only: invented deliveries and round numbers.
@@ -29,6 +29,49 @@ test("the end of a period is exclusive: a period that stops at Monday 00:00 belo
   assert.equal(weekOfPeriod({ period_start: "2026-10-03T03:00:00.000Z", period_end: "2026-10-05T03:00:00.001Z" }), "2026-10-05");
   // A period with no length still has a week: the one it sits in.
   assert.equal(weekOfPeriod({ period_start: "2026-10-05T12:00:00.000Z", period_end: "2026-10-05T12:00:00.000Z" }), "2026-10-05");
+});
+
+/* ---------- the Monday scrum where a report is presented ---------- */
+
+test("the meeting of a report is the Monday after the week it belongs to", () => {
+  // Monday to Wednesday of one week is presented at the Monday scrum of the next.
+  assert.equal(weekMeetingOf({ period_start: "2026-09-28T03:00:00.000Z", period_end: "2026-10-01T03:00:00.000Z" }), "2026-10-05");
+  assert.equal(weekMeetingOf({ period_start: "2026-10-01T03:00:00.000Z", period_end: "2026-10-03T03:00:00.000Z" }), "2026-10-05");
+});
+
+test("a period that starts on the weekend is presented by the week it ENDS in, never the one it starts in", () => {
+  // Saturday to Wednesday evening: it starts in the week of 28/09 but belongs to 05/10, so the meeting is 12/10.
+  assert.equal(weekMeetingOf({ period_start: "2026-10-03T03:00:00.000Z", period_end: "2026-10-08T00:30:00.000Z" }), "2026-10-12");
+  // The Friday report of that week, Thursday to Friday, goes to the very same meeting.
+  assert.equal(weekMeetingOf({ period_start: "2026-10-08T03:00:00.000Z", period_end: "2026-10-10T00:00:00.000Z" }), "2026-10-12");
+  // Friday to Tuesday, across the Sunday.
+  assert.equal(weekMeetingOf({ period_start: "2026-10-02T03:00:00.000Z", period_end: "2026-10-07T01:00:00.000Z" }), "2026-10-12");
+});
+
+test("the end is exclusive here too: a period that stops at Monday 00:00 is presented at that very Monday", () => {
+  assert.equal(weekMeetingOf({ period_start: "2026-10-03T03:00:00.000Z", period_end: "2026-10-05T03:00:00.000Z" }), "2026-10-05");
+  assert.equal(weekMeetingOf({ period_start: "2026-10-03T03:00:00.000Z", period_end: "2026-10-05T03:00:00.001Z" }), "2026-10-12");
+});
+
+test("São Paulo's calendar decides, whatever offset the period is written in", () => {
+  // 23:00 in São Paulo on a Monday is already Tuesday in UTC.
+  assert.equal(weekMeetingOf({ period_start: "2026-10-05T03:00:00.000Z", period_end: "2026-10-06T02:00:00.000Z" }), "2026-10-12");
+  assert.equal(weekMeetingOf({ period_start: "2026-10-05T00:00:00-03:00", period_end: "2026-10-06T23:00:00-03:00" }), "2026-10-12");
+  // Sunday 23:59:59 in São Paulo still belongs to the week that ends there.
+  assert.equal(weekMeetingOf({ period_start: "2026-10-01T03:00:00.000Z", period_end: "2026-10-05T02:59:59.000Z" }), "2026-10-05");
+});
+
+test("the meeting crosses the year", () => {
+  assert.equal(weekMeetingOf({ period_start: "2026-12-28T03:00:00.000Z", period_end: "2026-12-31T03:00:00.000Z" }), "2027-01-04");
+});
+
+test("the meeting is always a Monday, for every day a period can end on", () => {
+  for (let day = 0; day < 120; day++) {
+    const end = new Date(Date.parse("2026-10-01T15:00:00.000Z") + day * 24 * 60 * 60 * 1000).toISOString();
+    const meeting = weekMeetingOf({ period_start: "2026-09-28T03:00:00.000Z", period_end: end });
+    assert.match(meeting, /^\d{4}-\d{2}-\d{2}$/);
+    assert.equal(new Date(`${meeting}T00:00:00Z`).getUTCDay(), 1, `${end} -> ${meeting}`);
+  }
 });
 
 test("the sent list is grouped by week, newest first, each group labelled Monday to Friday", () => {

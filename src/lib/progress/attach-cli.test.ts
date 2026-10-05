@@ -75,6 +75,13 @@ test("it uploads each print of the folder, then adds them to the sent report, an
   assert.ok(!w.output().includes(SECRET));
 });
 
+test("every call it makes says which script it is, for the log of calls", async () => {
+  const w = world();
+  await w.run("--report", ID, "--shots-dir", WEEK);
+  assert.equal(w.requests.length, 3);
+  for (const r of w.requests) assert.equal(new Headers(r.init.headers).get("user-agent"), "roads-script/attach");
+});
+
 test("running it again adds nothing and says the prints were already there", async () => {
   const w = world();
   await w.run("--report", ID, "--shots-dir", WEEK);

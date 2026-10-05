@@ -79,10 +79,22 @@ código e tabelas fiquem legíveis em tela cheia). Eles ficam na pasta de prints
 - Só os arquivos listados saem; os demais são ignorados. Use só dados de teste e recorte a identidade de quem
   estava logado.
 
-Com o Frontlights 0.16 ou mais novo, a pasta de prints é a da semana no OneDrive (`weekShots` na configuração):
-`SCRUM\<ano>\<dd_mm da segunda>\summary`, a segunda-feira **seguinte** ao período do resumo, a da reunião em
-que ele é apresentado. O plugin resolve e confere a pasta e a entrega ao comando de envio em `--shots-dir`.
-Como a quarta e a sexta usam a mesma pasta, o `captions.json` de cada envio lista só os prints daquele resumo.
+A pasta de prints é a da semana no OneDrive (`weekShots` na configuração do plugin), com uma subpasta por
+resumo: `SCRUM\<ano>\<dd_mm da segunda>\summary\<dd_mm do último dia do período>`.
+
+- **A segunda** é a da reunião em que o resumo é apresentado: a segunda-feira **seguinte à semana em que o
+  período TERMINA**, no calendário de São Paulo. O fim do período é exclusivo (um período que termina na segunda
+  às 00:00 é da semana que acabou), e o início não conta: um resumo que começa no sábado, onde o anterior parou,
+  é da semana em que termina.
+- **Quem diz a data é o RoadS.** O `GET` do resumo devolve `weekMeeting` (`AAAA-MM-DD`, sempre uma segunda-feira)
+  para a janela que ele mostra, pela mesma regra que agrupa a visão semanal. Para qualquer outro período a regra
+  é a mesma, e o plugin a calcula.
+- **A subpasta** leva o **último dia** do período, o do seu último instante (o fim é exclusivo: um período que
+  termina na quinta às 00:00 tem a quarta como último dia). `07_10` para o resumo de quarta, `09_10` para o de
+  sexta, com o seu `captions.json` e os seus prints. A quarta e a sexta de uma semana usam a mesma segunda, mas cada uma
+  tem a sua subpasta: o `captions.json` de uma nunca sobrescreve o da outra.
+
+O plugin resolve e confere a pasta e a entrega ao comando de envio em `--shots-dir`.
 
 Cada print sobe sozinho para o RoadS antes do rascunho, que viaja só com o nome de cada print. Os prints ficam
 num armazenamento privado do RoadS; o e-mail os mostra pelo link do resumo, como a imagem de uso.

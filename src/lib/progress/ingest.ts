@@ -9,7 +9,10 @@
 import { ENTRY_STATUSES, PRODUCTION_ORIGIN, defaultReportWindow } from "../progress-report.ts";
 import type { EntryStatus, Overrides, ProgressContent, ProgressEntry, ProgressReportRow, ReportWindow } from "../progress-report.ts";
 import type { Produto } from "../types.ts";
+import { unsupportedSchema } from "../frontlights/contract.ts";
+import type { UnsupportedSchema } from "../frontlights/contract.ts";
 import { parseDraft } from "./draft.ts";
+import { weekMeetingOf } from "./week.ts";
 
 /** What the ingest needs to know about a stored report: never its content, edits or link token. */
 export type StoredReport = Pick<ProgressReportRow, "id" | "produto" | "period_start" | "period_end" | "status" | "rev" | "pushed_at" | "checked_at">;
@@ -76,10 +79,14 @@ export async function ingestDraft(
 
 export type ReceiveResult =
   | { status: 200; body: { id: string; created: boolean; url: string } }
-  | { status: 400 | 409; body: { error: string } };
+  | { status: 400 | 409; body: { error: string } }
+  | UnsupportedSchema;
 
 /** POST: validate the body, then ingest it. Everything but the secret check and the HTTP plumbing. */
 export async function receiveDraft(store: Pick<ReportStore, "findDraft" | "findByPeriod" | "insert" | "updateDraft">, body: unknown): Promise<ReceiveResult> {
+  // A body that names another version of the contract is refused before anything is read from it.
+  const unsupported = unsupportedSchema(body);
+  if (unsupported) return unsupported;
   const parsed = parseDraft(body);
   if (!parsed.ok) return { status: 400, body: { error: parsed.error } };
   const result = await ingestDraft(store, { produto: parsed.produto, content: parsed.content });
@@ -111,15 +118,22 @@ export function reportedEntries(sent: Pick<SentReport, "entries" | "overrides"> 
 const brief = (r: StoredReport | null): ReportBrief | null =>
   r && { id: r.id, period_start: r.period_start, period_end: r.period_end, pushed_at: r.pushed_at, rev: r.rev, checked_at: r.checked_at };
 
-/** GET: the window to collect next, a short look at the draft, and at the last sent report with what it told. */
+/**
+ * GET: the window to collect next, a short look at the draft, and at the last sent report with what it told.
+ * `weekMeeting` (YYYY-MM-DD, always a Monday) is the Monday scrum where a report of THAT window is presented,
+ * so Frontlights names the week's folder from it instead of working the week out itself. It says nothing
+ * about any other period.
+ */
 export async function reportState(
   store: Pick<ReportStore, "findDraft" | "findLastSent">,
   produto: Produto,
   now: Date = new Date()
-): Promise<{ window: ReportWindow; draft: ReportBrief | null; lastSent: (ReportBrief & { entries: ReportedEntry[] }) | null }> {
+): Promise<{ weekMeeting: string; window: ReportWindow; draft: ReportBrief | null; lastSent: (ReportBrief & { entries: ReportedEntry[] }) | null }> {
   const [draft, lastSent] = await Promise.all([store.findDraft(produto), store.findLastSent(produto)]);
+  const window = defaultReportWindow(lastSent?.period_end ?? null, now);
   return {
-    window: defaultReportWindow(lastSent?.period_end ?? null, now),
+    weekMeeting: weekMeetingOf({ period_start: window.start, period_end: window.end }),
+    window,
     draft: brief(draft),
     lastSent: lastSent && { ...(brief(lastSent) as ReportBrief), entries: reportedEntries(lastSent) },
   };

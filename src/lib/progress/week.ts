@@ -40,6 +40,15 @@ export function weekOfPeriod(period: { period_start: string; period_end: string 
   return weekStartOf(new Date(Date.parse(period.period_end) - 1).toISOString());
 }
 
+/**
+ * The Monday scrum where a report is presented: the Monday after the week it belongs to (weekOfPeriod).
+ * It is the day Frontlights names the week's folder after, so the rule lives here, in one place, and
+ * the plugin is handed the date instead of working it out again.
+ */
+export function weekMeetingOf(period: { period_start: string; period_end: string }): string {
+  return plusDays(weekOfPeriod(period), 7);
+}
+
 /** The sent list in weeks, in the order it came (newest first), each labelled Monday to Friday. */
 export function groupByWeek<T extends { period_start: string; period_end: string }>(list: T[]): { start: string; label: string; items: T[] }[] {
   const groups: { start: string; label: string; items: T[] }[] = [];

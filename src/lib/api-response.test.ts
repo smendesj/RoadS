@@ -7,7 +7,7 @@ test("a server error says nothing about what failed", async () => {
   const res = serverError("pending-changes", new Error('relation "roadmap_sync_queue" does not exist'));
   const body = await res.text();
   assert.equal(res.status, 500);
-  assert.deepEqual(JSON.parse(body), { error: "internal_error" });
+  assert.deepEqual(JSON.parse(body), { schemaVersion: 1, error: "internal_error" });
   assert.doesNotMatch(body, /roadmap_sync_queue|relation/);
   log.mock.restore();
 });

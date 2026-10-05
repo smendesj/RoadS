@@ -1,6 +1,6 @@
 // Runs the role-by-role UI suites one after another and reports which passed.
 //
-//   npm run e2e              public pages, Dev, Scrum Master, admin, direct server actions, "Resumo para a diretoria", dark mode/phone/cross-tab
+//   npm run e2e              public pages, the Frontlights doors, Dev, Scrum Master, admin, direct server actions, "Resumo para a diretoria", dark mode/phone/cross-tab
 //   npm run e2e -- reset     the password-reset flow too (sends ONE real e-mail to the owner's mailbox)
 //   npm run e2e:prod         read-only smoke test of production (https://roads-psi.vercel.app)
 //   npm run e2e:prod -- recovery   idem, plus a recovery link finished through the production page (changes, then restores, the Dev test account's password)
@@ -14,7 +14,7 @@ const withReset = process.argv.includes("reset");
 const withRecovery = process.argv.includes("recovery");
 const suites = prod
   ? ["prod-roles", ...(withRecovery ? ["prod-recovery"] : [])]
-  : ["public", "dev", "scrum-master", "admin", "actions", "progress-report", "final", ...(withReset ? ["password-reset"] : [])];
+  : ["public", "frontlights", "dev", "scrum-master", "admin", "actions", "progress-report", "final", ...(withReset ? ["password-reset"] : [])];
 
 const outcome = suites.map((name) => {
   console.log(`\n=================== ${name} ===================`);

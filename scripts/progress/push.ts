@@ -325,7 +325,7 @@ export async function runPush(argv: string[], deps: PushDeps): Promise<number> {
   if (!base) return fail("Sem endereço: informe --endpoint <url base> ou configure roadmapSync.endpoint em .frontlights/config.json.");
 
   const root = base.replace(/\/+$/, "");
-  const headers = { authorization: `Bearer ${secret}`, "content-type": "application/json" };
+  const headers = { authorization: `Bearer ${secret}`, "content-type": "application/json", "user-agent": "roads-script/push" };
 
   // Each print first, on its own, so the draft that names them never points at a print the bucket lacks.
   const upload = await uploadShots(root, headers, loaded, deps);

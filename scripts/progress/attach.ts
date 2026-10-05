@@ -76,7 +76,7 @@ export async function runAttach(argv: string[], deps: PushDeps): Promise<number>
   const base = args.endpoint ?? configuredEndpoint(deps.readConfig());
   if (!base) return fail("Sem endereço: informe --endpoint <url base> ou configure roadmapSync.endpoint em .frontlights/config.json.");
   const root = base.replace(/\/+$/, "");
-  const headers = { authorization: `Bearer ${secret}`, "content-type": "application/json" };
+  const headers = { authorization: `Bearer ${secret}`, "content-type": "application/json", "user-agent": "roads-script/attach" };
 
   const upload = await uploadShots(root, headers, loaded, deps);
   if (upload) return fail(`${upload} Nada foi acrescentado ao resumo.`);

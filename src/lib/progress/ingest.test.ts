@@ -274,12 +274,28 @@ test("a request for a period already sent answers 409", async () => {
   assert.deepEqual(out, { status: 409, body: { error: "period_already_sent" } });
 });
 
+test("a request that names another version of the contract answers 400 and stores nothing", async () => {
+  const db = fakeDatabase();
+  const out = await receiveDraft(db.store, { schemaVersion: 2, ...body() });
+  assert.deepEqual(out, { status: 400, body: { error: "unsupported_schema_version", supported: 1 } });
+  assert.equal(db.rows.length, 0);
+  assert.deepEqual(db.calls, []);
+});
+
+test("a request that names version 1 is as good as one that names none", async () => {
+  const db = fakeDatabase();
+  const out = await receiveDraft(db.store, { schemaVersion: 1, ...body() });
+  assert.deepEqual(out, { status: 200, body: { id: "id-1", created: true, url: "https://roads-psi.vercel.app/resumo" } });
+});
+
 test("the state starts the next window where the last sent report ended, and lists draft and last sent briefly", async () => {
   const db = fakeDatabase();
   const sent = db.addSent("2026-02-27T00:00:00-03:00", WINDOW.start);
   await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
   const state = await reportState(db.store, "GeoCloud", new Date("2026-03-05T15:00:00Z"));
   assert.deepEqual(state.window, { start: sent.period_end, end: "2026-03-05T00:00:00-03:00" });
+  // The window stops at Thursday 00:00 (exclusive), so it belongs to the week of Monday 02/03: presented on 09/03.
+  assert.equal(state.weekMeeting, "2026-03-09");
   assert.deepEqual(state.lastSent, {
     id: sent.id, period_start: sent.period_start, period_end: sent.period_end, pushed_at: sent.pushed_at, rev: 5, checked_at: sent.checked_at,
     entries: [{ id: "gc-101", status: "concluido" }],
@@ -294,7 +310,12 @@ test("the state starts the next window where the last sent report ended, and lis
 test("with nothing sent yet the window is the first one, and there may be no draft", async () => {
   const db = fakeDatabase();
   const state = await reportState(db.store, "GeoCloud", new Date("2026-10-01T15:00:00Z"));
-  assert.deepEqual(state, { window: { start: "2026-09-28T00:00:00-03:00", end: "2026-10-01T00:00:00-03:00" }, draft: null, lastSent: null });
+  assert.deepEqual(state, {
+    weekMeeting: "2026-10-05",
+    window: { start: "2026-09-28T00:00:00-03:00", end: "2026-10-01T00:00:00-03:00" },
+    draft: null,
+    lastSent: null,
+  });
 });
 
 /* ---------- What the last sent report already told the board ---------- */

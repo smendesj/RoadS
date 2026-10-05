@@ -122,6 +122,8 @@ test("it posts the draft to <endpoint>/progress-report with the secret as a bear
   const headers = new Headers(req.init.headers);
   assert.equal(headers.get("authorization"), `Bearer ${SECRET}`);
   assert.equal(headers.get("content-type"), "application/json");
+  // The log of calls shows which script made it (the name is only declared, like any User-Agent).
+  assert.equal(headers.get("user-agent"), "roads-script/push");
   assert.deepEqual(JSON.parse(String(req.init.body)), { produto: "GeoCloud", content: draft() });
   assert.match(w.output(), /HTTP 200/);
   assert.match(w.output(), /rel-1/);
@@ -211,6 +213,7 @@ test("each print goes up on its own first, then the draft carries only its path 
     ["/progress-report/shots", "/progress-report/shots", "/progress-report"]
   );
   for (const r of w.uploads()) assert.equal(new Headers(r.init.headers).get("authorization"), `Bearer ${SECRET}`);
+  for (const r of w.requests) assert.equal(new Headers(r.init.headers).get("user-agent"), "roads-script/push");
   assert.deepEqual(JSON.parse(String(w.uploads()[0].init.body)), { data: shot1.toString("base64") });
   const sent = JSON.parse(String(w.drafts()[0].init.body)) as { content: ProgressContent };
   assert.deepEqual(sent.content.shots, [
