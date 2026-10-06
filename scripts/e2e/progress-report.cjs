@@ -1,4 +1,4 @@
-// "Resumo para a diretoria", role by role: the Dashboard card, the Resumo tab, the review screen, the
+// "Resumo para a diretoria", role by role: the Resumo tab (and no card on the Dashboard), the review screen, the
 // public image link and the three server actions called straight, against the local production server.
 //
 // Fixtures: two SYNTHETIC reports of produto 'ELIMS' with periods in 2099 (one draft, one already sent),
@@ -321,7 +321,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     await L.login(dev);
     await L.menuButton(dev.page).waitFor();
     expect("dev -> no Resumo tab", (await dev.page.locator('a[href="/resumo"]').count()) === 0);
-    expect("dev -> no Resumo card on the Dashboard", (await dev.page.locator("[data-report-card]").count()) === 0);
+    expect("dev -> no Resumo card on the Dashboard (it is not there for anyone)", (await dev.page.locator("[data-report-card]").count()) === 0);
     for (const [name, p] of [["/resumo", "/resumo"], ["/resumo/<draft>", `/resumo/${draft.id}`], ["/resumo/<sent>", `/resumo/${sent.id}`], ["/resumo/semana/<week>", WEEK_PATH]]) {
       await dev.page.goto(BASE + p, { waitUntil: "load" });
       expect(`dev -> ${name} goes back to /dashboard`, dev.page.url().endsWith("/dashboard"), dev.page.url());
@@ -341,7 +341,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     const noReviewButtons = async (page) => (await page.getByRole("button", { name: /Copiar|Marcar como enviado/ }).count()) === 0;
 
     expect("scrum master -> the Resumo tab is there", (await smPage.locator('a[href="/resumo"]').count()) >= 1);
-    expect("scrum master -> no Resumo card on the Dashboard (drafts are the admin's)", (await smPage.locator("[data-report-card]").count()) === 0);
+    expect("scrum master -> no Resumo card on the Dashboard (it is not there for anyone)", (await smPage.locator("[data-report-card]").count()) === 0);
 
     await smPage.goto(BASE + "/resumo", { waitUntil: "load" });
     expect("scrum master -> /resumo opens", new URL(smPage.url()).pathname === "/resumo", smPage.url());
@@ -475,15 +475,9 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       expect("admin -> and unticks it again", accepted(off) && (await row(draft.id)).checked_at === null, `${off.kind}`);
     }
 
-    // ---- Dashboard card and the tab
+    // ---- the tab (the Dashboard has no Resumo card for anyone: the tab is the way in)
     expect("admin -> the Resumo tab is there, next to Config", (await page.locator('a[href="/resumo"]').count()) >= 1 && (await page.getByRole("link", { name: "Config", exact: true }).count()) === 1);
-    const card = page.locator("[data-report-card]");
-    expect("admin -> the Resumo card is on the Dashboard", (await card.count()) === 1);
-    const cardText = await card.innerText();
-    expect("admin -> the card is titled 'Resumo' and loaded (no read error)", /^resumo/i.test(cardText.trim()) && !/Não foi possível carregar/.test(cardText), cardText.slice(0, 80).replace(/\n/g, " | "));
-    expect("admin -> the card sits right under 'Em paralelo'", await card.evaluate((el) => (el.previousElementSibling?.textContent ?? "").includes("Em paralelo")));
-    const open = card.getByRole("link", { name: "Abrir" });
-    if ((await open.count()) === 1) expect("admin -> the card's 'Abrir' goes to /resumo", (await open.getAttribute("href")) === "/resumo");
+    expect("admin -> and no Resumo card on the Dashboard either", (await page.locator("[data-report-card]").count()) === 0);
 
     await page.goto(BASE + "/resumo", { waitUntil: "load" });
     expect("admin -> /resumo opens (the GeoCloud draft, the last sent, or the empty state)", new URL(page.url()).pathname === "/resumo", page.url());

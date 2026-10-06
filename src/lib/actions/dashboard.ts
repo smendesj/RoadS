@@ -9,7 +9,8 @@ import { getRoadmapBoard } from "@/lib/actions/roadmap";
 import { getLatestBoardSnapshot, syncBoardAsViewer } from "@/lib/actions/sync";
 import { statusByUrl } from "@/lib/board";
 import type { SyncColumn } from "@/lib/board-sync";
-import { syncFailureMessage } from "@/lib/sync-message";
+import { sliceBlocks, type SliceBlock, type SliceGroup } from "@/lib/slices";
+import { roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
 import { createClient } from "@/lib/supabase/server";
 import type { Tone } from "@/lib/tones";
 
@@ -17,8 +18,7 @@ export type DashboardModel = {
   branch: string;
   kpis: { label: string; value: string; hint: string; tone: Tone }[];
   entregas: { title: string; status: string; tone: Tone; effort: string; ref: string; url: string | null }[];
-  paralelo: { title: string; ref: string; url: string }[];
-  proxima: { title: string; effort: string; url: string | null }[];
+  slices: SliceBlock[];
   columns: SyncColumn[];
   syncedAt: string | null;
 };
@@ -41,16 +41,14 @@ async function currentSprintBranch(): Promise<string> {
   return `SPRINT-${sd}_${sm}-${ed}_${em}`;
 }
 
-async function buildDashboard(columns: SyncColumn[], syncedAt: string | null): Promise<DashboardModel> {
+async function buildDashboard(columns: SyncColumn[], syncedAt: string | null, slices: SliceGroup[]): Promise<DashboardModel> {
   const [{ lanes }, branch] = await Promise.all([getRoadmapBoard(), currentSprintBranch()]);
 
   // Issue URL -> Kanban status key, from the snapshot (every issue, per status).
   const statusOf = statusByUrl(columns);
 
   const atual = lanes.find((l) => l.id === "atual");
-  const proxima = lanes.find((l) => l.id === "proxima");
   const sprintItems = atual?.items ?? [];
-  const sprintUrls = new Set(sprintItems.map((it) => it.url).filter(Boolean) as string[]);
 
   const entregas = sprintItems.map((it) => {
     const key = it.url ? statusOf.get(it.url) : undefined;
@@ -76,7 +74,7 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null): P
   const kpis: DashboardModel["kpis"] = [
     { label: "Development", value: String(inDev), hint: `Sprint atual · ${dates}`, tone: "neutral" },
     {
-      label: "Concluídas na sprint",
+      label: "Concluídas",
       value: `${done} de ${sprintItems.length}`,
       hint: "Comprometidas esta semana",
       tone: "green",
@@ -89,17 +87,11 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null): P
     },
   ];
 
-  // In Development on the board but not part of the current sprint.
-  const paralelo = (columns.find((c) => c.key === "dev")?.items ?? [])
-    .filter((it) => !sprintUrls.has(it.url))
-    .map((it) => ({ title: it.title, ref: it.ref, url: it.url }));
-
   return {
     branch,
     kpis,
     entregas,
-    paralelo,
-    proxima: (proxima?.items ?? []).map((it) => ({ title: it.title, effort: it.effort, url: it.url })),
+    slices: sliceBlocks(slices, statusOf),
     columns,
     syncedAt,
   };
@@ -107,20 +99,24 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null): P
 
 export async function getDashboard(fallbackColumns: SyncColumn[]): Promise<DashboardModel> {
   const snapshot = await getLatestBoardSnapshot();
-  return buildDashboard(snapshot?.columns ?? fallbackColumns, snapshot?.syncedAt ?? null);
+  return buildDashboard(snapshot?.columns ?? fallbackColumns, snapshot?.syncedAt ?? null, snapshot?.slices ?? []);
 }
 
 // The "Sincronizar" button: pull GitHub Project #7 again, then rebuild everything from the Roadmap.
 // If the GitHub part fails, the Roadmap part still refreshes over the last good snapshot, and the
 // error is reported alongside.
-export async function syncDashboard(): Promise<{ model: DashboardModel; error: string | null }> {
+// `notice` is what the sync did to the Roadmap and to the sprint, the same line the Roadmap tab shows, so a sync
+// started here says what it moved too (and what it would write to the Project).
+export async function syncDashboard(): Promise<{ model: DashboardModel; error: string | null; notice: string | null }> {
   const result = await syncBoardAsViewer();
   if (result.ok) {
     const error = result.roadmap.error ? `Kanban atualizado, mas o Roadmap não: ${result.roadmap.error}` : null;
-    return { model: await buildDashboard(result.columns, result.syncedAt), error };
+    // The sync stored the sub-issues of the sprint with the board; read them back from there.
+    const stored = await getLatestBoardSnapshot();
+    return { model: await buildDashboard(result.columns, result.syncedAt, stored?.slices ?? []), error, notice: error ? null : roadmapSyncMessage(result.roadmap) };
   }
 
   const snapshot = await getLatestBoardSnapshot();
   const error = syncFailureMessage(result);
-  return { model: await buildDashboard(snapshot?.columns ?? [], snapshot?.syncedAt ?? null), error };
+  return { model: await buildDashboard(snapshot?.columns ?? [], snapshot?.syncedAt ?? null, snapshot?.slices ?? []), error, notice: null };
 }

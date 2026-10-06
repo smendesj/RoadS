@@ -41,6 +41,15 @@ bloqueia gravação de arquivos `.env*`) com `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_P
 `SUPABASE_SECRET_KEY`, `GITHUB_TOKEN`, `CRON_SECRET` (autentica o cron diário) e `FRONTLIGHTS_API_SECRET`
 (autentica o `/update-roads` do FrontlightS e os scripts de envio do resumo).
 
+`GITHUB_TOKEN` é um PAT clássico com `repo`, `read:org` e `project`. O `project` é de leitura **e** escrita: o
+RoadS já escreve no Project ao criar uma issue.
+
+`PROJECT_STATUS_WRITE` é **opcional**. Com `on`, a sincronização (botão, cron diário e
+`POST /api/frontlights/sync-board`) escreve Development ou Open no Project para manter o sprint atual do Roadmap
+e o Status em acordo (vale quem mexeu por último; Done e Blocker nunca são escritos). Com qualquer outro valor,
+ou sem a variável, ela só **informa** o que escreveria; o Roadmap continua seguindo o que o Project diz. A regra
+e o que o Frontlights vê dela estão em `docs/frontlights-contract.md`.
+
 ## Setup do banco
 
 ```bash

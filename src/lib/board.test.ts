@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { boardCard, statusByUrl, withIssueStatus } from "./board.ts";
+import { boardCard, projectCard, statusByUrl, withIssueStatus, withStatusWrites } from "./board.ts";
 
 const node = (repo: string, status: string | null, number = 1) => ({
   content: { number, title: `Issue ${number}`, url: `https://github.com/${repo}/issues/${number}`, repository: { nameWithOwner: repo } },
@@ -61,4 +61,52 @@ test("withIssueStatus marks sprint items with their snapshot status and leaves t
 test("withIssueStatus with no snapshot marks nothing", () => {
   const [lane] = withIssueStatus([{ id: "atual", items: [{ url: "u1" }] }], []);
   assert.equal("status" in lane.items[0], false);
+});
+
+
+const cardNode = (over: { id?: string | null; repo?: string; number?: number | null; status?: string | null; at?: string | null } = {}) => {
+  const { id = "PVTI_1", repo = "Essencis-Labs/GeoCloudAI", number = 7, status = "Development", at = "2026-10-06T20:49:07Z" } = over;
+  return {
+    ...(id ? { id } : {}),
+    content: number ? { number, title: "Issue", url: `https://github.com/${repo}/issues/${number}`, repository: { nameWithOwner: repo } } : {},
+    fieldValueByName: status ? { name: status, ...(at ? { updatedAt: at } : {}) } : null,
+  };
+};
+
+test("projectCard keeps what the sprint sync needs of a GeoCloud card: its item on the Project, the issue, the status and since when", () => {
+  assert.deepEqual(projectCard(cardNode()), { itemId: "PVTI_1", number: 7, status: "Development", statusAt: "2026-10-06T20:49:07Z" });
+});
+
+test("projectCard leaves out ELIMS, cards with no status or no time for it, and cards it could not write to", () => {
+  assert.equal(projectCard(cardNode({ repo: "Essencis-Labs/ELIMS" })), null);
+  assert.equal(projectCard(cardNode({ status: null })), null);
+  assert.equal(projectCard(cardNode({ status: "Someday" })), null);
+  assert.equal(projectCard(cardNode({ at: null })), null);
+  assert.equal(projectCard(cardNode({ id: null })), null);
+  assert.equal(projectCard(cardNode({ number: null })), null);
+});
+
+test("withStatusWrites moves a card to the column of the Status written and recounts both columns", () => {
+  const card = (n: number) => ({ title: `i${n}`, ref: `#${n}`, url: `u${n}` });
+  const columns = [
+    { key: "open", title: "Open", count: 2, items: [card(1), card(2)] },
+    { key: "dev", title: "Development", count: 1, items: [card(3)] },
+    { key: "done", title: "Done", count: 1, items: [card(4)] },
+  ];
+  const next = withStatusWrites(columns, [
+    { url: "u1", status: "Development" },
+    { url: "u3", status: "Open" },
+  ]);
+  const view = (cols: typeof columns) => cols.map((c) => [c.key, c.count, c.items.map((i) => i.url)]);
+  assert.deepEqual(view(next), [
+    ["open", 2, ["u2", "u3"]],
+    ["dev", 1, ["u1"]],
+    ["done", 1, ["u4"]],
+  ]);
+  assert.deepEqual(view(columns), [["open", 2, ["u1", "u2"]], ["dev", 1, ["u3"]], ["done", 1, ["u4"]]], "the input is not mutated");
+});
+
+test("withStatusWrites ignores a card the snapshot doesn't have", () => {
+  const columns = [{ key: "open", title: "Open", count: 1, items: [{ title: "a", ref: "#1", url: "u1" }] }];
+  assert.deepEqual(withStatusWrites(columns, [{ url: "nope", status: "Development" }]), columns);
 });

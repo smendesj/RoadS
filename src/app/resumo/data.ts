@@ -16,14 +16,6 @@ const PRODUCT: Produto = "GeoCloud";
 
 const ROW_COLUMNS = "id, produto, period_start, period_end, status, content, overrides, share_token, checked_at, sent_at, pushed_at, rev";
 
-// The Dashboard card only counts entries, so it reads the report without its prints (older reports carry
-// them inline as base64, the heavy part of `content`) and without the coverage gaps: PostgREST can pick
-// keys out of the jsonb.
-const CARD_COLUMNS =
-  "id, produto, period_start, period_end, status, overrides, share_token, checked_at, sent_at, pushed_at, rev, " +
-  "window:content->window, headline:content->headline, entries:content->entries, internal:content->internal, " +
-  "difficulties:content->difficulties, nextSteps:content->nextSteps, usage:content->usage";
-
 export type ReportLoad = { row: ProgressReportRow | null; failed: boolean };
 export type SentSummary = { id: string; period_start: string; period_end: string; sent_at: string | null };
 
@@ -82,15 +74,6 @@ async function readCurrent(columns: string, role: Role): Promise<{ data: Raw | n
 export async function loadCurrentReport(role: Role): Promise<ReportLoad> {
   const { data, failed } = await readCurrent(ROW_COLUMNS, role);
   return { row: data ? forScreen(data as unknown as ProgressReportRow) : null, failed };
-}
-
-/** The same report as the page shows (admin only), in the light shape the Dashboard card needs. */
-export async function loadCardReport(): Promise<ReportLoad> {
-  const { data, failed } = await readCurrent(CARD_COLUMNS, "admin");
-  if (!data) return { row: null, failed };
-  const { window: period, headline, entries, internal, difficulties, nextSteps, usage, ...row } = data;
-  const content = { window: period, headline, entries, internal, difficulties, nextSteps, usage };
-  return { row: { ...row, content } as unknown as ProgressReportRow, failed: false };
 }
 
 /**

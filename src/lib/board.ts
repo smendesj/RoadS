@@ -34,8 +34,11 @@ export type BoardStatus = (typeof BOARD_STATUSES)[number];
 export type BoardCard = { title: string; ref: string; url: string };
 
 type ProjectNode = {
+  /** The card's own id on the Project (what a Status is written to), not the issue's. */
+  id?: string;
   content?: { number?: number; title?: string; url?: string; repository?: { nameWithOwner?: string } } | null;
-  fieldValueByName?: { name?: string } | null;
+  /** The Status value; `updatedAt` is when GitHub last changed it on this card. */
+  fieldValueByName?: { name?: string; updatedAt?: string } | null;
 };
 
 export function boardCard(node: ProjectNode): { status: BoardStatus; card: BoardCard } | null {
@@ -47,4 +50,51 @@ export function boardCard(node: ProjectNode): { status: BoardStatus; card: Board
     status: status as BoardStatus,
     card: { title: content.title ?? "", ref: `#${content.number}`, url: content.url ?? "" },
   };
+}
+
+export type ProjectCard = { itemId: string; number: number; status: BoardStatus; statusAt: string };
+
+/**
+ * A GeoCloud card as the sprint sync reads it: its id on the Project, the issue, its Status and since when.
+ * A card missing any of those can't be judged or written to, so it isn't one. ELIMS never is.
+ */
+export function projectCard(node: ProjectNode): ProjectCard | null {
+  const card = boardCard(node);
+  const number = node.content?.number;
+  const statusAt = node.fieldValueByName?.updatedAt;
+  if (!card || !number || !node.id || !statusAt) return null;
+  return { itemId: node.id, number, status: card.status, statusAt };
+}
+
+const COLUMN_OF_STATUS = { Open: "open", Development: "dev" } as const;
+
+/**
+ * The snapshot's columns after RoadS wrote these Statuses to the Project: each card moves to the column of
+ * its new Status and the counts follow, so the Dashboard doesn't show the old Status until the next sync.
+ * A card the snapshot doesn't have is ignored; the input isn't touched.
+ */
+export function withStatusWrites<C extends { key: string; count: number; items: { url: string }[] }>(
+  columns: C[],
+  changes: { url: string; status: keyof typeof COLUMN_OF_STATUS }[]
+): C[] {
+  let next = columns;
+  for (const { url, status } of changes) {
+    const from = next.find((c) => c.items.some((i) => i.url === url));
+    const card = from?.items.find((i) => i.url === url);
+    if (!from || !card) continue;
+    const to = COLUMN_OF_STATUS[status];
+    if (from.key === to || !next.some((c) => c.key === to)) continue;
+    next = next.map((c) => {
+      if (c.key === from.key) {
+        const items = c.items.filter((i) => i.url !== url);
+        return { ...c, items, count: items.length };
+      }
+      if (c.key === to) {
+        const items = [...c.items, card];
+        return { ...c, items, count: items.length };
+      }
+      return c;
+    });
+  }
+  return next;
 }

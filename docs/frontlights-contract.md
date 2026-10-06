@@ -58,6 +58,7 @@ Uma mudança aditiva não pede issue, mas entra na seção 8 (histórico) deste 
 | `status` de uma entrega, **na resposta** (`lastSent.entries[]`) | os mesmos | **aberto**: quem consome tolera; um valor novo aceito pelo RoadS no pedido é aditivo |
 | `action` de uma mudança em `pending-changes` | `add`, `modify`, `move_lane`, `remove` | **aberto**: quem consome trata como ação desconhecida, sem recusar a resposta |
 | `reason` de `sync-board` quando `ok` é `false` | `not_configured`, `no_access`, `unauthenticated`, `error` | **aberto**: quem consome mostra a `message` |
+| `origin` do `payload` de um `move_lane` | `app`, `rotation`, `label`, `project` | **aberto**: um valor novo é aditivo; quem consome trata o desconhecido como informativo |
 
 ## 4. As rotas do plugin
 
@@ -105,9 +106,17 @@ O que mudou e ainda não foi escrito nos arquivos. Quem monta: `src/lib/frontlig
 - `payload` é informativo e livre por ação (por exemplo `add`: `lane_id` e `title`; podem vir `reason` e
   `github_issue_url`): campo novo ali é aditivo. **Dois são contrato:** o de `remove` (`item_id`, `lane_id`,
   `title`) e o de `move_lane`, que traz **sempre** `lane_id` (a lane de destino) e `from_lane_id` (a de origem),
-  seja o move de uma pessoa no app, a rotação dos sprints ou a separação por etiqueta de tipo (`title` e `reason`
-  vêm junto, informativos). Os `move_lane` que já estavam na fila antes de 2026-10-05 podem não ter
-  `from_lane_id` quando foram feitos por uma pessoa. O estado atual do item está em `item`.
+  seja o move de uma pessoa no app, a rotação dos sprints, a separação por etiqueta de tipo ou o que o Project
+  ditou (`title` e `reason` vêm junto, informativos). Os `move_lane` que já estavam na fila antes de 2026-10-05
+  podem não ter `from_lane_id` quando foram feitos por uma pessoa. O estado atual do item está em `item`.
+- **`origin`** (opcional, informativo, no `payload` de um `move_lane`): quem fez o move. `"app"` (uma pessoa no
+  app), `"rotation"` (a rotação dos sprints), `"label"` (a separação por etiqueta de tipo) ou `"project"` (o
+  Project ditou). Os `move_lane` enfileirados antes de 2026-10-06 não o trazem; é um conjunto aberto (seção 3).
+  **Um `move_lane` com `origin` `"project"` é escrito nos arquivos `.md` como qualquer outro e nunca deve ser
+  aplicado de volta ao Project:** é de lá que ele veio. O plugin não escreve no Project em nenhum caso; quem
+  mantém o sprint atual e o Project em acordo é só o RoadS (seção 4, `sync-board`).
+- Um `add` pode nomear `atual` em `lane_id`: é a issue que já estava em Development no Project quando entrou no
+  Roadmap, e entra direto no sprint atual.
 - O `id` de cada mudança é um UUID gerado pelo banco. O prefixo `done-` é **reservado ao plugin** (ele monta ids
   próprios para registrar conclusões, que nunca são confirmadas ao RoadS): o RoadS nunca emite um id assim, e o
   plugin recusa a busca inteira se vier um.
@@ -128,18 +137,37 @@ os arquivos foram escritos: **o ack é do plugin, depois de gravar**.
 
 ### `POST /sync-board`
 
-Roda a mesma sincronização do botão Sincronizar (statuses do Project, retrato do Dashboard, issues abertas e
-fechadas do Roadmap), sem corpo. A resposta é um resumo, nunca os cartões do quadro. Quem monta:
-`src/lib/frontlights/sync.ts`.
+Roda a mesma sincronização do botão Sincronizar e do cron diário (statuses do Project, o sprint atual do Roadmap
+em acordo com o Project, retrato do Dashboard, issues abertas e fechadas do Roadmap), sem corpo. A resposta é um
+resumo, nunca os cartões do quadro. Quem monta: `src/lib/frontlights/sync.ts`.
 
 ```json
-{ "schemaVersion": 1, "ok": true, "ran": true, "syncedAt": "…", "roadmap": { "added": 0, "removed": 0, "issuesCreated": 0 } }
+{ "schemaVersion": 1, "ok": true, "ran": true, "syncedAt": "…", "roadmap": { "added": 0, "removed": 0, "issuesCreated": 0, "sprint": { "pulled": 0, "released": 0, "written": 0, "wouldWrite": 0, "failed": 0, "stuck": 0 } } }
 ```
 
 - **Cooldown de 30 s**, o mesmo do botão e do cron diário (a cota do GitHub é compartilhada): uma segunda
-  chamada em menos de 30 s não roda; responde do último retrato com `"ran": false` e `roadmap` zerado.
+  chamada em menos de 30 s não roda; responde do último retrato com `"ran": false` e `roadmap` zerado, sem
+  `sprint`.
 - Uma sincronização que falha é **`200`** com `{ "ok": false, "reason": "…", "message": "…" }` (seção 3), não um
   erro HTTP. `roadmap.error` aparece quando o quadro sincronizou e o Roadmap não.
+- **`roadmap.sprint`** (opcional, só contagens): o que a sincronização fez para manter o sprint atual do
+  Roadmap (a lane `atual`) e o Project em acordo. `pulled`: issues que o Project pôs no sprint atual;
+  `released`: issues que o Project tirou dele (voltaram ao seu bloco); `written`: Statuses que o RoadS escreveu
+  no Project; `wouldWrite`: o que teria escrito com a escrita desligada; `failed`: moves ou escritas que
+  falharam; `stuck`: issues que o Project tirou do sprint e que não tinham bloco para onde voltar (ficam onde
+  estão). `error` (texto) aparece quando o passo todo falhou; as contagens vêm zeradas. O objeto não vem quando
+  não havia cartão a julgar. Quem consome ignora o campo que não conhece, e a mudança é aditiva (seção 8).
+- **A regra do sprint é só do RoadS.** "No sprint atual do Roadmap" e "Status Development no Project" são o mesmo
+  fato; o Project não tem campo de sprint, então os próximos sprints (`proxima`, `terceira`) existem só no
+  Roadmap (Open no Project). Quando os dois lados discordam, vale quem mexeu por último: o horário que o GitHub
+  guarda para o Status do cartão contra a linha `add`/`move_lane` mais nova do item na fila. Se o Project é o
+  mais recente, o RoadS move o item (para `atual`, ou de `atual` de volta ao seu bloco de tipo) e enfileira um
+  `move_lane` com as duas lanes (`origin` `"project"`); se o Roadmap é o mais recente, escreve o Status
+  (Development ou Open) no Project. Só uma discordância é tratada, então uma escrita do RoadS nunca volta como
+  mudança nova. Done e Blocker nunca são escritos nem movidos; só issues abertas do GeoCloud participam, nunca as
+  do ELIMS. A escrita no Project fica atrás de `PROJECT_STATUS_WRITE=on` no servidor (desligada por padrão: o
+  Roadmap ainda acompanha o que o Project diz, e o resumo só informa `wouldWrite`). O Frontlights não escreve no
+  Project e não precisa mudar: segue escrevendo `ROADMAP.md` e os arquivos de sprint a partir da fila.
 
 ## 5. As rotas do resumo para a diretoria
 
@@ -217,6 +245,7 @@ repositório, `roads-script/push` e `roads-script/attach`.
 | `roadmap-state` | `src/lib/frontlights/state.ts`, `src/lib/roadmap-state.ts` | `src/app/api/frontlights/roadmap-state/route.ts` |
 | `pending-changes`, `ack` | `src/lib/frontlights/queue.ts` | `…/pending-changes/route.ts`, `…/ack/route.ts` |
 | `sync-board` | `src/lib/frontlights/sync.ts`, `src/lib/sync-summary.ts` | `…/sync-board/route.ts` |
+| sprint atual e Project em acordo (`roadmap.sprint`, `origin` do `move_lane`) | `src/lib/sprint-status-sync.ts` (a regra, testada sem servidor), `src/lib/board-sync.ts` (as portas reais), `src/lib/board.ts` (a leitura dos cartões) | o mesmo `sync-board`, o botão Sincronizar e o cron diário |
 | rotas do resumo | `src/lib/progress/ingest.ts`, `draft.ts`, `shot-upload.ts`, `attach.ts` | `…/progress-report/**/route.ts` |
 | versão, segredo, registro | `src/lib/frontlights/contract.ts`, `door.ts`, `calls.ts` | `src/lib/frontlights/doors.ts` |
 
@@ -233,3 +262,10 @@ repositório, `roads-script/push` e `roads-script/attach`.
   conclusões (item de sprint com `done: true` em `roadmap-state`) a partir do estado, sem confirmá-las ao RoadS.
 - **2026-10-05 (aditivo):** todo `move_lane` novo traz `from_lane_id` além de `lane_id`, inclusive o feito por uma
   pessoa no app (antes só vinha nos moves do sistema).
+- **2026-10-06 (aditivo):** `roadmap.sprint` no resumo do `POST /sync-board`: contagens `pulled`, `released`,
+  `written`, `wouldWrite`, `failed`, `stuck` e, se o passo falhou, `error`. Ausente quando não havia cartão a
+  julgar.
+- **2026-10-06 (aditivo):** `origin` (`app`, `rotation`, `label`, `project`) no `payload` do `move_lane`, e um
+  `add` pode nomear `atual` em `lane_id`. Os moves enfileirados antes desta data não têm `origin`.
+- **2026-10-06:** o acordo entre o sprint atual do Roadmap e o Project é feito só pelo RoadS (Status Development é
+  o sprint atual; vale quem mexeu por último). Nada é pedido ao plugin, que não escreve no Project.

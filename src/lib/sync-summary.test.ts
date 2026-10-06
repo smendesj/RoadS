@@ -43,3 +43,11 @@ test("a failed sync keeps its reason and a message in the user's language", () =
     message: "GitHub respondeu 502",
   });
 });
+
+
+test("what the sprint step did travels in the summary as counts only", () => {
+  const sprint = { pulled: 1, released: 0, written: 2, wouldWrite: 0, failed: 0, stuck: 0 };
+  const summary = syncSummary({ ok: true, syncedAt: "2026-01-01T12:00:00.000Z", columns: [], roadmap: { added: 0, removed: 0, issuesCreated: 0, sprint } }, false);
+  assert.equal(summary.ok && summary.roadmap.sprint?.written, 2);
+  assert.deepEqual(summary.ok && summary.roadmap.sprint, sprint);
+});

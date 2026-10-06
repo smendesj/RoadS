@@ -6,6 +6,7 @@
 
 import { syncBoard, type SyncColumn, type SyncResult } from "@/lib/board-sync";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
+import type { SliceGroup } from "@/lib/slices";
 import { SYNC_COOLDOWN_MS } from "@/lib/sync-cooldown";
 import { isWithin } from "@/lib/timestamp";
 
@@ -31,9 +32,9 @@ export async function syncBoardAsViewer(): Promise<SyncResult> {
   return syncBoard();
 }
 
-export async function getLatestBoardSnapshot(): Promise<{ columns: SyncColumn[]; syncedAt: string } | null> {
+export async function getLatestBoardSnapshot(): Promise<{ columns: SyncColumn[]; syncedAt: string; slices: SliceGroup[] } | null> {
   const supabase = await createServerSupabase();
-  const { data } = await supabase.from("board_sync_state").select("columns, synced_at").eq("id", true).maybeSingle();
+  const { data } = await supabase.from("board_sync_state").select("columns, synced_at, slices").eq("id", true).maybeSingle();
   if (!data) return null;
-  return { columns: data.columns as SyncColumn[], syncedAt: data.synced_at as string };
+  return { columns: data.columns as SyncColumn[], syncedAt: data.synced_at as string, slices: (data.slices as SliceGroup[] | null) ?? [] };
 }

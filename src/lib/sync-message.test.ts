@@ -34,3 +34,35 @@ test("the Roadmap summary says how many issues stayed out for lack of a type lab
 test("a Roadmap that failed reports its own error instead of counts", () => {
   assert.equal(roadmapSyncMessage({ added: 0, removed: 0, issuesCreated: 0, error: "falhou" }), "falhou");
 });
+
+const NO_SPRINT = { pulled: 0, released: 0, written: 0, wouldWrite: 0, failed: 0, stuck: 0 };
+const BASE = "0 issue(s) adicionada(s), 0 encerrada(s) ou fora do Project removida(s).";
+
+test("a sprint that needed nothing from the Project adds nothing to the Roadmap summary", () => {
+  assert.equal(roadmapSyncMessage({ added: 0, removed: 0, issuesCreated: 0, sprint: NO_SPRINT }), BASE);
+});
+
+test("the summary says how the Roadmap and the Project followed each other", () => {
+  assert.equal(
+    roadmapSyncMessage({ added: 0, removed: 0, issuesCreated: 0, sprint: { ...NO_SPRINT, pulled: 2, released: 1, written: 3 } }),
+    `${BASE} Sprint atual e Project: 2 issue(s) puxada(s) para a sprint atual, 1 devolvida(s) ao Roadmap, 3 status escrito(s) no Project.`
+  );
+});
+
+test("with the writing off it says what would have been written, not that it was", () => {
+  assert.equal(
+    roadmapSyncMessage({ added: 0, removed: 0, issuesCreated: 0, sprint: { ...NO_SPRINT, wouldWrite: 2 } }),
+    `${BASE} Sprint atual e Project: 2 status seriam escritos no Project, mas a escrita está desligada.`
+  );
+});
+
+test("a failure of the sprint step is reported next to the counts, never hidden", () => {
+  assert.equal(
+    roadmapSyncMessage({ added: 0, removed: 0, issuesCreated: 0, sprint: { ...NO_SPRINT, pulled: 1, failed: 2, stuck: 1 } }),
+    `${BASE} Sprint atual e Project: 1 issue(s) puxada(s) para a sprint atual, 2 falharam, 1 sem bloco para voltar ao Roadmap.`
+  );
+  assert.equal(
+    roadmapSyncMessage({ added: 0, removed: 0, issuesCreated: 0, sprint: { ...NO_SPRINT, error: "fila ilegível" } }),
+    `${BASE} A sprint atual não acompanhou o Project: fila ilegível.`
+  );
+});

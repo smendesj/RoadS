@@ -34,6 +34,16 @@ const { BASE, expect, sleep } = L;
 
     // ------------------------------------------------ dashboard
     await sleep(1500);
+    // The blocks it keeps (Sprint, and the Slices of its issues under it) and the ones it dropped.
+    const block = (title) => page.getByText(title, { exact: true }).count();
+    expect("dashboard: has the Sprint block, the Slices block and the 'Concluídas' KPI", (await block("Sprint")) === 1 && (await block("Slices")) === 1 && (await block("Concluídas")) === 1);
+    const dropped = [];
+    for (const title of ["Em paralelo", "Próxima semana", "Esta sprint", "Concluídas na sprint"]) if ((await block(title)) > 0) dropped.push(title);
+    expect("dashboard: no 'Em paralelo', 'Próxima semana' or old titles", dropped.length === 0, dropped.join(", "));
+    expect("dashboard: Slices sits between the Sprint block and the Kanban", await page.evaluate(() => {
+      const order = ["Sprint", "Slices", "Kanban"].map((t) => [...document.querySelectorAll("span")].find((el) => el.textContent === t));
+      return order.every(Boolean) && order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING && order[1].compareDocumentPosition(order[2]) & Node.DOCUMENT_POSITION_FOLLOWING;
+    }));
     const sync = page.getByRole("button", { name: /Sincronizar/ });
     expect("dashboard: shows the (read-refresh) Sincronizar button", (await sync.count()) === 1);
     await sync.click();

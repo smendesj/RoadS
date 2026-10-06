@@ -9,6 +9,7 @@ import { useLocalTime } from "@/lib/use-local-time";
 type SyncContextValue = {
   model: DashboardModel;
   error: string | null;
+  notice: string | null;
   isPending: boolean;
   canSync: boolean;
   sync: () => void;
@@ -35,15 +36,18 @@ export function DashboardSyncProvider({
 }) {
   const [model, setModel] = useState(initialModel);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function sync() {
     setError(null);
+    setNotice(null);
     startTransition(async () => {
       try {
         const result = await syncDashboard();
         setModel(result.model);
         setError(result.error);
+        setNotice(result.notice);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Erro ao sincronizar.");
       }
@@ -51,7 +55,7 @@ export function DashboardSyncProvider({
   }
 
   return (
-    <SyncContext.Provider value={{ model, error, isPending, canSync, sync }}>{children}</SyncContext.Provider>
+    <SyncContext.Provider value={{ model, error, notice, isPending, canSync, sync }}>{children}</SyncContext.Provider>
   );
 }
 
@@ -61,7 +65,7 @@ export function DashboardBranch() {
 }
 
 export function SyncPill() {
-  const { isPending, error, model, canSync, sync } = useSync();
+  const { isPending, error, notice, model, canSync, sync } = useSync();
   // Shown in the viewer's time zone, which only the browser knows: "—" holds the line until then.
   const syncedAt = useLocalTime(model.syncedAt);
   const lastSync = model.syncedAt && (
@@ -71,7 +75,14 @@ export function SyncPill() {
   return (
     <div className="flex flex-col items-end gap-1">
       {canSync && <SyncButton onClick={sync} isPending={isPending} />}
-      {error ? <span className="max-w-[260px] text-right text-[11px] text-red-500">{error}</span> : lastSync}
+      {error ? (
+        <span className="max-w-[260px] text-right text-[11px] text-red-500">{error}</span>
+      ) : (
+        <>
+          {notice && <span className="max-w-[260px] text-right text-[11px] text-rs-text-soft">{notice}</span>}
+          {lastSync}
+        </>
+      )}
     </div>
   );
 }
@@ -95,62 +106,78 @@ export function KpiCards() {
   );
 }
 
-// reportSlot is the server-drawn "Resumo para a diretoria" card (admin only); it sits right under
-// "Em paralelo". A server component can't be imported in this client file, so the page hands it in.
-export function SprintPanels({ reportSlot }: { reportSlot?: ReactNode }) {
+export function SprintPanels() {
   const { model } = useSync();
   return (
-    <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[2fr_1fr]">
-      <div className="flex flex-col gap-1 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-7">
-        <span className="mb-2 text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Esta sprint</span>
-        {model.entregas.map((e) => {
-          const row = (
-            <>
-              <span className={badgeClass(e.tone) + " rounded-full whitespace-nowrap"}>{e.status}</span>
-              <span className="order-first basis-full text-[15px] font-semibold text-rs-text sm:order-none sm:basis-0 sm:flex-grow">{e.title}</span>
-              <span className="text-[13px] text-rs-text-faint">{e.effort}</span>
-              <span className="font-mono text-[13px] text-rs-brand-text">{e.ref}</span>
-            </>
-          );
-          return e.url ? (
-            <a key={e.title} href={e.url} target="_blank" rel="noreferrer" className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-bg py-3.5 sm:flex-nowrap">
-              {row}
+    <div className="flex flex-col gap-1 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-7">
+      <span className="mb-2 text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Sprint</span>
+      {model.entregas.map((e) => {
+        const row = (
+          <>
+            <span className={badgeClass(e.tone) + " rounded-full whitespace-nowrap"}>{e.status}</span>
+            <span className="order-first basis-full text-[15px] font-semibold text-rs-text sm:order-none sm:basis-0 sm:flex-grow">{e.title}</span>
+            <span className="text-[13px] text-rs-text-faint">{e.effort}</span>
+            <span className="font-mono text-[13px] text-rs-brand-text">{e.ref}</span>
+          </>
+        );
+        return e.url ? (
+          <a key={e.title} href={e.url} target="_blank" rel="noreferrer" className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-bg py-3.5 sm:flex-nowrap">
+            {row}
+          </a>
+        ) : (
+          <div key={e.title} className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-bg py-3.5 sm:flex-nowrap">
+            {row}
+          </div>
+        );
+      })}
+      {model.entregas.length === 0 && (
+        <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">Nenhum item na sprint atual.</div>
+      )}
+    </div>
+  );
+}
+
+// The sub-issues of every issue in the sprint, one block per parent issue. Each row's status is the
+// one the Kanban shows for that issue, so a slice reads the same here and there.
+export function SlicesPanel() {
+  const { model } = useSync();
+  return (
+    <div className="flex flex-col gap-1 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-7">
+      <span className="mb-2 text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Slices</span>
+      {model.slices.map((block) => (
+        <section key={block.url} className="mb-2 flex flex-col last:mb-0">
+          <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-border py-3.5 sm:flex-nowrap">
+            <a
+              href={block.url}
+              target="_blank"
+              rel="noreferrer"
+              className="basis-full text-[15px] font-bold text-rs-text hover:underline sm:basis-0 sm:flex-grow"
+            >
+              {block.title}
             </a>
-          ) : (
-            <div key={e.title} className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-bg py-3.5 sm:flex-nowrap">
-              {row}
-            </div>
-          );
-        })}
-        {model.entregas.length === 0 && (
-          <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">Nenhum item na sprint atual.</div>
-        )}
-      </div>
-      <div className="flex flex-col gap-5">
-        <div className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-6">
-          <span className="text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Em paralelo</span>
-          {model.paralelo.map((p) => (
-            <a key={p.url} href={p.url} target="_blank" rel="noreferrer" className="border-t border-rs-bg py-2 text-sm text-rs-text">
-              {p.title} <span className="font-mono text-[12px] text-rs-text-faint">{p.ref}</span>
+            <span className="text-[13px] text-rs-text-faint">
+              {block.done} de {block.total}
+            </span>
+            <span className="font-mono text-[13px] text-rs-brand-text">{block.ref}</span>
+          </div>
+          {block.rows.map((row) => (
+            <a
+              key={row.url}
+              href={row.url}
+              target="_blank"
+              rel="noreferrer"
+              className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-bg py-3.5 sm:flex-nowrap"
+            >
+              <span className={badgeClass(row.tone) + " rounded-full whitespace-nowrap"}>{row.status}</span>
+              <span className="order-first basis-full text-[15px] font-semibold text-rs-text sm:order-none sm:basis-0 sm:flex-grow">{row.title}</span>
+              <span className="font-mono text-[13px] text-rs-brand-text">{row.ref}</span>
             </a>
           ))}
-          {model.paralelo.length === 0 && (
-            <div className="border-t border-rs-bg py-2 text-sm text-rs-text-faint">Nada em andamento fora da sprint.</div>
-          )}
-        </div>
-        {reportSlot}
-        <div className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-6">
-          <span className="text-[13px] font-bold uppercase tracking-wide text-rs-brand-text">Próxima semana</span>
-          {model.proxima.map((p) => (
-            <div key={p.title} className="border-t border-rs-bg py-2 text-sm text-rs-text">
-              {p.title} · {p.effort}
-            </div>
-          ))}
-          {model.proxima.length === 0 && (
-            <div className="border-t border-rs-bg py-2 text-sm text-rs-text-faint">Nada planejado ainda.</div>
-          )}
-        </div>
-      </div>
+        </section>
+      ))}
+      {model.slices.length === 0 && (
+        <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">Nenhuma sub-issue nas issues da sprint atual.</div>
+      )}
     </div>
   );
 }

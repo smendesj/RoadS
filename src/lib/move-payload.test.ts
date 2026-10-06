@@ -27,3 +27,11 @@ test("both lanes are always there, whoever made the move: the contract promises 
 test("nothing undefined is left in the payload, so the JSON stored is exactly what was meant", () => {
   assert.equal(JSON.stringify(moveLanePayload({ from: "a", to: "b", title: undefined })), '{"lane_id":"b","from_lane_id":"a"}');
 });
+
+
+test("the origin of a move says who made it, and is left out when nobody says", () => {
+  for (const origin of ["app", "rotation", "label", "project"] as const) {
+    assert.deepEqual(moveLanePayload({ from: "a", to: "b", origin }), { lane_id: "b", from_lane_id: "a", origin });
+  }
+  assert.equal("origin" in moveLanePayload({ from: "a", to: "b" }), false);
+});

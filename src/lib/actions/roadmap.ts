@@ -5,6 +5,7 @@ import { withIssueStatus } from "@/lib/board";
 import { createGeoCloudIssue } from "@/lib/github";
 import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
 import { moveLanePayload } from "@/lib/move-payload";
+import { CURRENT_SPRINT } from "@/lib/sprint-status-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { NEW_ITEM_TITLE, type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
@@ -223,15 +224,20 @@ export async function saveRoadmapItemEdit(
     if (noteError) throw noteError;
   }
 
-  const issue = await ensureIssue(itemId, {
-    title: input.content ? (update.title as string) : access.item.title,
-    description: input.content ? (update.description as string) : access.item.description,
-    github_issue_url: access.item.github_issue_url,
-    prioridade: input.prioridade,
-    effort: input.effort,
-    tipo: input.content ? input.content.tipo : access.item.tipo ?? "feature",
-    stack: input.content ? input.content.stack : access.item.stack ?? "Geral",
-  });
+  const issue = await ensureIssue(
+    itemId,
+    {
+      title: input.content ? (update.title as string) : access.item.title,
+      description: input.content ? (update.description as string) : access.item.description,
+      github_issue_url: access.item.github_issue_url,
+      prioridade: input.prioridade,
+      effort: input.effort,
+      tipo: input.content ? input.content.tipo : access.item.tipo ?? "feature",
+      stack: input.content ? input.content.stack : access.item.stack ?? "Geral",
+    },
+    // Born in the current sprint, the issue is Development on the Project from the start.
+    access.item.lane_id === CURRENT_SPRINT ? "Development" : "Open"
+  );
 
   await queueChange(itemId, "modify", {
     prioridade: input.prioridade,
@@ -243,16 +249,17 @@ export async function saveRoadmapItemEdit(
 }
 
 // Every Roadmap item is a GitHub issue. A GeoCloud item saved without one (a "+ Novo item" once it
-// has a real title) gets its issue here, Open on Project #7. A failure doesn't fail the save: the
+// has a real title) gets its issue here, Open on Project #7 (Development if it is in the current sprint). A failure doesn't fail the save: the
 // next board sync retries it.
 async function ensureIssue(
   itemId: string,
-  item: NewIssueFields & { github_issue_url: string | null }
+  item: NewIssueFields & { github_issue_url: string | null },
+  status: "Open" | "Development"
 ): Promise<{ url: string; number: number } | null> {
   const token = process.env.GITHUB_TOKEN;
   if (item.github_issue_url || item.title === NEW_ITEM_TITLE || !token) return null;
   try {
-    const issue = await createGeoCloudIssue(token, item);
+    const issue = await createGeoCloudIssue(token, item, status);
     // Linking is bookkeeping, not a content edit, so it goes through the admin client: the
     // actor was already authorized above, and the 0007 triggers limit what their own session may set.
     const { error } = await createAdminClient()
@@ -299,5 +306,5 @@ export async function moveRoadmapItemLane(itemId: string, targetLaneId: string):
   if (!moved?.length) throw new Error("forbidden");
 
   // Both lanes, like every other move_lane: Frontlights writes the departure into the sprint the item left.
-  await queueChange(itemId, "move_lane", moveLanePayload({ from: access.item.lane_id, to: targetLaneId, title: access.item.title }));
+  await queueChange(itemId, "move_lane", moveLanePayload({ from: access.item.lane_id, to: targetLaneId, title: access.item.title, origin: "app" }));
 }
