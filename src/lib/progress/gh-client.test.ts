@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { GithubError, collectGithubData, createGithubClient } from "./gh-client.ts";
+import { GithubError, TREE_LIMITS, collectGithubData, createGithubClient } from "./gh-client.ts";
 import { buildFacts } from "./gh-facts.ts";
 
 // A sentinel that must never come out of anything the client prints or throws.
@@ -237,5 +237,181 @@ test("collecting only ever reads: GET requests and GraphQL queries, and the toke
     assert.ok(!call.url.href.includes(TOKEN));
     assert.ok(!JSON.stringify(call.body ?? {}).includes(TOKEN));
     if (call.body?.query) assert.ok(!/mutation/i.test(call.body.query));
+  }
+});
+
+/* ---------- The whole tree of sub-issues, against a fake GitHub ---------- */
+
+type Kid = { number: number; state?: string; stateReason?: string | null; closedAt?: string | null; labels?: string[]; repo?: string };
+const kidNode = (k: Kid) => ({
+  number: k.number,
+  title: `Parte ${k.number}`,
+  state: k.state ?? "OPEN",
+  stateReason: k.stateReason ?? null,
+  createdAt: "2026-02-20T12:00:00Z",
+  closedAt: k.closedAt ?? null,
+  url: `https://github.com/${REPO}/issues/${k.number}`,
+  repository: { nameWithOwner: k.repo ?? REPO },
+  labels: { nodes: (k.labels ?? []).map((name) => ({ name })) },
+});
+const closedKid = (number: number, closedAt: string): Kid => ({ number, state: "CLOSED", stateReason: "COMPLETED", closedAt });
+const boardNode = (number: number, status: string) => ({
+  content: { __typename: "Issue", number, repository: { nameWithOwner: REPO } },
+  fieldValueByName: { name: status, updatedAt: "2026-03-08T13:00:00Z" },
+});
+const oldIssue = (n: number, over: Record<string, unknown> = {}) => ({ ...rest(n), title: `Guarda-chuva ${n}`, created_at: "2026-02-20T12:00:00Z", user: { login: "dev-a" }, ...over });
+
+/** A GitHub whose issues hang in a tree: `kids` says what each issue's sub-issues are. Records what was read. */
+function treeGithub(t: {
+  listed: unknown[];
+  rest?: Record<number, unknown>;
+  kids?: Record<number, Kid[]>;
+  totals?: Record<number, number>;
+  events?: Record<number, unknown[]>;
+  prs?: Record<number, unknown>;
+  board?: unknown[];
+}) {
+  const reads: number[] = [];
+  const gets: number[] = [];
+  const queries: string[] = [];
+  const gh = fakeGithub((call) => {
+    const path = call.url.pathname;
+    if (path === `/repos/${REPO}/issues`) return json(t.listed);
+    const one = new RegExp(`^/repos/${REPO}/issues/(\\d+)$`).exec(path);
+    if (one) {
+      gets.push(Number(one[1]));
+      const found = t.rest?.[Number(one[1])];
+      return found ? json(found) : json({ message: BODY_SECRET }, { status: 404 });
+    }
+    if (path === `/repos/${REPO}/commits`) return json([]);
+    if (path !== "/graphql") return json({ message: BODY_SECRET }, { status: 404 });
+    const query = call.body?.query ?? "";
+    if (/projectV2\(number/.test(query)) {
+      return json({ data: { organization: { projectV2: { items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: t.board ?? [] } } } } });
+    }
+    if (/issue\(number/.test(query)) {
+      const n = Number(call.body?.variables?.n);
+      reads.push(n);
+      queries.push(query);
+      const kids = t.kids?.[n] ?? [];
+      return json({
+        data: {
+          repository: {
+            issue: issueNode(n, { subIssues: { totalCount: t.totals?.[n] ?? kids.length, nodes: kids.map(kidNode) }, timelineItems: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: t.events?.[n] ?? [] } }),
+          },
+        },
+      });
+    }
+    if (/pullRequest\(number/.test(query)) {
+      const wanted = [...query.matchAll(/p(\d+): pullRequest/g)].map((m) => Number(m[1]));
+      return json({ data: { repository: Object.fromEntries(wanted.map((n) => [`p${n}`, t.prs?.[n] ?? null])) } });
+    }
+    return json({ errors: [{ type: "OTHER" }] });
+  });
+  return { ...gh, reads, gets, queries };
+}
+
+async function factsOf(gh: ReturnType<typeof treeGithub>) {
+  const client = createGithubClient({ token: TOKEN, fetch: gh.fetch });
+  const data = await collectGithubData(client, { repository: REPO, window: WINDOW, author: "dev-a" });
+  return { data, facts: buildFacts({ repository: REPO, window: WINDOW, generatedAt: "2026-03-11T12:00:00-03:00", author: "dev-a", ...data }) };
+}
+
+test("the grandchildren are read too: their PRs and their closures are the umbrella's, and its parts are the leaves", async () => {
+  const gh = treeGithub({
+    listed: [oldIssue(70, { created_at: "2026-03-09T12:00:00Z", sub_issues_summary: { total: 2, completed: 1 } })],
+    kids: { 70: [{ number: 71 }, closedKid(72, "2026-03-08T12:00:00Z")], 71: [closedKid(73, "2026-03-10T12:00:00Z"), { number: 74, labels: ["status:blocker"] }] },
+    events: { 73: [{ __typename: "CrossReferencedEvent", willCloseTarget: true, source: { __typename: "PullRequest", number: 80, repository: { nameWithOwner: REPO } } }] },
+    prs: { 80: prNode(80, { title: "Parte (#73)", state: "MERGED", isDraft: false, merged: true, mergedAt: "2026-03-10T15:00:00Z", closedAt: "2026-03-10T15:00:00Z", mergeCommit: { oid: "beef000" } }) },
+    board: [boardNode(70, "Development")],
+  });
+  const { facts, data } = await factsOf(gh);
+
+  assert.deepEqual([...gh.reads].sort(), [70, 71, 72, 73, 74]); // every issue of the tree, once
+  assert.deepEqual(data.prs.map((p) => p.number), [80]);
+  const [entry] = facts.entries;
+  assert.deepEqual([entry.issue, entry.status], [70, "em_andamento"]); // a part merged, but 2 of 3 parts are done
+  assert.deepEqual(entry.subIssues, { total: 3, done: 2 }); // 72, 73 and 74: the step 71 counts through its parts
+  assert.ok(entry.sources.includes(`https://github.com/${REPO}/pull/80`));
+  assert.deepEqual(entry.slices, { closed: [{ title: "Parte 73", closedAt: "2026-03-10T09:00:00-03:00" }], blocked: [{ title: "Parte 74" }] });
+  assert.equal(facts.ignored.children, 4);
+  assert.equal(facts.ignored.cut, 0);
+  assert.ok(facts.gitWork.some((w) => w.ref === "PR #80 mesclado"));
+});
+
+test("the sub-issue query asks for what the report needs and stays a read", async () => {
+  const gh = treeGithub({ listed: [oldIssue(75, { created_at: "2026-03-09T12:00:00Z" })], kids: { 75: [{ number: 76 }] } });
+  await factsOf(gh);
+  assert.ok(gh.queries.length > 0);
+  for (const q of gh.queries) {
+    assert.match(q, /subIssues\(first: 100\) \{ totalCount nodes \{[^}]*repository \{ nameWithOwner \}/);
+    assert.match(q, /labels\(first: \d+\) \{ nodes \{ name \} \}/);
+    assert.ok(!/mutation/i.test(q));
+  }
+});
+
+test("a sub-issue touched in the window brings its quiet umbrella with it, however far up it hangs", async () => {
+  const gh = treeGithub({
+    listed: [oldIssue(302, { state: "closed", state_reason: "completed", closed_at: "2026-03-10T12:00:00Z", parent_issue_url: `https://api.github.com/repos/${REPO}/issues/301` })],
+    rest: {
+      301: oldIssue(301, { parent_issue_url: `https://api.github.com/repos/${REPO}/issues/300` }),
+      300: oldIssue(300),
+    },
+    kids: { 300: [{ number: 301 }], 301: [closedKid(302, "2026-03-10T12:00:00Z")] },
+    board: [boardNode(300, "Open")],
+  });
+  const { facts } = await factsOf(gh);
+  assert.deepEqual([...gh.gets].sort(), [300, 301]); // each ancestor fetched once
+  assert.deepEqual(facts.entries.map((e) => [e.issue, e.status, e.subIssues]), [[300, "em_andamento", { total: 1, done: 1 }]]);
+  assert.equal(facts.ignored.quiet, 0);
+});
+
+test("a tree is followed only so deep: the last level is read, what is below it is not, and `ignored` says so", async () => {
+  const bottom = 90 + TREE_LIMITS.depth;
+  const chain = Object.fromEntries(Array.from({ length: bottom + 3 - 90 }, (_, k) => [90 + k, [{ number: 91 + k }]]));
+  const gh = treeGithub({ listed: [oldIssue(90, { created_at: "2026-03-09T12:00:00Z" })], kids: chain, board: [boardNode(90, "Development")] });
+  const { facts } = await factsOf(gh);
+  assert.deepEqual([...gh.reads].sort((a, b) => a - b), Array.from({ length: TREE_LIMITS.depth + 1 }, (_, k) => 90 + k));
+  assert.ok(!gh.reads.includes(bottom + 1));
+  assert.equal(facts.ignored.cut, 1);
+  const [entry] = facts.entries;
+  assert.deepEqual(entry.subIssues, { total: 1, done: 0 }); // the last level read stands for the one part GitHub counts under it
+  assert.ok(entry.evidence.some((l) => /cortad/i.test(l)));
+});
+
+test("a tree is read only up to its size limit, whole issues at a time, and `ignored` says so", async () => {
+  const per = Math.floor(TREE_LIMITS.family / 3);
+  const many = (from: number) => Array.from({ length: per }, (_, k) => ({ number: from + k }));
+  const gh = treeGithub({
+    listed: [oldIssue(200, { created_at: "2026-03-09T12:00:00Z" })],
+    kids: { 200: [{ number: 201 }, { number: 202 }, { number: 203 }], 201: many(1000), 202: many(3000), 203: many(5000) },
+    board: [boardNode(200, "Development")],
+  });
+  const { facts } = await factsOf(gh);
+  assert.equal(gh.reads.length, 1 + 3 + 2 * per); // the third step's sub-issues would pass the limit: none of them is read
+  assert.ok(gh.reads.every((n) => n < 5000));
+  assert.equal(facts.ignored.cut, 1);
+  assert.deepEqual(facts.entries[0].subIssues, { total: 3 * per, done: 0 }); // the unread step stands for the parts GitHub counts under it
+  assert.ok(facts.entries[0].evidence.some((l) => /cortad/i.test(l)));
+});
+
+test("sub-issues of another repository are not read (their numbers mean other issues), and `ignored` says so", async () => {
+  const gh = treeGithub({
+    listed: [oldIssue(400, { created_at: "2026-03-09T12:00:00Z" })],
+    kids: { 400: [{ number: 401 }, { number: 402, repo: "acme/other-product" }] },
+    board: [boardNode(400, "Development")],
+  });
+  const { facts } = await factsOf(gh);
+  assert.deepEqual([...gh.reads].sort(), [400, 401]);
+  assert.deepEqual(facts.entries[0].subIssues, { total: 1, done: 0 });
+  assert.equal(facts.ignored.cut, 1);
+});
+
+test("a tree is collected with GET requests and GraphQL queries only, token in the header", async () => {
+  const gh = treeGithub({ listed: [oldIssue(500, { created_at: "2026-03-09T12:00:00Z" })], kids: { 500: [{ number: 501 }] }, board: [boardNode(500, "Development")] });
+  await factsOf(gh);
+  for (const call of gh.calls) {
+    assert.ok(call.method === "GET" || (call.method === "POST" && call.url.pathname === "/graphql"));
+    assert.ok(!call.url.href.includes(TOKEN) && !JSON.stringify(call.body ?? {}).includes(TOKEN));
   }
 });

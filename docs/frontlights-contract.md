@@ -229,6 +229,43 @@ com `issue`, ou gerais, sem); o texto, as situações, os números e os prints q
 que já estava lá é pulado. `404 { "error": "not_found" }`, `409 { "error": "not_sent" | "concurrent_change" }`,
 `400` para o corpo inválido.
 
+### Fatos do GitHub (`facts.json`)
+
+Não é rota: é o arquivo que o coletor (`scripts/progress/github.ts`) grava em `.frontlights/progress/facts.json` e que
+o plugin lê para escrever os textos. Entra aqui porque o plugin depende de cada campo. Valem as regras da seção 2:
+campo novo opcional é aditivo. O Frontlights 0.24.0 é o que passa a usar os campos abaixo; quem não os conhece os
+ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada entrada seguem como eram.
+
+- **A família.** Uma entrega (`entries[]`) é uma issue **sem pai**. Suas sub-issues, **em qualquer profundidade**,
+  são lidas e contam para ela: um PR ou commit que cita só uma neta é trabalho da capa, e o fechamento de uma parte
+  (como concluída) é atividade da capa. Criar sub-issues não é atividade (é planejamento). Uma sub-issue tocada no
+  período traz a capa junto, mesmo parada e fora da coluna Development. Quem monta: `src/lib/progress/gh-client.ts`
+  (a leitura, com limites) e `gh-facts.ts` (a conta).
+- **`entries[].subIssues`** `{ total, done }` (ou `null` sem sub-issues) conta as **folhas da árvore inteira**: uma
+  sub-issue com filhas conta pelas filhas, nunca por ela mesma. Uma folha fechada como **não planejada** não é parte:
+  fica fora de `total` e de `done`. Até aqui o campo contava só os filhos diretos; o formato é o mesmo, o que ele conta
+  mudou.
+- **A situação** continua só do coletor. Uma entrega com **parte fechada** (como concluída) até o fim do período
+  nunca fica `proximo`, mesmo sem PR nem commit: a parte entregue é trabalho feito.
+- **`entries[].slices`** (opcional, só em entrega que tem sub-issues): evidência para quem escreve. **Só existe no
+  `facts.json`: o rascunho montado nunca o leva** (`assemble.ts` monta cada entrada campo a campo).
+  - `closed`: `[{ title, closedAt }]`, as sub-issues de **qualquer nível** fechadas como concluídas dentro do
+    período, na ordem em que fecharam. `title` é o do GitHub (o redator o reescreve); `closedAt` vem no horário de São
+    Paulo, como `deliveredAt`. Uma sub-issue com filhas aparece junto com as filhas que fecharam.
+  - `blocked`: `[{ title }]`, as sub-issues **abertas** que carregam o rótulo `status:blocker` (o mesmo nome da coluna
+    Blocker do Project #7; um `blocker` solto não vale, pode ser "bloqueia a release") **ou** cujo cartão no
+    Project estava em Blocker no fim do período. Sub-issue em geral não tem cartão, então na prática é o rótulo. A
+    relação "bloqueada por" do GitHub não é lida.
+- **`ignored.cut`** (número): quantas issues tinham sub-issues que o GitHub conta e o coletor **não leu** (árvore
+  mais funda que 6 níveis abaixo da capa, mais de 400 sub-issues sob uma capa, ou sub-issues de outro repositório). A
+  leitura não estoura em silêncio: a entrega afetada traz uma linha de `evidence` ("Leitura das sub-issues
+  cortada…") e o coletor imprime um aviso. Sob uma issue cortada, o `subIssues` conta o que o GitHub diz que há
+  embaixo dela, e o que está mais fundo fica de fora: **a contagem pode estar abaixo do real**.
+- O e-mail e a visão semanal mostram, sozinhos, "X de Y partes prontas" abaixo da frase da entrega (nunca para
+  `proximo`, nunca com número de issue). Quem escreve o texto não repete a contagem (`docs/progress-draft.md`).
+- **Prints:** o print de uma parte entra em `captions.json` com o número da **entrega** (a capa); o RoadS não aceita
+  número de sub-issue ali.
+
 ## 6. O registro das chamadas
 
 Toda chamada que passa pela checagem do segredo é registrada, depois de a resposta sair (nunca atrasa nem derruba a
@@ -253,6 +290,7 @@ repositório, `roads-script/push` e `roads-script/attach`.
 | `sync-board` | `src/lib/frontlights/sync.ts`, `src/lib/sync-summary.ts` | `…/sync-board/route.ts` |
 | sprint atual e Project em acordo (`roadmap.sprint`, `origin` do `move_lane`) | `src/lib/sprint-status-sync.ts` (a regra, testada sem servidor), `src/lib/board-sync.ts` (as portas reais), `src/lib/board.ts` (a leitura dos cartões) | o mesmo `sync-board`, o botão Sincronizar e o cron diário |
 | rotas do resumo | `src/lib/progress/ingest.ts`, `draft.ts`, `shot-upload.ts`, `attach.ts` | `…/progress-report/**/route.ts` |
+| fatos do GitHub (`facts.json`: família, `subIssues`, `slices`, `ignored.cut`) | `src/lib/progress/gh-client.ts`, `gh-facts.ts`, `gh-status.ts` | `scripts/progress/github.ts` (`gh-cli.ts`) |
 | versão, segredo, registro | `src/lib/frontlights/contract.ts`, `door.ts`, `calls.ts` | `src/lib/frontlights/doors.ts` |
 
 ## 8. Histórico
@@ -279,3 +317,8 @@ repositório, `roads-script/push` e `roads-script/attach`.
   `modify` com `title` e `reason` `"title follows the issue on GitHub"`, e o resumo do `POST /sync-board` pode
   trazer `roadmap.retitled` (quantos títulos acompanharam; ausente quando nenhum). Os 19 itens do plano MVP que
   tinham ficado com o nome antigo foram acertados de uma vez e enfileirados do mesmo jeito.
+- **2026-10-07 (aditivo):** `facts.json` conta a árvore inteira de sub-issues. `entries[].subIssues` passa a contar as
+  folhas de qualquer nível (antes, só os filhos diretos), PRs, commits e fechamentos de qualquer descendente são
+  atividade da capa, uma capa com parte entregue nunca fica `proximo`, e há dois campos novos opcionais:
+  `entries[].slices` (`closed` e `blocked`, só no `facts.json`) e `ignored.cut`. E-mail e visão semanal mostram "X de
+  Y partes prontas". Nenhuma rota mudou e a `schemaVersion` segue 1.

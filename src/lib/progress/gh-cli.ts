@@ -101,6 +101,9 @@ export async function runGithubCli(argv: string[], deps: CliDeps): Promise<numbe
     deps.log(`Fatos do GitHub (GeoCloud) de ${values.from} a ${values.to}, horário de São Paulo.`);
     deps.log(`Entradas visíveis: ${facts.entries.filter((e) => !e.hidden).length} (${ENTRY_STATUSES.map((s) => `${STATUS_LABEL[s]} ${count(s)}`).join(", ")}).`);
     deps.log(`Ocultas por sugestão: ${facts.entries.filter((e) => e.hidden).length}. Internos: ${facts.internal.count}.`);
+    if (facts.ignored.cut > 0) {
+      deps.log(`Atenção: ${facts.ignored.cut} issue${facts.ignored.cut > 1 ? "s" : ""} com sub-issues não lidas por inteiro (árvore funda ou grande demais, ou sub-issues de outro repositório): a contagem de partes pode estar abaixo do real.`);
+    }
     deps.log(facts.gaps ? `Lacunas de cobertura: ${facts.gaps.length}.` : "Sem --messages: as lacunas de cobertura não foram calculadas.");
     deps.log(`Gravado em ${out}.`);
     return 0;

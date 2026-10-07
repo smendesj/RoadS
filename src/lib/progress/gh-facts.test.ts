@@ -85,6 +85,8 @@ test("a sub-issue is rolled up into its parent and never becomes an entry of its
     issues: [
       issue(100, { subIssues: { total: 3, completed: 1 } }),
       issue(101, { parent: 100, state: "closed", stateReason: "completed", closedAt: "2026-03-09T12:00:00-03:00" }),
+      issue(102, { parent: 100 }),
+      issue(103, { parent: 100 }),
     ],
     prs: [pr(1101, { title: "Passo concluído (#101)" })],
     projectItems: [board(100, "Development"), board(101, "Done")],
@@ -92,7 +94,198 @@ test("a sub-issue is rolled up into its parent and never becomes an entry of its
   assert.deepEqual(out.entries.map((e) => e.id), ["gc-100"]);
   assert.deepEqual(out.entries[0].subIssues, { total: 3, done: 1 });
   assert.equal(out.entries[0].status, "em_andamento"); // 1 of 3 steps: the parent is not under validation
-  assert.equal(out.ignored.children, 1);
+  assert.equal(out.ignored.children, 3);
+  assert.equal(out.ignored.cut, 0);
+});
+
+/* ---------- The whole tree of sub-issues ---------- */
+
+const closedIn = (at: string): Partial<GhIssue> => ({ state: "closed", stateReason: "completed", closedAt: at });
+const OLD = "2026-02-20T09:00:00-03:00"; // before the window opened
+const c = (oid: string, at: string, author = "dev-a") => ({ oid, at, author });
+
+test("the parts of an umbrella are the leaves of its whole tree, at any depth", () => {
+  // 100 has a step with two parts (103 done, 104 open), a part of its own (102, open), and a cancelled one.
+  const out = facts({
+    issues: [
+      issue(100),
+      issue(101, { parent: 100 }),
+      issue(102, { parent: 100 }),
+      issue(103, { parent: 101, ...closedIn("2026-03-09T12:00:00-03:00") }),
+      issue(104, { parent: 101 }),
+      issue(105, { parent: 101, state: "closed", stateReason: "not_planned", closedAt: "2026-03-09T12:00:00-03:00" }),
+    ],
+    projectItems: [board(100, "Development")],
+  });
+  assert.deepEqual(out.entries.map((e) => e.issue), [100]);
+  assert.deepEqual(out.entries[0].subIssues, { total: 3, done: 1 }); // 101 counts through 103 and 104, not as a part itself
+  assert.equal(out.ignored.children, 5);
+});
+
+test("an umbrella with no sub-issues at all has no parts, and no slices either", () => {
+  const out = facts({ issues: [issue(110)], projectItems: [board(110, "Development")] });
+  assert.equal(out.entries[0].subIssues, null);
+  assert.equal("slices" in out.entries[0], false);
+});
+
+test("a pull request that cites only a grandchild is the umbrella's work and its delivery", () => {
+  const out = facts({
+    issues: [issue(120), issue(121, { parent: 120 }), issue(122, { parent: 121, ...closedIn("2026-03-09T12:00:00-03:00") })],
+    prs: [pr(1122, { title: "Parte (#122)" })],
+    projectItems: [board(120, "Development")],
+  });
+  const [entry] = out.entries;
+  assert.equal(entry.status, "em_validacao"); // its only part is done and merged, the umbrella awaits confirmation
+  assert.equal(entry.deliveredAt, "2026-03-09T11:00:00-03:00");
+  assert.ok(entry.sources.includes(`https://github.com/${REPO}/pull/1122`));
+  assert.ok(entry.evidence.some((l) => l.includes("#1122")));
+});
+
+test("a PR that only polishes a part already delivered does not move the umbrella's delivery, at any depth", () => {
+  const out = facts({
+    issues: [issue(130, { state: "closed", stateReason: "completed", closedAt: "2026-03-10T18:00:00-03:00" }), issue(131, { parent: 130 }), issue(132, { parent: 131, ...closedIn("2026-03-09T12:00:00-03:00") }), issue(133, { parent: 131, ...closedIn("2026-03-10T12:00:00-03:00") })],
+    prs: [
+      pr(1132, { title: "Parte 1 (#132)", mergedAt: "2026-03-09T11:00:00-03:00" }),
+      pr(1134, { title: "Teste da parte 1 (#132)", createdAt: "2026-03-09T12:10:00-03:00", mergedAt: "2026-03-09T12:30:00-03:00" }),
+      pr(1133, { title: "Parte 2 (#133)", mergedAt: "2026-03-10T11:30:00-03:00" }),
+    ],
+    timelines: [timeline(132, { closers: [1132] })],
+    projectItems: [board(130, "Done")],
+  });
+  assert.equal(out.entries[0].status, "concluido");
+  assert.equal(out.entries[0].deliveredAt, "2026-03-10T11:30:00-03:00");
+});
+
+test("a commit that cites a grandchild makes a quiet umbrella part of the window, under way", () => {
+  const family = [issue(140, { createdAt: OLD }), issue(141, { parent: 140, createdAt: OLD }), issue(142, { parent: 141, createdAt: OLD })];
+  const quiet = facts({ issues: family, projectItems: [board(140, "Open")] });
+  assert.deepEqual(quiet.entries, []);
+  assert.equal(quiet.ignored.quiet, 1);
+
+  const worked = facts({ issues: family, timelines: [timeline(142, { commits: [c("aaaa111", "2026-03-09T10:00:00-03:00")] })], projectItems: [board(140, "Open")] });
+  assert.deepEqual(worked.entries.map((e) => [e.issue, e.status]), [[140, "em_andamento"]]);
+  assert.equal(worked.ignored.quiet, 0);
+});
+
+test("one commit that cites the umbrella and its part is counted once", () => {
+  const out = facts({
+    issues: [issue(145), issue(146, { parent: 145 })],
+    timelines: [timeline(145, { commits: [c("aaaa111", "2026-03-09T10:00:00-03:00")] }), timeline(146, { commits: [c("aaaa111", "2026-03-09T10:00:00-03:00")] })],
+    projectItems: [board(145, "Development")],
+  });
+  assert.ok(out.entries[0].evidence.some((l) => /^1 commit citando/.test(l)), out.entries[0].evidence.join("|"));
+});
+
+test("a part closed in the window makes a quiet umbrella part of it, with no PR and never as proximo; creating parts does not", () => {
+  const closed = facts({
+    issues: [issue(150, { createdAt: OLD }), issue(151, { parent: 150, createdAt: OLD, ...closedIn("2026-03-09T15:00:00-03:00") }), issue(152, { parent: 150, createdAt: OLD })],
+    projectItems: [board(150, "Open")],
+  });
+  assert.deepEqual(closed.entries.map((e) => [e.issue, e.status, e.subIssues]), [[150, "em_andamento", { total: 2, done: 1 }]]);
+
+  const planned = facts({
+    issues: [issue(155, { createdAt: OLD }), issue(156, { parent: 155, createdAt: "2026-03-09T10:00:00-03:00" })],
+    projectItems: [board(155, "Open")],
+  });
+  assert.deepEqual(planned.entries, []);
+  assert.equal(planned.ignored.quiet, 1);
+});
+
+test("a part cancelled in the window is housekeeping, not activity of the umbrella", () => {
+  const out = facts({
+    issues: [issue(158, { createdAt: OLD }), issue(159, { parent: 158, createdAt: OLD, state: "closed", stateReason: "not_planned", closedAt: "2026-03-09T15:00:00-03:00" })],
+    projectItems: [board(158, "Open")],
+  });
+  assert.deepEqual(out.entries, []);
+});
+
+test("an umbrella on Development with parts closed before the window and nothing since is under way, not proximo", () => {
+  const out = facts({
+    issues: [
+      issue(160, { createdAt: OLD }),
+      ...[161, 162, 163].map((n) => issue(n, { parent: 160, createdAt: OLD, ...closedIn("2026-03-02T15:00:00-03:00") })),
+      ...[164, 165].map((n) => issue(n, { parent: 160, createdAt: OLD })),
+    ],
+    projectItems: [board(160, "Development")],
+  });
+  const [entry] = out.entries;
+  assert.equal(entry.status, "em_andamento");
+  assert.deepEqual(entry.subIssues, { total: 5, done: 3 });
+  assert.deepEqual(entry.slices, { closed: [], blocked: [] }); // none was closed inside the window
+});
+
+test("slices list the parts closed inside the window, at any depth and in closing order, and the parts that are blocked", () => {
+  const out = facts({
+    issues: [
+      issue(300),
+      issue(301, { parent: 300, ...closedIn("2026-03-09T15:00:00-03:00") }),
+      issue(302, { parent: 301, ...closedIn("2026-03-09T12:00:00-03:00") }),
+      issue(303, { parent: 300, state: "closed", stateReason: "not_planned", closedAt: "2026-03-09T13:00:00-03:00" }),
+      issue(304, { parent: 300, ...closedIn("2026-03-05T12:00:00-03:00") }), // before the window
+      issue(305, { parent: 300, labels: ["Status:Blocker"] }),
+      issue(306, { parent: 300 }), // blocked on the board
+      issue(307, { parent: 300, ...closedIn("2026-03-12T12:00:00-03:00") }), // after the window
+      issue(308, { parent: 300, labels: ["status:blocker"], ...closedIn("2026-03-10T12:00:00-03:00") }), // blocked once, closed now
+      issue(309, { parent: 300, labels: ["type:feature"] }),
+      issue(399, { parent: 300, labels: ["blocker", "needs-decision"] }), // a bare "blocker" can mean a release blocker: not the same thing
+    ],
+    projectItems: [board(300, "Development"), board(306, "Blocker")],
+  });
+  assert.deepEqual(out.entries[0].slices, {
+    closed: [
+      { title: "Funcionalidade 302", closedAt: "2026-03-09T12:00:00-03:00" },
+      { title: "Funcionalidade 301", closedAt: "2026-03-09T15:00:00-03:00" },
+      { title: "Funcionalidade 308", closedAt: "2026-03-10T12:00:00-03:00" },
+    ],
+    blocked: [{ title: "Funcionalidade 305" }, { title: "Funcionalidade 306" }],
+  });
+  // The parts tell the progress; the status is still the collector's, from the umbrella's own card.
+  assert.equal(out.entries[0].status, "em_andamento");
+});
+
+test("a part's Blocker card counts as blocked as of the end of the window", () => {
+  const out = facts({
+    issues: [issue(310), issue(311, { parent: 310 })],
+    timelines: [timeline(311, { statusHistory: [{ at: "2026-03-12T10:00:00-03:00", to: "Done" }, { at: "2026-03-08T10:00:00-03:00", to: "Blocker" }] })],
+    projectItems: [board(310, "Development"), board(311, "Done", { statusUpdatedAt: "2026-03-12T10:00:00-03:00" })],
+  });
+  assert.deepEqual(out.entries[0].slices?.blocked, [{ title: "Funcionalidade 311" }]);
+});
+
+test("slices are evidence for whoever writes: the facts carry them, and the entry stays one JSON object of plain values", () => {
+  const out = facts({ issues: [issue(320), issue(321, { parent: 320, ...closedIn("2026-03-09T12:00:00-03:00") })], projectItems: [board(320, "Development")] });
+  assert.deepEqual(JSON.parse(JSON.stringify(out.entries[0].slices)), { closed: [{ title: "Funcionalidade 321", closedAt: "2026-03-09T12:00:00-03:00" }], blocked: [] });
+});
+
+test("an umbrella planned in one go is not internal once its parts have a PR", () => {
+  const planning = Array.from({ length: 4 }, (_, k) => issue(520 + k, { assignees: [], createdAt: `2026-03-09T09:0${k}:00-03:00` }));
+  const out = facts({
+    issues: [issue(500, { assignees: [], createdAt: "2026-03-09T09:00:00-03:00" }), issue(501, { parent: 500, assignees: [], createdAt: "2026-03-09T09:01:00-03:00" }), ...planning],
+    prs: [pr(1501, { title: "Parte (#501)" })],
+    projectItems: [],
+  });
+  assert.deepEqual(out.entries.map((e) => e.issue), [500]);
+  assert.deepEqual(out.internal.items.map((i) => i.ref), ["#520", "#521", "#522", "#523"]);
+});
+
+test("a tree read only in part is said so: the entry carries a line, `ignored` counts it, and the parts GitHub counts stand in", () => {
+  // 400 says it has 3 sub-issues but only 401 was read; 410 says it has 4 and none was read.
+  const out = facts({
+    issues: [
+      issue(400, { subIssues: { total: 3, completed: 1 } }),
+      issue(401, { parent: 400, ...closedIn("2026-03-09T12:00:00-03:00") }),
+      issue(410, { subIssues: { total: 4, completed: 1 } }),
+    ],
+    projectItems: [board(400, "Development"), board(410, "Development")],
+  });
+  assert.equal(out.ignored.cut, 2);
+  const [partial, none] = out.entries;
+  assert.deepEqual(partial.subIssues, { total: 1, done: 1 });
+  assert.deepEqual(none.subIssues, { total: 4, done: 1 });
+  for (const e of [partial, none]) assert.ok(e.evidence.some((l) => /cortad/i.test(l)), e.evidence.join("|"));
+  const whole = facts({ issues: [issue(420, { subIssues: { total: 1, completed: 0 } }), issue(421, { parent: 420 })], projectItems: [board(420, "Development")] });
+  assert.equal(whole.ignored.cut, 0);
+  assert.ok(!whole.entries[0].evidence.some((l) => /cortad/i.test(l)));
 });
 
 test("an umbrella issue with every step merged takes the last merge as its delivery", () => {

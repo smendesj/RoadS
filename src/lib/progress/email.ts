@@ -8,6 +8,7 @@
 // links are https ones.
 import { STATUS_LABEL } from "../progress-report.ts";
 import type { EmailBuild, EmailOptions, EntryStatus, ProgressContent, ProgressEntry } from "../progress-report.ts";
+import { partsLabel } from "./report-view.ts";
 import { placeShots, visibleOf, type PlacedShot } from "./shot-place.ts";
 import { joinNames, visualAlt, visualModel, visualSize, windowDays } from "./visual.ts";
 
@@ -129,10 +130,15 @@ function heading(label: string, color: string): string {
 
 function entryBlock(entry: ProgressEntry): string {
   const summary = clean(entry.summary);
+  const parts = partsLabel(entry.subIssues);
   return padded(
     10,
     0,
-    full(row(cell(font(15, 22, COLOR.ink), `<b>${body(clean(entry.title))}</b>`)) + (summary ? row(cell(font(15, 22, COLOR.ink, "padding-top:2px;"), body(summary))) : ""))
+    full(
+      row(cell(font(15, 22, COLOR.ink), `<b>${body(clean(entry.title))}</b>`)) +
+        (summary ? row(cell(font(15, 22, COLOR.ink, "padding-top:2px;"), body(summary))) : "") +
+        (parts ? row(cell(font(13, 19, COLOR.muted, "padding-top:3px;"), escapeHtml(parts))) : "")
+    )
   );
 }
 
@@ -314,7 +320,11 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   out.push("", shownCounters.map((s) => `${STATUS_LABEL[s]}: ${counts[s]}`).join(" · "));
   const item = (e: ProgressEntry) => `- ${clean(e.title)}${clean(e.summary) ? `: ${clean(e.summary)}` : ""}`;
   const printLines = (list: PlacedShot[]) => list.filter((s) => s.src && clean(s.shot.caption)).map((s) => `Print: ${clean(s.shot.caption)}`);
-  const itemWithShots = (e: ProgressEntry) => [item(e), ...printLines(shotsOf(e.issue)).map((l) => `  ${l}`)];
+  const partsLine = (e: ProgressEntry) => {
+    const parts = partsLabel(e.subIssues);
+    return parts ? [`  ${parts}`] : [];
+  };
+  const itemWithShots = (e: ProgressEntry) => [item(e), ...partsLine(e), ...printLines(shotsOf(e.issue)).map((l) => `  ${l}`)];
   for (const status of ["concluido", "em_validacao", "em_andamento"] as const) {
     if (counts[status] > 0) out.push("", STATUS_LABEL[status], ...by(status).flatMap(itemWithShots));
   }

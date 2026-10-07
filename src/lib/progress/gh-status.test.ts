@@ -103,6 +103,16 @@ test("Blocker on the board is bloqueado, unless the work was already delivered a
   assert.equal(statusOf({ board, prs: [pr()], closedAt: "2026-03-09T09:00:00-03:00" }), "concluido");
 });
 
+test("a part of the umbrella closed before the window ended means work was done: never proximo", () => {
+  const board = { atEnd: "Development", now: "Development" } as const;
+  const subIssues = { total: 8, done: 3 };
+  assert.equal(statusOf({ board, subIssues, closedParts: ["2026-03-09T15:00:00-03:00"] }), "em_andamento");
+  assert.equal(classifyEntry(input({ board, subIssues, closedParts: ["2026-03-09T15:00:00-03:00"] }))?.reason, "work_in_progress");
+  // The same umbrella with no part closed yet, and one whose only closure came after the window: still next.
+  assert.equal(statusOf({ board, subIssues: { total: 8, done: 0 } }), "proximo");
+  assert.equal(statusOf({ board, subIssues, closedParts: ["2026-03-10T08:00:00-03:00"] }), "proximo");
+});
+
 test("an issue that is only in the backlog is not part of the report", () => {
   assert.equal(classifyEntry(input({ board: { atEnd: "Open", now: "Open" } })), null);
   assert.equal(classifyEntry(input()), null);

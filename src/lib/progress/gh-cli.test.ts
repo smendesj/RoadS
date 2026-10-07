@@ -78,6 +78,24 @@ test("a run writes the facts of the window and prints a Portuguese summary witho
   assert.ok(!printed.includes(TOKEN) && !h.written.get(DEFAULT_FACTS_PATH)?.includes(TOKEN));
 });
 
+test("a tree of sub-issues read only in part is warned about in the summary and counted in the facts", async () => {
+  const whole = harness();
+  assert.equal(await runGithubCli(["--from", "2026-03-09", "--to", "2026-03-10"], whole.deps), 0);
+  assert.equal(facts(whole.written).ignored.cut, 0);
+  assert.ok(!whole.out.join("\n").includes("sub-issues"));
+
+  // GitHub counts 3 sub-issues under issue 7, and none comes back from the read.
+  const cut = harness();
+  const base = cut.deps.fetch as NonNullable<CliDeps["fetch"]>;
+  cut.deps.fetch = async (input, init) =>
+    new URL(input).pathname === `/repos/${REPO}/issues`
+      ? json([{ number: 7, title: "Tela de exemplo", state: "open", labels: [], assignees: [{ login: "dev-a" }], user: { login: "dev-a" }, created_at: "2026-03-09T12:00:00Z", body: "", sub_issues_summary: { total: 3, completed: 0 } }])
+      : base(input, init);
+  assert.equal(await runGithubCli(["--from", "2026-03-09", "--to", "2026-03-10"], cut.deps), 0);
+  assert.equal(facts(cut.written).ignored.cut, 1);
+  assert.match(cut.out.join("\n"), /1 issue[\s\S]*sub-issues[\s\S]*abaixo do real/);
+});
+
 test("with a usage file the coverage gaps are computed against the sessions", async () => {
   const usage = (sessionEnd: string) =>
     JSON.stringify({

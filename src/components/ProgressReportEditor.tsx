@@ -12,7 +12,7 @@ import {
 } from "@/lib/progress-report";
 import { lintSentence } from "@/lib/progress/lint";
 import { locateKey, parseKey, type resolveHidden } from "@/lib/progress/resolve";
-import { formatDay } from "@/lib/progress/report-view";
+import { formatDay, partsLabel } from "@/lib/progress/report-view";
 
 /** What saving one edit comes back with: what was stored (the server tidies text) and the language warnings. */
 export type SaveOutcome = { ok: true; stored: string | boolean; warnings: LintIssue[] } | { ok: false; message: string };
@@ -373,11 +373,7 @@ export function ProgressReportEditor({
                 <HideToggle fieldKey={`${base}:hidden`} hidden={entry.hidden} readOnly={readOnly} save={save} />
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-rs-text-faint">
                   {entry.deliveredAt && <span>Entregue em {formatDay(entry.deliveredAt)}</span>}
-                  {entry.subIssues && (
-                    <span>
-                      {entry.subIssues.done} de {entry.subIssues.total} partes prontas
-                    </span>
-                  )}
+                  {partsLabel(entry.subIssues) && <span>{partsLabel(entry.subIssues)}</span>}
                   {entry.sources.map((url) => {
                     const name = sourceLabel(url);
                     return name ? (

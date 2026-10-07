@@ -5,6 +5,7 @@ import {
   formatStamp,
   isConferenceCurrent,
   isUuid,
+  partsLabel,
   previewDocument,
   reasonMessage,
   reportPeriodLabel,
@@ -162,4 +163,13 @@ test("a reason nobody foresaw still gives a usable sentence, never undefined or 
     assert.match(message, /Não foi possível/);
     assert.ok(!message.includes("algo-novo"));
   }
+});
+
+test("the parts of a delivery read as plain words, in the singular too, and nothing for a delivery with no parts", () => {
+  assert.equal(partsLabel({ total: 8, done: 3 }), "3 de 8 partes prontas");
+  assert.equal(partsLabel({ total: 5, done: 5 }), "5 de 5 partes prontas");
+  assert.equal(partsLabel({ total: 1, done: 0 }), "0 de 1 parte pronta");
+  assert.equal(partsLabel(null), null);
+  assert.equal(partsLabel({ total: 0, done: 0 }), null);
+  assert.equal(partsLabel(undefined), null);
 });

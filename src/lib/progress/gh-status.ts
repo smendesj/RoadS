@@ -43,7 +43,10 @@ export type StatusInput = {
   closers?: number[];
   /** Instants of the commits that cite the issue. */
   commits: string[];
+  /** The parts of the issue (the leaves of its sub-issue tree): how many there are and how many are done. */
   subIssues?: { total: number; done: number } | null;
+  /** Instants at which parts of the issue, at any depth, were closed as completed: a delivered part is work done. */
+  closedParts?: string[];
 };
 
 export type StatusReason =
@@ -167,7 +170,8 @@ export function classifyEntry(input: StatusInput): StatusDecision | null {
     if (childrenPending) return decide("em_andamento", "children_pending");
     return merged.length > 0 ? decide("em_validacao", "merged_awaiting_confirmation") : decide(OPEN_PR_STATUS, "pr_open");
   }
-  const worked = input.commits.some(before) || input.prs.some((p) => before(p.firstCommitAt) || before(p.createdAt));
+  const worked =
+    input.commits.some(before) || input.prs.some((p) => before(p.firstCommitAt) || before(p.createdAt)) || (input.closedParts ?? []).some(before);
   if (worked) return decide("em_andamento", "work_in_progress");
   if (input.board.atEnd === "Development") return decide("proximo", "board_development");
   return null;

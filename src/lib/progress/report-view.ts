@@ -57,6 +57,12 @@ export function reportPeriodLabel(window: ReportWindow): string {
   return last > first ? `${dm(first)} a ${dm(last)}` : dm(first);
 }
 
+/** "3 de 8 partes prontas": how far a delivery made of parts has come, in plain words and with no issue number. */
+export function partsLabel(parts: { total: number; done: number } | null | undefined): string | null {
+  if (!parts || parts.total <= 0) return null;
+  return `${parts.done} de ${parts.total} ${parts.total === 1 ? "parte pronta" : "partes prontas"}`;
+}
+
 /** Entries per status as the e-mail will show them: hidden ones are not counted. */
 export function statusCounts(content: Pick<ProgressContent, "entries">): Record<EntryStatus, number> {
   const counts = Object.fromEntries(ENTRY_STATUSES.map((s) => [s, 0])) as Record<EntryStatus, number>;

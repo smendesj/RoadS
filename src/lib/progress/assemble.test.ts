@@ -144,3 +144,22 @@ test("an error never repeats the text it was sent", () => {
   assert.equal(r.ok, false);
   if (!r.ok) assert.ok(!r.error.includes(SENTINEL));
 });
+
+test("the parts of a delivery travel to the draft, and the slices stay in the facts: they never reach the content", () => {
+  const SLICE_TITLE = "Parte fechada de exemplo";
+  const slices = { closed: [{ title: SLICE_TITLE, closedAt: "2026-09-28T16:00:00-03:00" }], blocked: [{ title: "Parte bloqueada de exemplo" }] };
+  const content = assembled({
+    facts: facts({ entries: [fact(1, "concluido", { subIssues: { total: 8, done: 5 }, slices }), fact(2, "em_validacao", { slices: { closed: [], blocked: [] } }), fact(3, "concluido", { hidden: true })] }),
+  });
+  assert.deepEqual(content.entries[0].subIssues, { total: 8, done: 5 });
+  for (const e of content.entries) {
+    assert.equal("slices" in e, false);
+    assert.deepEqual(Object.keys(e).sort(), ["deliveredAt", "edited", "hidden", "id", "issue", "sources", "status", "subIssues", "summary", "title"]);
+  }
+  assert.ok(!JSON.stringify(content).includes(SLICE_TITLE) && !JSON.stringify(content).includes("bloqueada de exemplo"));
+  // What the server runs on the push takes it as it is.
+  const shots = [1, 2].map((issue) => ({ id: `shot-${issue}`, caption: "Tela de exemplo", mime: "image/png" as const, issue, path: `${String(issue).repeat(64)}.png` }));
+  const parsed = parseDraft({ produto: "GeoCloud", content: { ...content, shots } });
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.deepEqual(parsed.content.entries[0].subIssues, { total: 8, done: 5 });
+});

@@ -12,7 +12,15 @@ const MAX_PAGES = 50;
 const PROJECT_NUMBER = 7;
 const PARALLEL = 4;
 const PR_CHUNK = 20;
-const MAX_CHILDREN = 60;
+
+/**
+ * How far the tree of sub-issues is followed: `depth` levels below an issue that has no parent (GitHub allows
+ * eight levels in all, and a hundred sub-issues under each), and `family` sub-issues read under one such issue
+ * (each of them costs a request). Past either limit the rest is NOT read, and the issue that was cut keeps what
+ * GitHub says it has, so buildFacts shows the gap in `ignored.cut` and in the entry's evidence. Both leave about
+ * twice the room the largest umbrella of the product takes today, and the tree only grows.
+ */
+export const TREE_LIMITS = { depth: 6, family: 400 } as const;
 
 export type GithubErrorKind = "token" | "rate_limit" | "forbidden" | "not_found" | "server" | "network" | "graphql" | "http" | "parse" | "read_only";
 
@@ -185,7 +193,7 @@ const PROJECT_QUERY = `query($owner: String!, $after: String) { organization(log
 
 const ISSUE_QUERY = `query($owner: String!, $name: String!, $n: Int!, $cursor: String) { repository(owner: $owner, name: $name) { issue(number: $n) {
   number
-  subIssues(first: 100) { nodes { number title state stateReason createdAt closedAt url } }
+  subIssues(first: 100) { totalCount nodes { number title state stateReason createdAt closedAt url repository { nameWithOwner } labels(first: 20) { nodes { name } } } }
   closedByPullRequestsReferences(first: 10, includeClosedPrs: true) { nodes { number repository { nameWithOwner } } }
   timelineItems(first: 100, after: $cursor, itemTypes: [CROSS_REFERENCED_EVENT, REFERENCED_EVENT, CLOSED_EVENT, PROJECT_V2_ITEM_STATUS_CHANGED_EVENT, CONNECTED_EVENT]) {
     pageInfo { hasNextPage endCursor }
@@ -231,7 +239,22 @@ type IssueDetail = {
   timeline: GhTimeline;
   /** Pull requests this issue's timeline points at (any link kind): their details are fetched next. */
   prNumbers: number[];
+  /** The sub-issues of this repository that GitHub listed (a sub-issue of another repository is left out). */
   children: GhIssue[];
+  /** What GitHub counts under this issue, all repositories together; null when GitHub did not answer for it. */
+  childSummary: { total: number; completed: number } | null;
+};
+
+type SubIssueNode = {
+  number: number;
+  title?: string;
+  state?: string;
+  stateReason?: string | null;
+  createdAt: string;
+  closedAt?: string | null;
+  url?: string;
+  repository?: RepoRef;
+  labels?: Nodes<{ name?: string }>;
 };
 
 async function fetchIssueDetail(client: GithubClient, repository: string, n: number): Promise<IssueDetail> {
@@ -240,12 +263,13 @@ async function fetchIssueDetail(client: GithubClient, repository: string, n: num
   const prNumbers = new Set<number>();
   const closers = new Set<number>();
   let children: GhIssue[] = [];
+  let childSummary: IssueDetail["childSummary"] = null;
   let cursor: string | null = null;
   for (let page = 0; page < 10; page++) {
     const data: {
       repository?: {
         issue?: {
-          subIssues?: Nodes<{ number: number; title?: string; state?: string; stateReason?: string | null; createdAt: string; closedAt?: string | null; url?: string }>;
+          subIssues?: { totalCount?: number | null; nodes?: (SubIssueNode | null)[] | null } | null;
           closedByPullRequestsReferences?: Nodes<{ number: number; repository?: RepoRef }>;
           timelineItems?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }; nodes?: (TimelineEvent | null)[] };
         } | null;
@@ -261,24 +285,26 @@ async function fetchIssueDetail(client: GithubClient, repository: string, n: num
         }
       }
       const kids = nodesOf(issue.subIssues);
-      children =
-        kids.length <= MAX_CHILDREN
-          ? kids.map((k) => ({
-              number: k.number,
-              title: k.title ?? "",
-              url: k.url ?? `https://github.com/${repository}/issues/${k.number}`,
-              state: (k.state ?? "").toUpperCase() === "CLOSED" ? "closed" : "open",
-              stateReason: reason(k.stateReason),
-              createdAt: k.createdAt,
-              closedAt: k.closedAt ?? null,
-              labels: [],
-              author: null,
-              assignees: [],
-              body: "",
-              parent: n,
-              subIssues: null,
-            }))
-          : [];
+      const closed = (k: SubIssueNode) => (k.state ?? "").toUpperCase() === "CLOSED";
+      childSummary = { total: Math.max(issue.subIssues?.totalCount ?? 0, kids.length), completed: kids.filter(closed).length };
+      // A sub-issue of another repository has a number that means some other issue here: it is not read.
+      children = kids
+        .filter((k) => !k.repository?.nameWithOwner || sameRepo(k.repository, repository))
+        .map((k) => ({
+          number: k.number,
+          title: k.title ?? "",
+          url: k.url ?? `https://github.com/${repository}/issues/${k.number}`,
+          state: closed(k) ? "closed" : "open",
+          stateReason: reason(k.stateReason),
+          createdAt: k.createdAt,
+          closedAt: k.closedAt ?? null,
+          labels: nodesOf(k.labels).map((l) => l.name ?? "").filter(Boolean),
+          author: null,
+          assignees: [],
+          body: "",
+          parent: n,
+          subIssues: null,
+        }));
     }
     for (const e of (issue.timelineItems?.nodes ?? []).filter((x): x is TimelineEvent => x != null)) {
       const inRepo = (ref: PrRef) => ref?.__typename === "PullRequest" && typeof ref.number === "number" && sameRepo(ref.repository, repository);
@@ -301,7 +327,7 @@ async function fetchIssueDetail(client: GithubClient, repository: string, n: num
     cursor = info.endCursor;
   }
   timeline.closers = [...closers];
-  return { timeline, prNumbers: [...prNumbers], children };
+  return { timeline, prNumbers: [...prNumbers], children, childSummary };
 }
 
 async function fetchPrs(client: GithubClient, repository: string, numbers: number[]): Promise<GhPr[]> {
@@ -415,8 +441,9 @@ export type CollectedData = Pick<FactsInput, "issues" | "prs" | "timelines" | "p
 
 /**
  * Everything buildFacts needs, for one repository and one window: the issues and PRs touched since the
- * window opened, the sprint issues that were quiet, every issue's timeline (and its sub-issues'), the PR
- * details with their commits, Project #7, and the commits on the default branch.
+ * window opened, the sprint issues that were quiet, the issues above a touched sub-issue, every issue's
+ * timeline (and that of every sub-issue under it, at any depth up to TREE_LIMITS), the PR details with their
+ * commits, Project #7, and the commits on the default branch.
  */
 export async function collectGithubData(
   client: GithubClient,
@@ -448,23 +475,71 @@ export async function collectGithubData(
     if (!one.pull_request) issues.set(one.number, issueFromRest(one, repository));
   }
 
+  // A sub-issue touched in the window brings the issues above it, quiet or not: the umbrella is the entry, and
+  // its parts (this one among them) are what the report counts.
+  const asked = new Set<number>();
+  for (let hop = 0; hop < TREE_LIMITS.depth; hop++) {
+    const above = [...new Set([...issues.values()].map((i) => i.parent))].filter((p): p is number => p != null && !issues.has(p) && !asked.has(p));
+    if (above.length === 0) break;
+    await mapPool(above, PARALLEL, async (n) => {
+      asked.add(n);
+      const one = await client.get<RestIssue>(`/repos/${repository}/issues/${n}`);
+      if (!one.pull_request) issues.set(one.number, issueFromRest(one, repository));
+    });
+  }
+
+  // Where an issue hangs: the issue without a parent above it, and how many levels down it is.
+  const place = (n: number): { root: number; depth: number } => {
+    let root = n;
+    let depth = 0;
+    const seen = new Set([n]);
+    for (let p = issues.get(root)?.parent; p != null && issues.has(p) && !seen.has(p); p = issues.get(root)?.parent) {
+      root = p;
+      seen.add(p);
+      depth++;
+    }
+    return { root, depth };
+  };
+  const familySize = new Map<number, number>();
+  for (const i of issues.values()) {
+    const { root } = place(i.number);
+    if (root !== i.number) familySize.set(root, (familySize.get(root) ?? 0) + 1);
+  }
+
+  // Every issue is read (its timeline is where its PRs and commits are), level by level: what the list showed
+  // first, then the sub-issues each one names, and theirs. An issue's sub-issues come in whole or not at all
+  // when they would pass TREE_LIMITS; what GitHub counts under it stays on the issue, so the gap shows.
   const timelines = new Map<number, GhTimeline>();
-  const read = async (n: number): Promise<IssueDetail> => {
+  const details = new Map<number, IssueDetail>();
+  const read = async (n: number): Promise<void> => {
     const detail = await fetchIssueDetail(client, repository, n);
+    details.set(n, detail);
     timelines.set(n, detail.timeline);
     detail.prNumbers.forEach((p) => prNumbers.add(p));
-    return detail;
   };
-  const details = await mapPool([...issues.keys()], PARALLEL, read);
-  // Sub-issues the list did not show are still needed: their PRs are the parent's delivery.
-  for (const detail of details) {
-    for (const child of detail.children) if (!issues.has(child.number)) issues.set(child.number, child);
+  const expanded = new Set<number>();
+  let level = [...issues.keys()];
+  while (level.length > 0) {
+    level.sort((a, b) => a - b);
+    await mapPool(level.filter((n) => !details.has(n)), PARALLEL, read);
+    const next: number[] = [];
+    for (const n of level) {
+      if (expanded.has(n)) continue;
+      expanded.add(n);
+      const issue = issues.get(n) as GhIssue;
+      const detail = details.get(n) as IssueDetail;
+      if (issue.subIssues === null && detail.childSummary) issue.subIssues = detail.childSummary;
+      const fresh = detail.children.filter((k) => !issues.has(k.number));
+      const { root, depth } = place(n);
+      if (fresh.length === 0 || depth >= TREE_LIMITS.depth || (familySize.get(root) ?? 0) + fresh.length > TREE_LIMITS.family) continue;
+      familySize.set(root, (familySize.get(root) ?? 0) + fresh.length);
+      for (const kid of fresh) {
+        issues.set(kid.number, kid);
+        next.push(kid.number);
+      }
+    }
+    level = next;
   }
-  await mapPool(
-    [...issues.values()].filter((i) => i.parent != null && !timelines.has(i.number)).map((i) => i.number),
-    PARALLEL,
-    read
-  );
 
   const prs = await fetchPrs(client, repository, [...prNumbers].sort((a, b) => a - b));
 

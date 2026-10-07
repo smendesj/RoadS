@@ -21,8 +21,13 @@ export type GhIssue = {
   author: string | null;
   assignees: string[];
   body: string;
-  /** Set when this issue is a sub-issue: it is rolled up into that parent. */
+  /** Set when this issue is a sub-issue: it is rolled up into that parent (its direct one, at any depth). */
   parent: number | null;
+  /**
+   * What GitHub says about this issue's DIRECT sub-issues. The report counts the leaves of the tree it was
+   * given instead; this is how a tree that was read only in part is noticed (and what stands in for the parts
+   * under an issue none of whose sub-issues were read).
+   */
   subIssues: { total: number; completed: number } | null;
 };
 
@@ -76,13 +81,24 @@ export type FactsInput = {
 
 /* ---------- Output ---------- */
 
+/** What happened to the parts of an umbrella in the window: evidence for whoever writes, never part of the draft. */
+export type PartsSlices = {
+  /** Parts, at any depth, closed as completed inside the window, in closing order (São Paulo time). */
+  closed: { title: string; closedAt: string }[];
+  /** Open parts that carry a blocker label or sit on the Blocker column of Project #7. */
+  blocked: { title: string }[];
+};
+
 export type FactEntry = {
   id: string; // "gc-<issue>": the key edits are stored under
   issue: number;
   title: string; // as written on GitHub: the drafting step rewrites it in plain language
   status: EntryStatus;
   deliveredAt: string | null;
+  /** The parts of the issue: the leaves of its whole tree of sub-issues, at any depth (cancelled ones left out). */
   subIssues: { total: number; done: number } | null;
+  /** Only for an issue that has sub-issues. Kept in facts.json: the assembled draft does not carry it. */
+  slices?: PartsSlices;
   hidden: boolean;
   hiddenReason: string | null;
   evidence: string[];
@@ -102,8 +118,12 @@ export type ProgressFacts = {
   gitWork: GitWork[];
   /** Filled by the CLI when a usage file is given. */
   gaps?: { at: string; ref: string; nearestMessageMinutes: number | null }[];
-  /** What was looked at and deliberately left out, so a missing issue is never a mystery. */
-  ignored: { backlog: number; quiet: number; settled: number; children: number };
+  /**
+   * What was looked at and deliberately left out, so a missing issue is never a mystery. `cut` counts the issues
+   * whose sub-issues GitHub counts but the collector did not read (a tree too deep or too big, or sub-issues of
+   * another repository): their entries carry a line saying the parts may be underestimated.
+   */
+  ignored: { backlog: number; quiet: number; settled: number; children: number; cut: number };
 };
 
 /* ---------- Window and hide list ---------- */
@@ -256,17 +276,59 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     const delivery = pickDelivery(merged, timelineOf.get(n)?.closers ?? [], closedAtOf(n));
     return all.filter((p) => !merged.includes(p) || p === delivery);
   };
+  // Everything under an issue, at any depth (a loop in the parent links, which GitHub does not allow, would not hang this).
+  const descendantsOf = (n: number): GhIssue[] => {
+    const found: GhIssue[] = [];
+    const seen = new Set([n]);
+    const walk = (m: number) => {
+      for (const k of childrenOf.get(m) ?? []) {
+        const kid = issueOf.get(k);
+        if (seen.has(k) || !kid) continue;
+        seen.add(k);
+        found.push(kid);
+        walk(k);
+      }
+    };
+    walk(n);
+    return found.sort(byNumber);
+  };
+  // The work of an issue is the work of its whole family: the PRs and commits of any part count for the umbrella.
   const gathered = (n: number) => {
-    const kids = childrenOf.get(n) ?? [];
+    const family = descendantsOf(n);
     const own = timelineOf.get(n);
+    const commits = new Map<string, GhCommit>();
+    for (const t of [own, ...family.map((k) => timelineOf.get(k.number))]) for (const cm of t?.commits ?? []) commits.set(cm.oid, cm);
     return {
-      prs: (kids.length === 0 ? prsOfIssue.get(n) ?? [] : unique([...reduced(n), ...kids.flatMap(reduced)])).slice().sort(byNumber),
-      commits: [...(own?.commits ?? []), ...kids.flatMap((k) => timelineOf.get(k)?.commits ?? [])],
+      family,
+      prs: (family.length === 0 ? prsOfIssue.get(n) ?? [] : unique([...reduced(n), ...family.flatMap((k) => reduced(k.number))])).slice().sort(byNumber),
+      commits: [...commits.values()],
       history: own?.statusHistory ?? [],
     };
   };
 
-  const internalReason = (i: GhIssue, atEnd: ReturnType<typeof boardStatusAt>): string | null => {
+  // The parts of an issue are the leaves of its tree. A cancelled leaf is not a part; a leaf that GitHub says has
+  // sub-issues nobody read stands for the parts GitHub counts under it.
+  const cancelled = (i: GhIssue): boolean => i.state === "closed" && i.stateReason === "not_planned";
+  const unread = (i: GhIssue | undefined): { total: number; done: number } | null =>
+    i?.subIssues && i.subIssues.total > 0 ? { total: i.subIssues.total, done: Math.min(i.subIssues.completed, i.subIssues.total) } : null;
+  const partsOf = (n: number, family: GhIssue[]): { total: number; done: number } | null => {
+    const counts =
+      family.length === 0
+        ? [unread(issueOf.get(n))]
+        : family.filter((i) => !childrenOf.has(i.number)).map((i) => unread(i) ?? (cancelled(i) ? { total: 0, done: 0 } : { total: 1, done: i.state === "closed" ? 1 : 0 }));
+    const total = counts.reduce((sum, p) => sum + (p?.total ?? 0), 0);
+    return total > 0 ? { total, done: counts.reduce((sum, p) => sum + (p?.done ?? 0), 0) } : null;
+  };
+  const deliveredPart = (i: GhIssue): boolean => i.state === "closed" && !cancelled(i) && !!i.closedAt;
+  const incomplete = (i: GhIssue): boolean => !!i.subIssues && i.subIssues.total > (childrenOf.get(i.number)?.length ?? 0);
+  // The repository's own convention: `status:blocker`, named like the Blocker column of Project #7. A bare "blocker" can mean a release blocker.
+  const BLOCKED_LABEL = /^status\s*:\s*(?:blocker|blocked)$/i;
+  const blockedPart = (i: GhIssue): boolean =>
+    i.state === "open" &&
+    (i.labels.some((l) => BLOCKED_LABEL.test(l.trim())) ||
+      boardStatusAt(boardItem.get(i.number) ?? null, timelineOf.get(i.number)?.statusHistory ?? [], input.window.end) === "Blocker");
+
+  const internalReason = (i: GhIssue, atEnd: ReturnType<typeof boardStatusAt>, familyPrs: GhPr[]): string | null => {
     if (hide.issues.includes(i.number) || hide.patterns.some((p) => patternMatches(p, i.title))) return "lista local (hide.json)";
     if (TEST_SYNC.test(i.title)) return "teste de sincronização";
     if (i.state === "closed" && i.stateReason === "not_planned") return "fechada como não planejada";
@@ -276,7 +338,7 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     if (labels.some((l) => INTERNAL_LABELS.has(l)) && !labels.some((l) => FEATURE_LABELS.has(l))) return "rótulo de teste/chore/infra";
     const head = i.body.slice(0, 400);
     if (FOLLOW_UP_BODY.some((re) => re.test(head))) return "pendência de revisão";
-    if (batch.has(i.number) && i.assignees.length === 0 && (prsOfIssue.get(i.number) ?? []).length === 0) {
+    if (batch.has(i.number) && i.assignees.length === 0 && familyPrs.length === 0) {
       return "planejamento criado em lote";
     }
     return null;
@@ -284,29 +346,32 @@ export function buildFacts(input: FactsInput): ProgressFacts {
 
   const entries: FactEntry[] = [];
   const internal: InternalItem[] = [];
-  const ignored = { backlog: 0, quiet: 0, settled: 0, children: 0 };
+  const ignored = { backlog: 0, quiet: 0, settled: 0, children: 0, cut: input.issues.filter(incomplete).length };
 
   for (const issue of [...input.issues].sort(byNumber)) {
     if (issue.parent != null) {
       ignored.children++;
       continue;
     }
-    const { prs, commits, history } = gathered(issue.number);
+    const { family, prs, commits, history } = gathered(issue.number);
+    const closedParts = family.filter(deliveredPart);
     const item = boardItem.get(issue.number) ?? null;
     const atEnd = boardStatusAt(item, history, input.window.end);
     const now = asBoardStatus(item?.status);
 
+    // Creating sub-issues is planning, not progress: only what was done to the family counts as its activity.
     const activity = [
       issue.createdAt,
       issue.closedAt,
       item?.statusUpdatedAt,
       ...history.map((h) => h.at),
       ...commits.map((c) => c.at),
+      ...closedParts.map((p) => p.closedAt),
       ...prs.flatMap((p) => [p.createdAt, p.closedAt, p.mergedAt, ...p.commits.map((c) => c.at)]),
     ];
     const active = activity.some(inWindow);
 
-    const reason = internalReason(issue, atEnd);
+    const reason = internalReason(issue, atEnd, prs);
     if (reason) {
       if (active) internal.push({ ref: `#${issue.number}`, title: issue.title, reason });
       continue;
@@ -318,7 +383,7 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     }
 
     const closedAt = issue.state === "closed" ? issue.closedAt : null;
-    const subIssues = issue.subIssues && issue.subIssues.total > 0 ? { total: issue.subIssues.total, done: issue.subIssues.completed } : null;
+    const subIssues = partsOf(issue.number, family);
     const decision = classifyEntry({
       windowEnd: input.window.end,
       closedAt,
@@ -327,6 +392,7 @@ export function buildFacts(input: FactsInput): ProgressFacts {
       closers: timelineOf.get(issue.number)?.closers,
       commits: commits.map((c) => c.at),
       subIssues,
+      closedParts: closedParts.map((p) => p.closedAt as string),
     });
     if (!decision) {
       ignored.backlog++;
@@ -355,9 +421,32 @@ export function buildFacts(input: FactsInput): ProgressFacts {
       status: decision.status,
       deliveredAt: decision.deliveredAt,
       subIssues,
+      ...(family.length > 0
+        ? {
+            slices: {
+              closed: closedParts
+                .filter((p) => inWindow(p.closedAt))
+                .sort((a, b) => Date.parse(a.closedAt as string) - Date.parse(b.closedAt as string) || a.number - b.number)
+                .map((p) => ({ title: p.title, closedAt: toSaoPauloIso(p.closedAt as string) })),
+              blocked: family.filter(blockedPart).map((p) => ({ title: p.title })),
+            },
+          }
+        : {}),
       hidden: hiddenReason !== null,
       hiddenReason,
-      evidence: evidenceLines({ issue, decision, prs, commits, now, since: item?.statusUpdatedAt ?? null, windowEnd: input.window.end, subIssues }),
+      evidence: evidenceLines({
+        issue,
+        decision,
+        prs,
+        commits,
+        now,
+        since: item?.statusUpdatedAt ?? null,
+        windowEnd: input.window.end,
+        subIssues,
+        closedInWindow: closedParts.filter((p) => inWindow(p.closedAt)).length,
+        lastPartClosed: closedParts.map((p) => p.closedAt as string).filter(inWindow).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1) ?? null,
+        cut: [issue, ...family].some(incomplete),
+      }),
       // The draft parser takes at most MAX_SOURCES links: the issue and the PR that delivered it come first.
       sources: unique([issue.url, ...(decision.delivery?.url ? [decision.delivery.url] : []), ...prs.map((p) => p.url)]).slice(0, MAX_SOURCES),
     });
@@ -392,6 +481,11 @@ function evidenceLines(a: {
   since: string | null;
   windowEnd: string;
   subIssues: { total: number; done: number } | null;
+  /** Parts closed as completed inside the window, and when the last one was. */
+  closedInWindow: number;
+  lastPartClosed: string | null;
+  /** Some issue of the family has sub-issues that were not read. */
+  cut: boolean;
 }): string[] {
   const end = Date.parse(a.windowEnd);
   const lines: string[] = [];
@@ -425,7 +519,7 @@ function evidenceLines(a: {
   );
   const cited = a.commits.filter((c) => Date.parse(c.at) < end).sort((x, y) => Date.parse(x.at) - Date.parse(y.at));
   if (cited.length > 0) {
-    lines.push(`${cited.length} commit${cited.length > 1 ? "s" : ""} citando a issue, o último em ${formatSaoPaulo(cited[cited.length - 1].at)}`);
+    lines.push(`${cited.length} commit${cited.length > 1 ? "s" : ""} citando a issue ou suas sub-issues, o último em ${formatSaoPaulo(cited[cited.length - 1].at)}`);
   }
   if (a.now) {
     const late = a.since && Date.parse(a.since) >= end ? ", depois do fim da janela" : "";
@@ -434,7 +528,11 @@ function evidenceLines(a: {
   if (a.issue.state === "closed" && a.issue.closedAt) {
     lines.push(`Issue fechada em ${formatSaoPaulo(a.issue.closedAt)}${Date.parse(a.issue.closedAt) >= end ? ", depois do fim da janela" : ""}`);
   }
-  if (a.subIssues) lines.push(`Sub-issues: ${a.subIssues.done} de ${a.subIssues.total} concluídas`);
+  if (a.subIssues) lines.push(`Partes (as folhas das sub-issues, em qualquer nível): ${a.subIssues.done} de ${a.subIssues.total} concluídas`);
+  if (a.closedInWindow > 0 && a.lastPartClosed) {
+    lines.push(`${a.closedInWindow} sub-issue${a.closedInWindow > 1 ? "s" : ""} fechada${a.closedInWindow > 1 ? "s" : ""} no período, a última em ${formatSaoPaulo(a.lastPartClosed)}`);
+  }
+  if (a.cut) lines.push("Leitura das sub-issues cortada (árvore funda ou grande demais, ou sub-issues de outro repositório): a contagem de partes pode estar abaixo do real");
   if (a.decision.reason === "board_development") {
     lines.push(`Sem commits nem PR até ${formatSaoPaulo(new Date(end - 60_000).toISOString())}: o quadro diz Development, mas ainda não há código`);
   }

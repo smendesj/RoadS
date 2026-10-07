@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { STATUS_LABEL, type EntryStatus, type ProgressContent, type ProgressEntry } from "@/lib/progress-report";
+import { partsLabel } from "@/lib/progress/report-view";
 import { placeShots, visibleOf } from "@/lib/progress/shot-place";
 
 // The week of the Resumo, to present at the Monday scrum: the e-mail's content in the e-mail's order, as large
@@ -103,6 +104,7 @@ export function WeekPresentation({
     <article key={e.id} data-entry={e.issue} className={`flex flex-col gap-4 border-l-8 pl-5 sm:pl-8 ${STATUS_ACCENT[e.status]}`}>
       <h3 className="text-3xl font-bold text-rs-text sm:text-4xl">{e.title}</h3>
       {e.summary && <p className="text-xl text-rs-text sm:text-2xl">{e.summary}</p>}
+      {partsLabel(e.subIssues) && <p data-parts className="text-lg text-rs-text-soft sm:text-xl">{partsLabel(e.subIssues)}</p>}
       {shotsOf(e.issue).map(({ shot, src }) => (src ? <Print key={shot.id} src={src} caption={shot.caption} product={produto} onOpen={setZoom} /> : null))}
     </article>
   );

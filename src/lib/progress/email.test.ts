@@ -468,3 +468,40 @@ test("with one project or none the e-mail does not mention projects", () => {
   assert.doesNotMatch(html(rich({ usage: usageFor(2, { products: ["Alpha"] }) })), /Projetos somados/);
   assert.doesNotMatch(text(), /Projetos somados/);
 });
+
+/* ---------- the parts of a delivery ---------- */
+
+test("a delivery with parts says how many are ready, in plain words under its sentence, in the HTML and in the text", () => {
+  const content = rich({
+    entries: [
+      entry(1, "concluido", { subIssues: { total: 8, done: 8 } }),
+      entry(3, "em_validacao", { subIssues: { total: 4, done: 4 } }),
+      entry(4, "em_andamento", { subIssues: { total: 8, done: 3 } }),
+      entry(5, "proximo", { subIssues: { total: 6, done: 0 } }),
+      entry(7, "concluido", { subIssues: { total: 1, done: 1 } }),
+      entry(2, "concluido"),
+    ],
+  });
+  const out = html(content);
+  for (const line of ["8 de 8 partes prontas", "4 de 4 partes prontas", "3 de 8 partes prontas", "1 de 1 parte pronta"]) assert.ok(out.includes(line), line);
+  // Right under the sentence of its own delivery, before the next one starts.
+  assert.ok(at(out, "Frase de exemplo sobre a entrega de teste 4.") < at(out, "3 de 8 partes prontas"));
+  assert.ok(at(out, "3 de 8 partes prontas") < at(out, ">Dificuldades e bloqueios<"));
+  // A delivery with no parts, and an upcoming one, say nothing about parts; the count is no issue number either.
+  assert.equal(out.match(/partes? prontas?/g)?.length, 4);
+  const plain = text(content);
+  assert.match(plain, /- Entrega de teste 4: Frase de exemplo sobre a entrega de teste 4\.\n {2}3 de 8 partes prontas\n/);
+  assert.equal(plain.match(/partes? prontas?/g)?.length, 4);
+  assert.ok(!plain.includes("6 de 6") && !plain.includes("0 de 6"));
+});
+
+test("the parts line of a blocked delivery sits in the blockers, and a hidden delivery never shows one", () => {
+  const content = rich({
+    entries: [entry(4, "bloqueado", { subIssues: { total: 5, done: 1 } }), entry(6, "concluido", { hidden: true, subIssues: { total: 9, done: 9 } })],
+  });
+  for (const out of [html(content), text(content)]) {
+    assert.ok(out.includes("1 de 5 partes prontas"));
+    assert.ok(!out.includes("9 de 9"));
+  }
+  assert.ok(at(html(content), ">Dificuldades e bloqueios<") < at(html(content), "1 de 5 partes prontas"));
+});
