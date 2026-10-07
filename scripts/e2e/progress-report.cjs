@@ -401,6 +401,10 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       );
       expect("scrum master -> the print of a delivery sits under it", (await smPage.locator('[data-entry="9001"] [data-print]').count()) === 1);
       expect(
+        "scrum master -> each delivery says how many of its parts are ready, in plain words and with no issue number",
+        (await smPage.locator('[data-entry="9001"] [data-parts]').innerText()) === "2 de 2 partes prontas" && (await smPage.locator('[data-entry="9003"] [data-parts]').innerText()) === "1 de 2 partes prontas"
+      );
+      expect(
         "scrum master -> a general print added after the send shows among the other prints, with its caption",
         (await smPage.locator('section[aria-label="Outros prints"]').innerText()).includes(GENERAL_CAPTION)
       );
@@ -489,6 +493,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     const sandbox = await frame.getAttribute("sandbox");
     expect("admin -> the preview frame is sandboxed and runs no scripts", sandbox !== null && !/allow-scripts/.test(sandbox), String(sandbox));
     expect("admin -> the preview is the e-mail built from the draft", (await srcdocNow()).includes("Resumo rascunho") && (await srcdocNow()).includes("Primeira entrega"));
+    expect("admin -> the preview says how many parts of a delivery are ready (the delivered one has all, the others one of two)", (await srcdocNow()).includes("2 de 2 partes prontas") && (await srcdocNow()).includes("1 de 2 partes prontas"));
     {
       const doc = await srcdocNow();
       const at = (needle) => doc.indexOf(needle);
