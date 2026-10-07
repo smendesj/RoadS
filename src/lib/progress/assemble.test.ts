@@ -163,3 +163,33 @@ test("the parts of a delivery travel to the draft, and the slices stay in the fa
   assert.equal(parsed.ok, true);
   if (parsed.ok) assert.deepEqual(parsed.content.entries[0].subIssues, { total: 8, done: 5 });
 });
+
+const cover = (n: number, over: Record<string, unknown> = {}) => ({
+  issue: n,
+  title: `Capa técnica ${n}`,
+  issues: { total: 9, done: 4 },
+  parts: { total: 17, done: 12, remaining: 5 },
+  open: [{ issue: n + 1, title: `Entrega aberta ${n + 1}` }],
+  ...over,
+});
+const withSprint = (epics: unknown[]) => facts({ sprint: { epics, totals: { covers: epics.length, remainingParts: epics.length * 5 } }, delivered: { issues: 2, parts: 9 } });
+
+test("the sprint block comes from the facts, with the writer's sentence per cover or an empty one, and nothing else of the facts", () => {
+  const content = assembled({ facts: withSprint([cover(900), cover(950)]), texts: texts({ sprint: [{ issue: 900, summary: "Uma frase simples sobre a capa." }] }) });
+  assert.deepEqual(content.sprint?.epics.map((c) => [c.issue, c.title, c.summary]), [[900, "Capa técnica 900", "Uma frase simples sobre a capa."], [950, "Capa técnica 950", ""]]);
+  assert.deepEqual(content.sprint?.epics[0].parts, { total: 17, done: 12, remaining: 5 });
+  assert.deepEqual(content.sprint?.epics[0].open, [{ issue: 901, title: "Entrega aberta 901" }]);
+  assert.deepEqual(content.sprint?.totals, { covers: 2, remainingParts: 10 });
+  // The chip of what was delivered is made from the deliveries on show, so what the user edits is followed: it is not stored.
+  assert.equal("delivered" in content, false);
+  const shots = [1, 2].map((issue) => ({ id: `shot-${issue}`, caption: "Tela de exemplo", mime: "image/png" as const, issue, path: `${String(issue).repeat(64)}.png` }));
+  assert.equal(parseDraft({ produto: "GeoCloud", content: { ...content, shots } }).ok, true);
+});
+
+test("facts without a sprint block (older ones) give a draft without one, and a sentence for a cover the facts do not have is refused", () => {
+  assert.equal("sprint" in assembled(), false);
+  assert.equal(assembled({ facts: withSprint([]) }).sprint?.epics.length, 0);
+  const r = assembleDraft(input({ facts: withSprint([cover(900)]), texts: texts({ sprint: [{ issue: 900, summary: "Certa." }, { issue: 777, summary: "Errada." }] }) }));
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.error, /#777 /);
+});

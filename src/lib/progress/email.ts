@@ -7,8 +7,9 @@
 // grid. Rounded corners are a bonus that Outlook ignores. Every piece of text is escaped; the only
 // links are https ones.
 import { STATUS_LABEL } from "../progress-report.ts";
-import type { EmailBuild, EmailOptions, EntryStatus, ProgressContent, ProgressEntry } from "../progress-report.ts";
-import { partsLabel } from "./report-view.ts";
+import type { EmailBuild, EmailOptions, EntryStatus, ProgressContent, ProgressEntry, SprintCover } from "../progress-report.ts";
+import { amountLabel, openTitles, partsLabel, sprintChips } from "./report-view.ts";
+import type { SprintChips } from "./report-view.ts";
 import { placeShots, visibleOf, type PlacedShot } from "./shot-place.ts";
 import { joinNames, visualAlt, visualModel, visualSize, windowDays } from "./visual.ts";
 
@@ -101,18 +102,47 @@ const font = (size: number, line: number, color: string, extra = ""): string =>
 const full = (rows: string): string => table('width="100%" style="width:100%;"', rows);
 const padded = (top: number, bottom: number, inner: string): string => row(cell(`padding:${top}px ${PAD}px ${bottom}px ${PAD}px;`, inner));
 
-function chip(status: CounterStatus, count: number): string {
+function chip(status: CounterStatus, label: string): string {
   const { bg, fg } = CHIP[status];
   return table(
     'style="border-collapse:separate;"',
-    row(cell(`${font(13, 18, fg)}font-weight:bold;padding:5px 12px;border-radius:12px;white-space:nowrap;background-color:${bg};`, `${escapeHtml(STATUS_LABEL[status])}: ${count}`, `bgcolor="${bg}"`))
+    row(cell(`${font(13, 18, fg)}font-weight:bold;padding:5px 12px;border-radius:12px;background-color:${bg};`, escapeHtml(label), `bgcolor="${bg}"`))
   );
 }
 
-function counters(counts: Record<CounterStatus, number>): string {
+/**
+ * The chips. A report with a sprint block has two of them in words ("Concluído: 14 sub-issues em 6 issues",
+ * "Em andamento: ..."), one under the other because they are long, and "Bloqueado" only if some delivery is;
+ * "Em validação" is not among them. An older report keeps the chips it always had, side by side.
+ */
+function counters(counts: Record<CounterStatus, number>, chips: SprintChips | null): string {
+  if (chips) {
+    const stacked: [CounterStatus, string][] = [
+      ["concluido", `${STATUS_LABEL.concluido}: ${amountLabel(chips.delivered.parts, chips.delivered.issues)}`],
+      ["em_andamento", `${STATUS_LABEL.em_andamento}: ${amountLabel(chips.going.parts, chips.going.issues)}`],
+    ];
+    if (chips.blocked > 0) stacked.push(["bloqueado", `${STATUS_LABEL.bloqueado}: ${chips.blocked}`]);
+    return padded(18, 0, table("", stacked.map(([status, label]) => row(cell("padding-bottom:6px;", chip(status, label)))).join("")));
+  }
   const shown = (["concluido", "em_validacao", "em_andamento"] as const).concat(counts.bloqueado > 0 ? (["bloqueado"] as never[]) : []);
-  const cells = shown.map((status) => cell("", chip(status, counts[status]))).join(cell("width:8px;font-size:1px;", "&nbsp;", 'width="8"'));
+  const cells = shown.map((status) => cell("", chip(status, `${STATUS_LABEL[status]}: ${counts[status]}`))).join(cell("width:8px;font-size:1px;", "&nbsp;", 'width="8"'));
   return padded(18, 4, table("", row(cells)));
+}
+
+/** One cover of the sprint: its title, the writer's sentence, how far its sub-issues have come, and what is left. */
+function coverBlock(cover: SprintCover): string {
+  const summary = clean(cover.summary);
+  const left = openTitles(cover.open);
+  return padded(
+    10,
+    0,
+    full(
+      row(cell(font(15, 22, COLOR.ink), `<b>${body(clean(cover.title))}</b>`)) +
+        (summary ? row(cell(font(15, 22, COLOR.ink, "padding-top:2px;"), body(summary))) : "") +
+        row(cell(font(13, 19, COLOR.muted, "padding-top:3px;"), escapeHtml(`${cover.parts.done} de ${cover.parts.total} sub-issues`))) +
+        (left ? row(cell(font(13, 19, COLOR.muted, "padding-top:2px;"), `Restam: ${body(left)}`)) : "")
+    )
+  );
 }
 
 function heading(label: string, color: string): string {
@@ -177,6 +207,7 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   const range = windowRange(content);
   const headline = clean(content.headline);
   const visible = visibleOf(content);
+  const chips = sprintChips(content);
   const by = (status: EntryStatus) => visible.filter((e) => e.status === status);
   const counts: Record<CounterStatus, number> = {
     concluido: by("concluido").length,
@@ -222,12 +253,16 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
 
   if (headline) rows.push(padded(22, 0, full(row(cell(font(17, 26, COLOR.ink), body(headline))))));
 
-  rows.push(counters(counts));
+  rows.push(counters(counts, chips));
 
   for (const status of ["concluido", "em_validacao", "em_andamento"] as const) {
     if (counts[status] === 0) continue;
     rows.push(heading(STATUS_LABEL[status], SECTION_COLOR[status]), ...by(status).flatMap(withShots));
   }
+
+  // What is left of the sprint's covers, after the deliveries.
+  const covers = (content.sprint?.epics ?? []).filter((c) => c.parts.remaining > 0);
+  if (covers.length > 0) rows.push(heading("Em andamento na sprint", SECTION_COLOR.em_andamento), ...covers.map(coverBlock));
 
   // Blocked entries are blockers by definition, so they live here, and "Nenhum bloqueio." is only true
   // when there are neither blocked entries nor difficulties.
@@ -316,8 +351,17 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   const out: string[] = ["GeoCloud: andamento"];
   if (range) out.push(`Período: ${range}`);
   if (headline) out.push("", headline);
-  const shownCounters: CounterStatus[] = counts.bloqueado > 0 ? ["concluido", "em_validacao", "em_andamento", "bloqueado"] : ["concluido", "em_validacao", "em_andamento"];
-  out.push("", shownCounters.map((s) => `${STATUS_LABEL[s]}: ${counts[s]}`).join(" · "));
+  if (chips) {
+    const said = [
+      `${STATUS_LABEL.concluido}: ${amountLabel(chips.delivered.parts, chips.delivered.issues)}`,
+      `${STATUS_LABEL.em_andamento}: ${amountLabel(chips.going.parts, chips.going.issues)}`,
+      ...(chips.blocked > 0 ? [`${STATUS_LABEL.bloqueado}: ${chips.blocked}`] : []),
+    ];
+    out.push("", said.join(" · "));
+  } else {
+    const shownCounters: CounterStatus[] = counts.bloqueado > 0 ? ["concluido", "em_validacao", "em_andamento", "bloqueado"] : ["concluido", "em_validacao", "em_andamento"];
+    out.push("", shownCounters.map((s) => `${STATUS_LABEL[s]}: ${counts[s]}`).join(" · "));
+  }
   const item = (e: ProgressEntry) => `- ${clean(e.title)}${clean(e.summary) ? `: ${clean(e.summary)}` : ""}`;
   const printLines = (list: PlacedShot[]) => list.filter((s) => s.src && clean(s.shot.caption)).map((s) => `Print: ${clean(s.shot.caption)}`);
   const partsLine = (e: ProgressEntry) => {
@@ -327,6 +371,13 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   const itemWithShots = (e: ProgressEntry) => [item(e), ...partsLine(e), ...printLines(shotsOf(e.issue)).map((l) => `  ${l}`)];
   for (const status of ["concluido", "em_validacao", "em_andamento"] as const) {
     if (counts[status] > 0) out.push("", STATUS_LABEL[status], ...by(status).flatMap(itemWithShots));
+  }
+  if (covers.length > 0) {
+    out.push("", "Em andamento na sprint");
+    for (const cover of covers) {
+      out.push(`- ${clean(cover.title)}${clean(cover.summary) ? `: ${clean(cover.summary)}` : ""}`, `  ${cover.parts.done} de ${cover.parts.total} sub-issues`);
+      if (openTitles(cover.open)) out.push(`  Restam: ${openTitles(cover.open)}`);
+    }
   }
   out.push("", "Dificuldades e bloqueios");
   if (counts.bloqueado === 0 && difficulties.length === 0) out.push("Nenhum bloqueio.");

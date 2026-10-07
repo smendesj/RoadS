@@ -180,6 +180,8 @@ export function combineWeek(rows: WeekReport[]): Week {
     },
     difficulties: latest.difficulties,
     nextSteps: latest.nextSteps,
+    // What is left of the sprint is the picture at the end of the week: the latest report's, never a sum.
+    ...(latest.sprint ? { sprint: latest.sprint } : {}),
     usage: weekUsage(shown, window),
     ...(shots.length ? { shots } : {}),
   };

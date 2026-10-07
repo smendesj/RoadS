@@ -4,11 +4,13 @@ import {
   formatDay,
   formatStamp,
   isConferenceCurrent,
+  amountLabel,
   isUuid,
   partsLabel,
   previewDocument,
   reasonMessage,
   reportPeriodLabel,
+  sprintChips,
   statusCounts,
 } from "./report-view.ts";
 import type { ProgressContent, ProgressEntry } from "../progress-report.ts";
@@ -172,4 +174,46 @@ test("the parts of a delivery read as plain words, in the singular too, and noth
   assert.equal(partsLabel(null), null);
   assert.equal(partsLabel({ total: 0, done: 0 }), null);
   assert.equal(partsLabel(undefined), null);
+});
+
+test("the amount of a chip says sub-issues and issues, with the singular where it is one", () => {
+  assert.equal(amountLabel(14, 6), "14 sub-issues em 6 issues");
+  assert.equal(amountLabel(1, 1), "1 sub-issue em 1 issue");
+  assert.equal(amountLabel(0, 0), "0 sub-issues em 0 issues");
+  assert.equal(amountLabel(1, 3), "1 sub-issue em 3 issues");
+});
+
+const cover = (issue: number, remaining: number, total = 10) => ({
+  issue,
+  title: `Capa ${issue}`,
+  summary: "",
+  issues: { total: 3, done: 1 },
+  parts: { total, done: total - remaining, remaining },
+  open: [],
+});
+
+test("the chips of a report with a sprint block: delivered from the deliveries on show, in progress from what the covers have left", () => {
+  const entries = [
+    entry({ id: "a", issue: 1, status: "concluido", subIssues: { total: 6, done: 6 } }),
+    entry({ id: "b", issue: 2, status: "concluido", subIssues: { total: 4, done: 4 } }),
+    ...[3, 4, 5, 6].map((n) => entry({ id: `c${n}`, issue: n, status: "concluido" })), // no parts: each counts one
+    entry({ id: "h", issue: 7, status: "concluido", hidden: true, subIssues: { total: 9, done: 9 } }), // hidden: not counted
+    entry({ id: "v", issue: 8, status: "em_validacao" }),
+    entry({ id: "w", issue: 9, status: "bloqueado" }),
+  ];
+  const chips = sprintChips({ entries, sprint: { epics: [cover(100, 5), cover(101, 4), cover(102, 5), cover(103, 0)], totals: { covers: 3, remainingParts: 14 } } });
+  assert.deepEqual(chips, { delivered: { parts: 6 + 4 + 4, issues: 6 }, going: { parts: 14, issues: 3 }, blocked: 1 });
+});
+
+test("the chips with nothing in them say zero, and a report without a sprint block has none of these chips", () => {
+  assert.deepEqual(sprintChips({ entries: [], sprint: { epics: [], totals: { covers: 0, remainingParts: 0 } } }), { delivered: { parts: 0, issues: 0 }, going: { parts: 0, issues: 0 }, blocked: 0 });
+  assert.equal(sprintChips({ entries: [entry({})] }), null);
+});
+
+test("what the user changes in the screen changes the chips: a delivery hidden or no longer concluded leaves the count", () => {
+  const entries = [entry({ id: "a", issue: 1, status: "concluido", subIssues: { total: 4, done: 4 } }), entry({ id: "b", issue: 2, status: "em_andamento" })];
+  const sprint = { epics: [], totals: { covers: 0, remainingParts: 0 } };
+  assert.deepEqual(sprintChips({ entries, sprint })?.delivered, { parts: 4, issues: 1 });
+  assert.deepEqual(sprintChips({ entries: [{ ...entries[0], hidden: true }, entries[1]], sprint })?.delivered, { parts: 0, issues: 0 });
+  assert.deepEqual(sprintChips({ entries: [{ ...entries[0], status: "em_validacao" }, entries[1]], sprint })?.delivered, { parts: 0, issues: 0 });
 });

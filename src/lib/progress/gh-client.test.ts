@@ -215,10 +215,12 @@ test("collecting reads issues, the board, sub-issues and PRs, and the facts come
   const data = await collectGithubData(client, { repository: REPO, window: WINDOW, author });
 
   const facts = buildFacts({ repository: REPO, window: WINDOW, generatedAt: "2026-03-11T12:00:00-03:00", author, ...data });
-  // 50: Development with an open draft PR; 60: umbrella whose only step was merged; 61 is rolled up; 51 is a PR.
-  assert.deepEqual(facts.entries.map((e) => [e.issue, e.status]), [[50, "em_validacao"], [60, "concluido"]]);
-  assert.equal(facts.entries[1].deliveredAt, "2026-03-09T15:00:00-03:00");
-  assert.deepEqual(facts.entries[1].subIssues, { total: 1, done: 1 });
+  // 50: on Development, so a cover of the sprint with its one part left; 60: umbrella whose only step was merged;
+  // 61 is rolled up; 51 is a PR.
+  assert.deepEqual(facts.entries.map((e) => [e.issue, e.status]), [[60, "concluido"]]);
+  assert.deepEqual(facts.sprint.epics.map((c) => [c.issue, c.parts.remaining]), [[50, 1]]);
+  assert.equal(facts.entries[0].deliveredAt, "2026-03-09T15:00:00-03:00");
+  assert.deepEqual(facts.entries[0].subIssues, { total: 1, done: 1 });
   assert.equal(facts.internal.count, 0);
   // Git work: the merge of PR 62, the commits found, and the direct commit on the default branch.
   assert.deepEqual(
@@ -254,6 +256,7 @@ const kidNode = (k: Kid) => ({
   repository: { nameWithOwner: k.repo ?? REPO },
   labels: { nodes: (k.labels ?? []).map((name) => ({ name })) },
 });
+const commitEvent = (oid: string, at: string) => ({ __typename: "ReferencedEvent", commit: { oid, committedDate: at, author: { user: { login: "dev-a" } } } });
 const closedKid = (number: number, closedAt: string): Kid => ({ number, state: "CLOSED", stateReason: "COMPLETED", closedAt });
 const boardNode = (number: number, status: string) => ({
   content: { __typename: "Issue", number, repository: { nameWithOwner: REPO } },
@@ -323,7 +326,7 @@ test("the grandchildren are read too: their PRs and their closures are the umbre
     kids: { 70: [{ number: 71 }, closedKid(72, "2026-03-08T12:00:00Z")], 71: [closedKid(73, "2026-03-10T12:00:00Z"), { number: 74, labels: ["status:blocker"] }] },
     events: { 73: [{ __typename: "CrossReferencedEvent", willCloseTarget: true, source: { __typename: "PullRequest", number: 80, repository: { nameWithOwner: REPO } } }] },
     prs: { 80: prNode(80, { title: "Parte (#73)", state: "MERGED", isDraft: false, merged: true, mergedAt: "2026-03-10T15:00:00Z", closedAt: "2026-03-10T15:00:00Z", mergeCommit: { oid: "beef000" } }) },
-    board: [boardNode(70, "Development")],
+    board: [boardNode(70, "Open")],
   });
   const { facts, data } = await factsOf(gh);
 
@@ -369,7 +372,7 @@ test("a sub-issue touched in the window brings its quiet umbrella with it, howev
 test("a tree is followed only so deep: the last level is read, what is below it is not, and `ignored` says so", async () => {
   const bottom = 90 + TREE_LIMITS.depth;
   const chain = Object.fromEntries(Array.from({ length: bottom + 3 - 90 }, (_, k) => [90 + k, [{ number: 91 + k }]]));
-  const gh = treeGithub({ listed: [oldIssue(90, { created_at: "2026-03-09T12:00:00Z" })], kids: chain, board: [boardNode(90, "Development")] });
+  const gh = treeGithub({ listed: [oldIssue(90, { created_at: "2026-03-09T12:00:00Z" })], kids: chain, events: { 90: [commitEvent("aaaa111", "2026-03-10T12:00:00Z")] }, board: [boardNode(90, "Open")] });
   const { facts } = await factsOf(gh);
   assert.deepEqual([...gh.reads].sort((a, b) => a - b), Array.from({ length: TREE_LIMITS.depth + 1 }, (_, k) => 90 + k));
   assert.ok(!gh.reads.includes(bottom + 1));
@@ -385,7 +388,8 @@ test("a tree is read only up to its size limit, whole issues at a time, and `ign
   const gh = treeGithub({
     listed: [oldIssue(200, { created_at: "2026-03-09T12:00:00Z" })],
     kids: { 200: [{ number: 201 }, { number: 202 }, { number: 203 }], 201: many(1000), 202: many(3000), 203: many(5000) },
-    board: [boardNode(200, "Development")],
+    events: { 200: [commitEvent("aaaa111", "2026-03-10T12:00:00Z")] },
+    board: [boardNode(200, "Open")],
   });
   const { facts } = await factsOf(gh);
   assert.equal(gh.reads.length, 1 + 3 + 2 * per); // the third step's sub-issues would pass the limit: none of them is read
@@ -399,7 +403,8 @@ test("sub-issues of another repository are not read (their numbers mean other is
   const gh = treeGithub({
     listed: [oldIssue(400, { created_at: "2026-03-09T12:00:00Z" })],
     kids: { 400: [{ number: 401 }, { number: 402, repo: "acme/other-product" }] },
-    board: [boardNode(400, "Development")],
+    events: { 400: [commitEvent("aaaa111", "2026-03-10T12:00:00Z")] },
+    board: [boardNode(400, "Open")],
   });
   const { facts } = await factsOf(gh);
   assert.deepEqual([...gh.reads].sort(), [400, 401]);
@@ -451,7 +456,8 @@ test("the epics above a delivery cost it neither depth nor size: its own parts k
       ...Object.fromEntries(above.map((n, k) => [n, [k + 1 < above.length ? { number: above[k + 1], labels: ["type:epic"] } : { number: work }]])),
       ...chain,
     },
-    board: [boardNode(work, "Development")],
+    events: { [work]: [commitEvent("aaaa111", "2026-03-10T12:00:00Z")] },
+    board: [boardNode(work, "Open")],
   });
   const { facts } = await factsOf(gh);
   const reads = [...gh.reads].sort((a, b) => a - b);
@@ -459,4 +465,35 @@ test("the epics above a delivery cost it neither depth nor size: its own parts k
   assert.deepEqual(facts.entries.map((e) => [e.issue, e.epicPath?.length, e.epic?.issue]), [[work, above.length, above[above.length - 1]]]);
   assert.equal(facts.ignored.cut, 1); // the part at the last level read still has one below it
   assert.equal(facts.ignored.epics, above.length);
+});
+
+test("everything under an item on Development is read, news or not: the sprint block needs every part", async () => {
+  // 6000 is an epic on the board and nothing happened to it: it is fetched as a sprint item, and all of its tree is read.
+  const gh = treeGithub({
+    listed: [],
+    rest: { 6000: oldIssue(6000, EPIC) },
+    kids: {
+      6000: [{ number: 6001, labels: ["type:epic"] }, { number: 6010 }],
+      6001: [{ number: 6020 }, closedKid(6021, "2026-02-01T12:00:00Z")],
+      6010: [{ number: 6011 }, { number: 6012 }],
+      6020: [{ number: 6022 }],
+    },
+    board: [boardNode(6000, "Development")],
+  });
+  const { facts } = await factsOf(gh);
+  assert.deepEqual([...gh.reads].sort((a, b) => a - b), [6000, 6001, 6010, 6011, 6012, 6020, 6021, 6022]);
+  // Deliveries: 6010, 6020 and 6021 (6001 is an epic in between). Parts: 6011, 6012, 6022 and 6021.
+  assert.deepEqual(facts.sprint.epics.map((c) => [c.issue, c.issues, c.parts]), [[6000, { total: 3, done: 1 }, { total: 4, done: 1, remaining: 3 }]]);
+});
+
+test("the same tree off the sprint board is not read down: nothing happened in it", async () => {
+  const gh = treeGithub({
+    listed: [],
+    rest: {},
+    kids: { 6100: [{ number: 6110 }], 6110: [{ number: 6111 }] },
+    board: [],
+  });
+  const { facts } = await factsOf(gh);
+  assert.deepEqual(gh.reads, []);
+  assert.deepEqual(facts.sprint.epics, []);
 });

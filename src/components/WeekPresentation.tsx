@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { STATUS_LABEL, type EntryStatus, type ProgressContent, type ProgressEntry } from "@/lib/progress-report";
-import { partsLabel } from "@/lib/progress/report-view";
+import { amountLabel, openTitles, partsLabel, sprintChips } from "@/lib/progress/report-view";
 import { placeShots, visibleOf } from "@/lib/progress/shot-place";
 
 // The week of the Resumo, to present at the Monday scrum: the e-mail's content in the e-mail's order, as large
@@ -90,11 +90,24 @@ export function WeekPresentation({
   const { shotsOf, general } = placeShots(content, shotUrls, (u) => (u ? u : null), Infinity);
   const done = by("concluido").length;
   const upcoming = by("proximo");
+  // A week with a sprint block says its chips in words (and has no "Em validação" one); an older one keeps its own.
+  const chips = sprintChips(content);
+  const covers = (content.sprint?.epics ?? []).filter((c) => c.parts.remaining > 0);
+  const headerChips: { id: EntryStatus; label: string }[] = chips
+    ? [
+        { id: "concluido", label: `${STATUS_LABEL.concluido}: ${amountLabel(chips.delivered.parts, chips.delivered.issues)}` },
+        { id: "em_andamento", label: `${STATUS_LABEL.em_andamento}: ${amountLabel(chips.going.parts, chips.going.issues)}` },
+        ...(chips.blocked > 0 ? [{ id: "bloqueado" as const, label: `${STATUS_LABEL.bloqueado}: ${chips.blocked}` }] : []),
+      ]
+    : (["concluido", "em_validacao", "em_andamento", "bloqueado"] as const)
+        .filter((s) => s !== "bloqueado" || by("bloqueado").length > 0)
+        .map((s) => ({ id: s, label: `${STATUS_LABEL[s]}: ${by(s).length}` }));
 
   const sections: { id: string; label: string; show: boolean }[] = [
     { id: "concluido", label: STATUS_LABEL.concluido, show: done > 0 },
     { id: "em_validacao", label: STATUS_LABEL.em_validacao, show: by("em_validacao").length > 0 },
     { id: "em_andamento", label: STATUS_LABEL.em_andamento, show: by("em_andamento").length > 0 },
+    { id: "sprint", label: "Em andamento na sprint", show: covers.length > 0 },
     { id: "dificuldades", label: "Dificuldades", show: true },
     { id: "proximos", label: "Próximos passos", show: upcoming.length > 0 || content.nextSteps.length > 0 },
     { id: "uso", label: "Uso do Claude", show: true },
@@ -140,13 +153,11 @@ export function WeekPresentation({
           <p className="text-xl text-rs-text-soft sm:text-2xl">Período: {periodLabel}</p>
           <p data-week-headline className="text-2xl text-rs-text sm:text-4xl">{content.headline}</p>
           <ul className="flex flex-wrap gap-3">
-            {(["concluido", "em_validacao", "em_andamento", "bloqueado"] as const)
-              .filter((s) => s !== "bloqueado" || by("bloqueado").length > 0)
-              .map((s) => (
-                <li key={s} className="rounded-full bg-rs-card px-5 py-2 text-lg font-bold text-rs-text sm:text-xl">
-                  {STATUS_LABEL[s]}: {by(s).length}
-                </li>
-              ))}
+            {headerChips.map((c) => (
+              <li key={c.id} data-chip={c.id} className="rounded-full bg-rs-card px-5 py-2 text-lg font-bold text-rs-text sm:text-xl">
+                {c.label}
+              </li>
+            ))}
           </ul>
         </header>
 
@@ -157,6 +168,22 @@ export function WeekPresentation({
               {by(s).map(entryBlock)}
             </section>
           ) : null
+        )}
+
+        {covers.length > 0 && (
+          <section id="sprint" className={SECTION}>
+            <h2 className={H2}>Em andamento na sprint</h2>
+            {covers.map((c) => (
+              <article key={c.issue} data-cover={c.issue} className="flex flex-col gap-3 border-l-8 border-amber-500 pl-5 sm:pl-8">
+                <h3 className="text-3xl font-bold text-rs-text sm:text-4xl">{c.title}</h3>
+                {c.summary && <p className="text-xl text-rs-text sm:text-2xl">{c.summary}</p>}
+                <p className="text-lg text-rs-text-soft sm:text-xl">
+                  {c.parts.done} de {c.parts.total} sub-issues
+                </p>
+                {openTitles(c.open) && <p className="text-lg text-rs-text-soft sm:text-xl">Restam: {openTitles(c.open)}</p>}
+              </article>
+            ))}
+          </section>
         )}
 
         <section id="dificuldades" className={SECTION}>

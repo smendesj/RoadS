@@ -530,6 +530,12 @@ export async function collectGithubData(
     timelines.set(n, detail.timeline);
     detail.prNumbers.forEach((p) => prNumbers.add(p));
   };
+  // What hangs from an item of the sprint (Project #7 on Development) is read whole, news or not: the sprint block
+  // says how many parts of it are left, and that needs every one of them.
+  const covers = new Set(
+    projectItems.filter((it) => it.kind === "Issue" && it.status === "Development" && it.repository.toLowerCase() === repository.toLowerCase()).map((it) => it.number)
+  );
+  const covered = new Set<number>();
   const expanded = new Set<number>();
   let level = [...issues.keys()];
   while (level.length > 0) {
@@ -545,13 +551,15 @@ export async function collectGithubData(
       const fresh = detail.children.filter((k) => !issues.has(k.number));
       if (fresh.length === 0) continue;
       const place = placeOf(n);
+      const inCover = covers.has(n) || covered.has(n);
       if (place) {
         if (place.below >= TREE_LIMITS.depth || (familySize.get(place.root) ?? 0) + fresh.length > TREE_LIMITS.family) continue;
         familySize.set(place.root, (familySize.get(place.root) ?? 0) + fresh.length);
       }
       for (const kid of fresh) {
         issues.set(kid.number, kid);
-        if (place || isEpic(kid) || wanted.has(kid.number)) next.push(kid.number);
+        if (inCover) covered.add(kid.number);
+        if (place || inCover || isEpic(kid) || wanted.has(kid.number)) next.push(kid.number);
       }
     }
     level = next;

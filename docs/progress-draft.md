@@ -27,7 +27,8 @@ Um JSON, gravado onde o Frontlights pedir (`{draft}`):
   ],
   "internal": "Também houve ajustes internos de organização.",
   "difficulties": [{ "text": "O que está travando.", "needs": "O que é preciso para destravar, e de quem." }],
-  "nextSteps": ["Primeiro passo.", "Segundo passo."]
+  "nextSteps": ["Primeiro passo.", "Segundo passo."],
+  "sprint": [{ "issue": 974, "summary": "Uma frase simples sobre o que falta desta parte da sprint." }]
 }
 ```
 
@@ -54,7 +55,30 @@ Um JSON, gravado onde o Frontlights pedir (`{draft}`):
   coletado. Com total zero, a linha não aparece.
 - `difficulties`: o que trava ou atrasa e, em `needs`, o que é preciso e de quem. Pode ficar vazio (o e-mail
   diz que não há bloqueios).
-- `nextSteps`: o que vem a seguir, em ordem. Cada item é um texto ou `{ "text": "..." }`.
+- `nextSteps`: o que vem a seguir, em ordem. Cada item é um texto ou `{ "text": "..." }`. Os próximos passos
+  saem do bloco `sprint` dos fatos (o que falta de cada capa), não de uma lista de issues paradas.
+- `sprint`: uma frase simples (até 30 palavras) por **capa da sprint**, pelo número da issue da capa. Opcional:
+  sem frase, a capa aparece só com o título que tem no GitHub. Frase para uma issue que não é capa nos fatos
+  recusa a montagem e diz o número.
+
+## A sprint e os dois números do topo
+
+O e-mail e a visão semanal abrem com dois números, que o RoadS calcula sozinho (o redator **não os repete** no
+texto):
+
+- **Concluído: N sub-issues em M issues**: tudo que foi entregue no período, esteja ou não na sprint. M é o
+  número de entregas visíveis e concluídas; N soma, por entrega, as partes prontas (uma entrega sem partes conta 1).
+  O que a pessoa esconde ou muda na tela entra na conta.
+- **Em andamento: N sub-issues em K issues**: o que **falta** das capas da sprint. Uma capa é um item do Project
+  (do repositório) com Status Development, epic ou não: o coletor lê a árvore inteira dela e conta as folhas que
+  ainda não estão prontas; uma capa sem filhas é a sua única parte. K é o número de capas com algo por fazer. Uma
+  capa que está na sprint e já tem parte pronta conta nos dois números.
+
+Não existe número de "Em validação" nesse topo (o chip saiu). **Capa da sprint não é entrega**: não pede texto por
+entrega nem print, e aparece no bloco "Em andamento na sprint", logo depois das entregas, com o título, a frase
+do arquivo de textos, "12 de 17 sub-issues" e o que resta ("Restam: ..."). Os fatos trazem tudo isso em `sprint`
+(e `delivered`, só como evidência); a visão semanal soma as entregas dos resumos enviados na semana (cada issue uma
+vez) e mostra o bloco do **último** resumo da semana.
 
 ## Regras de linguagem
 

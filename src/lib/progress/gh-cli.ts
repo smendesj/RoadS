@@ -7,6 +7,7 @@ import type { UsageModel } from "../progress-report.ts";
 import { findCoverageGaps, messageTimesFromUsage } from "./gaps.ts";
 import { GithubError, collectGithubData, createGithubClient } from "./gh-client.ts";
 import { buildFacts, parseHideList, windowFromDates } from "./gh-facts.ts";
+import { amountLabel } from "./report-view.ts";
 
 export const DEFAULT_FACTS_PATH = ".frontlights/progress/facts.json";
 export const DEFAULT_HIDE_PATH = ".frontlights/progress/hide.json";
@@ -100,6 +101,7 @@ export async function runGithubCli(argv: string[], deps: CliDeps): Promise<numbe
     const count = (s: string) => facts.entries.filter((e) => e.status === s && !e.hidden).length;
     deps.log(`Fatos do GitHub (GeoCloud) de ${values.from} a ${values.to}, horário de São Paulo.`);
     deps.log(`Entradas visíveis: ${facts.entries.filter((e) => !e.hidden).length} (${ENTRY_STATUSES.map((s) => `${STATUS_LABEL[s]} ${count(s)}`).join(", ")}).`);
+    deps.log(`Concluído: ${amountLabel(facts.delivered.parts, facts.delivered.issues)}. Em andamento na sprint: ${amountLabel(facts.sprint.totals.remainingParts, facts.sprint.totals.covers)}.`);
     deps.log(`Ocultas por sugestão: ${facts.entries.filter((e) => e.hidden).length}. Internos: ${facts.internal.count}.`);
     if (facts.ignored.cut > 0) {
       deps.log(`Atenção: ${facts.ignored.cut} issue${facts.ignored.cut > 1 ? "s" : ""} com sub-issues não lidas por inteiro (árvore funda ou grande demais, ou sub-issues de outro repositório): a contagem de partes pode estar abaixo do real.`);

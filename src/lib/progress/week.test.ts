@@ -238,3 +238,22 @@ test("a week with a single report is that report, with the generated opening lin
   assert.equal(one.content.headline, "Na semana, 1 entrega concluída, 1 em validação e 1 em andamento.");
   assert.equal(one.content.usage.totals.messages, 150);
 });
+
+const coverOf = (issue: number, remaining: number) => ({
+  issue,
+  title: `Capa ${issue}`,
+  summary: "",
+  issues: { total: 3, done: 1 },
+  parts: { total: 10, done: 10 - remaining, remaining },
+  open: [{ issue: issue + 1, title: `Entrega aberta ${issue + 1}` }],
+});
+
+test("what is left of the sprint is the latest report's picture, never a sum; reports with no block give the week none", () => {
+  const wed = report("quarta", { sprint: { epics: [coverOf(900, 7), coverOf(950, 5)], totals: { covers: 2, remainingParts: 12 } } });
+  const fri = report("sexta", { sprint: { epics: [coverOf(900, 4)], totals: { covers: 1, remainingParts: 4 } } });
+  const week = combineWeek([fri, wed]); // any order in: the dates decide which one is the latest
+  assert.deepEqual(week.content.sprint, fri.content.sprint);
+  // The week's "concluído" is made from its deliveries, each issue once, as already done.
+  assert.equal(combineWeek([wed, report("sexta")]).content.sprint, undefined); // the latest has no block: the week has none
+  assert.equal("sprint" in combineWeek([report("quarta"), report("sexta")]).content, false);
+});

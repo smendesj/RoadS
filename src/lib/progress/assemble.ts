@@ -6,7 +6,9 @@
 //
 // The texts file, documented for people in docs/progress-draft.md:
 //   { headline, entries: [{ issue, title, summary, hidden? }], internal?, difficulties?: [{ text, needs? }],
-//     nextSteps?: [string | { text }] }
+//     nextSteps?: [string | { text }], sprint?: [{ issue, summary }] }
+// `sprint` is one plain sentence per cover of the sprint (the item of the Project on Development, by its issue
+// number); a cover with no sentence shows the title it has on GitHub.
 import type { ProgressContent } from "../progress-report.ts";
 
 export type AssembleInput = {
@@ -40,6 +42,9 @@ export function assembleDraft({ texts, facts, usage, access }: AssembleInput): A
   if (!isObject(usage)) return { ok: false, error: "Falta o arquivo de uso do Claude: rode o coletor de uso antes de montar o resumo." };
   if (typeof texts.headline !== "string" || texts.headline.trim() === "") return { ok: false, error: "Falta a frase de abertura (headline) nos textos." };
 
+  const sprintTexts = new Map<number, string>();
+  for (const t of list(texts.sprint)) if (isObject(t) && typeof t.issue === "number" && typeof t.summary === "string") sprintTexts.set(t.issue, t.summary);
+
   const written = new Map<number, Record<string, unknown>>();
   for (const t of list(texts.entries)) {
     if (isObject(t) && typeof t.issue === "number") written.set(t.issue, t);
@@ -71,6 +76,11 @@ export function assembleDraft({ texts, facts, usage, access }: AssembleInput): A
   const unknown = [...written.keys()].filter((n) => !known.has(n));
   if (unknown.length > 0) return { ok: false, error: `Há texto para ${issues(unknown)}, que não está nos fatos coletados.` };
 
+  // The sprint block (what is left of each cover) comes from the facts alone; the writer only adds a sentence.
+  const covers = isObject(facts.sprint) ? list(facts.sprint.epics).filter(isFact) : [];
+  const strayCovers = [...sprintTexts.keys()].filter((n) => !covers.some((c) => c.issue === n));
+  if (strayCovers.length > 0) return { ok: false, error: `Há texto para ${issues(strayCovers)} na sprint, que não é uma capa dos fatos coletados.` };
+
   const count = isObject(facts.internal) && typeof facts.internal.count === "number" ? facts.internal.count : 0;
   const internalText = typeof texts.internal === "string" && texts.internal.trim() !== "" ? texts.internal : `Também houve ${count} ajustes internos de organização.`;
 
@@ -83,6 +93,12 @@ export function assembleDraft({ texts, facts, usage, access }: AssembleInput): A
     nextSteps: list(texts.nextSteps).map((n) => (typeof n === "string" ? { text: n } : n)),
     usage,
   };
+  if (isObject(facts.sprint) && Array.isArray(facts.sprint.epics)) {
+    content.sprint = {
+      epics: covers.map((c) => ({ issue: c.issue, title: c.title, summary: sprintTexts.get(c.issue) ?? "", issues: c.issues, parts: c.parts, open: c.open })),
+      totals: facts.sprint.totals,
+    };
+  }
   if (access) content.access = access;
   return { ok: true, content };
 }

@@ -271,6 +271,26 @@ ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada en
     Blocker do Project #7; um `blocker` solto não vale, pode ser "bloqueia a release") **ou** cujo cartão no
     Project estava em Blocker no fim do período. Sub-issue em geral não tem cartão, então na prática é o rótulo. A
     relação "bloqueada por" do GitHub não é lida.
+- **A sprint.** Cada item aberto do Project #7 (do repositório) com Status Development no fim do período é uma **capa
+  da sprint**, epic ou não, e **nunca é uma entrada** (não pede texto por entrega nem print); uma capa dentro de
+  outra conta só na de cima, e uma issue escondida (`hide.json`), de teste de sincronização ou sob um epic escondido
+  não é capa. `sprint: { epics: [ { issue, title, issues: { total, done }, parts: { total, done, remaining }, open:
+  [ { issue, title } ] } ], totals: { covers, remainingParts } }`: `issues` são as entregas da capa (filhas que não
+  são epic, através dos epics intermediários, sem as canceladas); `parts` são as folhas da árvore inteira dela (uma
+  capa sem filhas é a sua única parte; um epic vazio dentro dela não conta); `open` são as entregas ainda abertas,
+  até 30. Só entram em `epics` as capas com `remaining` maior que zero, então `totals.covers` é o número delas (o K do
+  chip) e `totals.remainingParts` a soma do que falta (o N). O coletor lê a árvore inteira de cada capa, tenha ou não
+  havido novidade. Um item em Blocker continua sendo uma entrada `bloqueado`.
+- **`delivered`** `{ issues, parts }` (só nos fatos, como evidência): as entradas visíveis e concluídas e a soma de
+  `max(1, subIssues.done)` delas. O chip do e-mail e da visão semanal **não lê este campo**: refaz a conta com as
+  entradas que estão à mostra, para seguir o que a pessoa esconde ou muda na tela.
+- **`content.sprint`** (opcional, aditivo, no `POST /progress-report`): o mesmo `sprint` dos fatos, com um `summary` a
+  mais por capa (a frase do redator, vazia quando não há). O servidor refaz `parts.remaining` e `totals`, e recusa
+  capa repetida ou `done` maior que `total`, dizendo o campo. Sem ele, o e-mail volta aos chips de antes. Com ele, o
+  e-mail e a visão semanal mostram **"Concluído: N sub-issues em M issues"** e **"Em andamento: N sub-issues em K
+  issues"** (e "Bloqueado: N" se houver), sem o chip "Em validação", e o bloco "Em andamento na sprint" depois das
+  entregas. A visão semanal soma as entregas dos resumos da semana (cada issue uma vez) e traz o bloco do último.
+- **`ignored.covers`** (número): quantas capas da sprint o coletor achou (uma capa epic entra também em `epics`).
 - **`ignored.epics`** (número): quantos epics foram tratados como agrupador (nenhum é entrada).
 - **`ignored.cut`** (número): quantas issues tinham sub-issues que o GitHub conta e o coletor **não leu** (árvore
   mais funda que 6 níveis abaixo da entrega, mais de 400 sub-issues sob uma entrega, ou sub-issues de outro
@@ -343,3 +363,9 @@ repositório, `roads-script/push` e `roads-script/attach`.
   `entries[].epicPath` (só no `facts.json`) dão o epic como cabeçalho, e `ignored.epics` conta os agrupadores. Muda o
   que é uma entrada: antes, só a issue sem pai; agora, cada raiz de trabalho sob um epic. Uma issue já decomposta em
   partes deixa de ser tida por interna só pelo rótulo ou pelo corpo.
+- **2026-10-07 (aditivo, à noite):** a sprint vira bloco à parte. `facts.json` ganha `sprint` (as capas, itens do
+  Project em Development, com `issues`, `parts`, `open` e `totals`), `delivered` e `ignored.covers`; um item em
+  Development deixa de ser entrada (antes virava `proximo` ou `em_andamento`, com texto e print). `content.sprint`
+  (opcional) vai no rascunho, e o e-mail e a visão semanal passam a dizer "Concluído: N sub-issues em M issues" e
+  "Em andamento: N sub-issues em K issues", sem o chip "Em validação". O arquivo de textos ganha `sprint` (uma frase
+  por capa). Relatórios sem o bloco seguem como eram.

@@ -16,6 +16,8 @@ import type {
   ProgressEntry,
   ReportWindow,
   Shot,
+  SprintBlock,
+  SprintCover,
   TokenCount,
   UsageModel,
 } from "../progress-report.ts";
@@ -42,7 +44,7 @@ export const shotExtension = (mime: Shot["mime"]): "png" | "jpg" => (mime === "i
  */
 const fieldsOf = <T>(all: { [K in keyof T]-?: true }) => Object.keys(all) as (keyof T & string)[];
 export const KEPT_FIELDS = {
-  content: fieldsOf<ProgressContent>({ window: true, headline: true, entries: true, internal: true, difficulties: true, nextSteps: true, usage: true, shots: true, gaps: true, access: true }),
+  content: fieldsOf<ProgressContent>({ window: true, headline: true, entries: true, internal: true, difficulties: true, nextSteps: true, usage: true, shots: true, sprint: true, gaps: true, access: true }),
   entry: fieldsOf<ProgressEntry>({ id: true, issue: true, status: true, title: true, summary: true, deliveredAt: true, subIssues: true, hidden: true, edited: true, sources: true }),
   usage: fieldsOf<UsageModel>({ scope: true, products: true, window: true, generatedAt: true, label: true, method: true, totals: true, byModel: true, favoriteModel: true, peakHour: true, days: true, notes: true }),
   totals: fieldsOf<UsageModel["totals"]>({ sessions: true, messages: true, humanPrompts: true, activeDays: true, tokens: true }),
@@ -51,6 +53,8 @@ export const KEPT_FIELDS = {
   session: fieldsOf<DayUsage["sessions"][number]>({ start: true, end: true, messages: true, tokens: true }),
   shot: fieldsOf<Shot>({ id: true, caption: true, mime: true, issue: true, path: true, data: true }),
   gap: fieldsOf<CoverageGap>({ at: true, ref: true, nearestMessageMinutes: true }),
+  sprint: fieldsOf<SprintBlock>({ epics: true, totals: true }),
+  cover: fieldsOf<SprintCover>({ issue: true, title: true, summary: true, issues: true, parts: true, open: true }),
 };
 
 export type ParsedDraft = { ok: true; produto: Produto; content: ProgressContent } | { ok: false; error: string };
@@ -358,6 +362,40 @@ function gap(value: unknown, path: string): CoverageGap {
   };
 }
 
+/** The block "Em andamento na sprint". The sums are made again from the covers, so they can never disagree with them. */
+function sprintBlock(value: unknown, path: string): SprintBlock {
+  const b = record(value, path);
+  const seen = new Set<number>();
+  const epics = list(b.epics, `${path}.epics`, 30).map((v, i) => {
+    const at = `${path}.epics[${i}]`;
+    const c = record(v, at);
+    const issue = whole(c.issue, `${at}.issue`, 1e7);
+    if (seen.has(issue)) refuse(`${at}.issue`, "capa repetida");
+    seen.add(issue);
+    const counted = (field: "issues" | "parts") => {
+      const n = record(c[field], `${at}.${field}`);
+      const total = whole(n.total, `${at}.${field}.total`, 1e5);
+      const done = whole(n.done, `${at}.${field}.done`, 1e5);
+      if (done > total) refuse(`${at}.${field}`, "mais prontas do que o total");
+      return { total, done };
+    };
+    const parts = counted("parts");
+    return {
+      issue,
+      title: text(c.title, `${at}.title`, 200, true),
+      summary: c.summary === undefined ? "" : text(c.summary, `${at}.summary`, 400),
+      issues: counted("issues"),
+      parts: { ...parts, remaining: parts.total - parts.done },
+      open: (c.open === undefined ? [] : list(c.open, `${at}.open`, 30)).map((o, k) => {
+        const row = record(o, `${at}.open[${k}]`);
+        return { issue: whole(row.issue, `${at}.open[${k}].issue`, 1e7), title: text(row.title, `${at}.open[${k}].title`, 200, true) };
+      }),
+    };
+  });
+  const left = epics.filter((c) => c.parts.remaining > 0);
+  return { epics, totals: { covers: left.length, remainingParts: left.reduce((sum, c) => sum + c.parts.remaining, 0) } };
+}
+
 function content(value: unknown, path: string): ProgressContent {
   const c = record(value, path);
   const entries = list(c.entries, `${path}.entries`, 100).map((e, i) => entry(e, `${path}.entries[${i}]`));
@@ -400,6 +438,7 @@ function content(value: unknown, path: string): ProgressContent {
   const missing = entries.filter((e) => !e.hidden && e.status !== "proximo" && !shown.has(e.issue)).map((e) => `#${e.issue}`);
   if (missing.length > 0) refuse(`${path}.shots`, `falta print destas entregas: ${missing.join(", ")}`);
   if (c.shots !== undefined) result.shots = shots;
+  if (c.sprint !== undefined) result.sprint = sprintBlock(c.sprint, `${path}.sprint`);
   if (c.gaps !== undefined) result.gaps = list(c.gaps, `${path}.gaps`, 200).map((g, i) => gap(g, `${path}.gaps[${i}]`));
   if (c.access !== undefined) result.access = access(c.access, `${path}.access`);
   return result;

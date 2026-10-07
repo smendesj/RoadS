@@ -70,10 +70,14 @@ test("a run writes the facts of the window and prints a Portuguese summary witho
   const written = facts(h.written);
   assert.equal(written.scope, "GeoCloud");
   assert.deepEqual(written.window, { start: "2026-03-09T00:00:00-03:00", end: "2026-03-11T00:00:00-03:00" });
-  assert.deepEqual(written.entries.map((e) => [e.issue, e.status]), [[7, "proximo"]]);
+  // Issue 7 is on Development: a cover of the sprint, with its one part left, and no entry.
+  assert.deepEqual(written.entries, []);
+  assert.deepEqual(written.sprint.epics.map((c) => [c.issue, c.parts.remaining]), [[7, 1]]);
+  assert.deepEqual(written.delivered, { issues: 0, parts: 0 });
   assert.equal("gaps" in written, false); // no usage file given: not computed, not "no gaps"
   const printed = [...h.out, ...h.err].join("\n");
-  assert.match(printed, /Próximo/);
+  assert.match(printed, /Concluído: 0 sub-issues em 0 issues/);
+  assert.match(printed, /Em andamento na sprint: 1 sub-issue em 1 issue/);
   assert.match(printed, /facts\.json/);
   assert.ok(!printed.includes(TOKEN) && !h.written.get(DEFAULT_FACTS_PATH)?.includes(TOKEN));
 });
@@ -82,7 +86,7 @@ test("a tree of sub-issues read only in part is warned about in the summary and 
   const whole = harness();
   assert.equal(await runGithubCli(["--from", "2026-03-09", "--to", "2026-03-10"], whole.deps), 0);
   assert.equal(facts(whole.written).ignored.cut, 0);
-  assert.ok(!whole.out.join("\n").includes("sub-issues"));
+  assert.ok(!whole.out.join("\n").includes("Atenção"));
 
   // GitHub counts 3 sub-issues under issue 7, and none comes back from the read.
   const cut = harness();
@@ -93,7 +97,7 @@ test("a tree of sub-issues read only in part is warned about in the summary and 
       : base(input, init);
   assert.equal(await runGithubCli(["--from", "2026-03-09", "--to", "2026-03-10"], cut.deps), 0);
   assert.equal(facts(cut.written).ignored.cut, 1);
-  assert.match(cut.out.join("\n"), /1 issue[\s\S]*sub-issues[\s\S]*abaixo do real/);
+  assert.match(cut.out.join("\n"), /Atenção: 1 issue[\s\S]*abaixo do real/);
 });
 
 test("with a usage file the coverage gaps are computed against the sessions", async () => {

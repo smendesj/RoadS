@@ -2,6 +2,7 @@
 // Kept apart from the components so they run under `node --test`: no "server-only", no "@/" imports.
 import { ENTRY_STATUSES, localDay } from "../progress-report.ts";
 import type { EntryStatus, ProgressContent, ProgressReportRow, ReportWindow } from "../progress-report.ts";
+import { visibleOf } from "./shot-place.ts";
 
 /** What the card and the page say to an admin when no report exists yet (nothing was ever pushed). */
 export const EMPTY_REPORT_TEXT = "Nenhum rascunho ainda. Inicie o Frontlights e escolha atualizar o resumo para a diretoria.";
@@ -61,6 +62,44 @@ export function reportPeriodLabel(window: ReportWindow): string {
 export function partsLabel(parts: { total: number; done: number } | null | undefined): string | null {
   if (!parts || parts.total <= 0) return null;
   return `${parts.done} de ${parts.total} ${parts.total === 1 ? "parte pronta" : "partes prontas"}`;
+}
+
+/** "14 sub-issues em 6 issues": the amount a chip of the e-mail names, with the singular where it is one. */
+export function amountLabel(parts: number, issues: number): string {
+  return `${parts} ${parts === 1 ? "sub-issue" : "sub-issues"} em ${issues} ${issues === 1 ? "issue" : "issues"}`;
+}
+
+/** What is still open in a cover, as plain text: the titles in order, and past eight how many more there are. */
+export function openTitles(open: { title: string }[], shown = 8): string {
+  const titles = open.map((o) => (typeof o.title === "string" ? o.title.trim() : "")).filter(Boolean);
+  const more = titles.length - shown;
+  return titles.slice(0, shown).join("; ") + (more > 0 ? `; e mais ${more}` : "");
+}
+
+export type SprintChips = {
+  /** The deliveries on show that are concluded (a delivery with no parts counts one) and their parts. */
+  delivered: { parts: number; issues: number };
+  /** What is left of the sprint's covers: the parts, and how many covers still have some. */
+  going: { parts: number; issues: number };
+  /** The deliveries on show that are blocked. */
+  blocked: number;
+};
+
+/**
+ * The numbers of the chips of a report that has a sprint block: "Concluído" is every delivery on show that was
+ * concluded (so what the user hides or changes in the screen is followed), "Em andamento" what is left of the
+ * sprint's covers. Null for a report made before the block existed, which keeps the chips it always had.
+ */
+export function sprintChips(content: Pick<ProgressContent, "entries" | "sprint">): SprintChips | null {
+  if (!content.sprint) return null;
+  const visible = visibleOf(content as ProgressContent);
+  const concluded = visible.filter((e) => e.status === "concluido");
+  const covers = (content.sprint.epics ?? []).filter((c) => c.parts.remaining > 0);
+  return {
+    delivered: { parts: concluded.reduce((sum, e) => sum + Math.max(1, e.subIssues?.done ?? 0), 0), issues: concluded.length },
+    going: { parts: covers.reduce((sum, c) => sum + c.parts.remaining, 0), issues: covers.length },
+    blocked: visible.filter((e) => e.status === "bloqueado").length,
+  };
 }
 
 /** Entries per status as the e-mail will show them: hidden ones are not counted. */

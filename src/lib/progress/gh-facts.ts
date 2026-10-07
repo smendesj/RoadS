@@ -2,7 +2,7 @@
 // timelines, Project #7 items). Pure: the network lives in gh-client.ts, the clock is passed in. The
 // output is a PROPOSAL for the drafting step and the screen: status, delivery date, rolled-up sub-issues,
 // the evidence behind each choice, what looks internal, and the git work the coverage check needs.
-import type { EntryStatus, ReportWindow } from "../progress-report.ts";
+import type { EntryStatus, ReportWindow, SprintCover } from "../progress-report.ts";
 import type { GitWork } from "./gaps.ts";
 import { MAIN_BRANCH, asBoardStatus, boardStatusAt, classifyEntry, pickDelivery, prStateAt, toSaoPauloIso } from "./gh-status.ts";
 import type { PrFact, StatusDecision } from "./gh-status.ts";
@@ -120,12 +120,22 @@ export type FactEntry = {
 
 export type InternalItem = { ref: string; title: string; reason: string };
 
+/** A cover of the sprint as the collector finds it; the writer's sentence (`summary`) is added when the draft is assembled. */
+export type SprintFact = Omit<SprintCover, "summary">;
+
 export type ProgressFacts = {
   scope: "GeoCloud";
   repository: string;
   window: ReportWindow;
   generatedAt: string;
   entries: FactEntry[];
+  /**
+   * The sprint: every open item of the Project on Development is a COVER, never an entry (no print, no text per
+   * delivery). `epics` lists the covers with parts left, `totals` what the e-mail's "Em andamento" chip says.
+   */
+  sprint: { epics: SprintFact[]; totals: { covers: number; remainingParts: number } };
+  /** What the e-mail's "Concluído" chip says: the visible entries concluded, and their parts (a delivery with none counts 1). */
+  delivered: { issues: number; parts: number };
   internal: { count: number; items: InternalItem[] };
   /** Commits and merged PRs of the window, in time order: what the coverage check measures against Claude use. */
   gitWork: GitWork[];
@@ -135,9 +145,10 @@ export type ProgressFacts = {
    * What was looked at and deliberately left out, so a missing issue is never a mystery. `cut` counts the issues
    * whose sub-issues GitHub counts but the collector did not read (a tree too deep or too big, or sub-issues of
    * another repository): their entries carry a line saying the parts may be underestimated. `epics` counts the
-   * epics treated as groupers (an epic whose ancestors are all epics): none of them is an entry.
+   * epics treated as groupers (an epic whose ancestors are all epics): none of them is an entry. `covers` counts the
+   * covers of the sprint, which are a block of their own (an epic cover is counted in `epics` too).
    */
-  ignored: { backlog: number; quiet: number; settled: number; children: number; cut: number; epics: number };
+  ignored: { backlog: number; quiet: number; settled: number; children: number; cut: number; epics: number; covers: number };
 };
 
 /* ---------- Window and hide list ---------- */
@@ -380,6 +391,45 @@ export function buildFacts(input: FactsInput): ProgressFacts {
 
   // The local hide list names an issue or a title; naming an epic hides every delivery under it.
   const hiddenLocally = (i: GhIssue): boolean => hide.issues.includes(i.number) || hide.patterns.some((p) => patternMatches(p, i.title));
+
+  // The covers of the sprint: the open items of the Project on Development. Each is a block of its own, with what is
+  // left of it, and neither it nor anything on Development is an entry (a cover under another one is part of it).
+  const MAX_OPEN = 30;
+  const openAtEnd = (i: GhIssue): boolean => i.state === "open" || (i.closedAt !== null && Date.parse(i.closedAt) >= end);
+  const onDevelopment = (i: GhIssue): boolean =>
+    boardStatusAt(boardItem.get(i.number) ?? null, timelineOf.get(i.number)?.statusHistory ?? [], input.window.end) === "Development";
+  // What the team hid, or a synchronization test, is no cover either; it goes through the entry rules (and is listed as internal).
+  const developing = input.issues.filter(
+    (i) => openAtEnd(i) && onDevelopment(i) && !TEST_SYNC.test(i.title) && ![i, ...(ancestorsOf(i) ?? [])].some(hiddenLocally)
+  );
+  const developingNumbers = new Set(developing.map((i) => i.number));
+  const covers = developing.filter((i) => !(ancestorsOf(i) ?? []).some((a) => developingNumbers.has(a.number))).sort(byNumber);
+  // The deliveries of a cover: what hangs from it that is not an epic, through any epics in between.
+  const deliveriesUnder = (cover: GhIssue): GhIssue[] =>
+    descendantsOf(cover.number).filter((d) => {
+      if (isEpic(d) || cancelled(d)) return false;
+      const chain = ancestorsOf(d) ?? [];
+      return chain.slice(0, Math.max(0, chain.findIndex((a) => a.number === cover.number))).every(isEpic);
+    });
+  const coverFact = (cover: GhIssue): SprintFact => {
+    const family = descendantsOf(cover.number);
+    // An empty epic inside a cover is no part. A cover with no children is its own single part.
+    const counts =
+      family.length === 0
+        ? [unread(cover) ?? { total: 1, done: 0 }]
+        : family.filter((i) => !isEpic(i) && !childrenOf.has(i.number)).map((i) => unread(i) ?? (cancelled(i) ? { total: 0, done: 0 } : { total: 1, done: i.state === "closed" ? 1 : 0 }));
+    const total = counts.reduce((sum, p) => sum + p.total, 0);
+    const done = counts.reduce((sum, p) => sum + p.done, 0);
+    const deliveries = deliveriesUnder(cover);
+    return {
+      issue: cover.number,
+      title: cover.title,
+      issues: family.length === 0 ? { total: 1, done: 0 } : { total: deliveries.length, done: deliveries.filter((d) => d.state === "closed").length },
+      parts: { total, done, remaining: total - done },
+      open: family.length === 0 ? [] : deliveries.filter((d) => d.state === "open").slice(0, MAX_OPEN).map((d) => ({ issue: d.number, title: d.title })),
+    };
+  };
+
   const internalReason = (i: GhIssue, atEnd: ReturnType<typeof boardStatusAt>, familyPrs: GhPr[], epics: GhIssue[], hasParts: boolean): string | null => {
     if (hiddenLocally(i) || epics.some(hiddenLocally)) return "lista local (hide.json)";
     if (TEST_SYNC.test(i.title)) return "teste de sincronização";
@@ -401,7 +451,7 @@ export function buildFacts(input: FactsInput): ProgressFacts {
 
   const entries: FactEntry[] = [];
   const internal: InternalItem[] = [];
-  const ignored = { backlog: 0, quiet: 0, settled: 0, children: 0, cut: input.issues.filter(incomplete).length, epics: 0 };
+  const ignored = { backlog: 0, quiet: 0, settled: 0, children: 0, cut: input.issues.filter(incomplete).length, epics: 0, covers: covers.length };
 
   for (const issue of [...input.issues].sort(byNumber)) {
     if (groupsOnly(issue)) {
@@ -412,6 +462,7 @@ export function buildFacts(input: FactsInput): ProgressFacts {
       ignored.children++;
       continue;
     }
+    if (developingNumbers.has(issue.number)) continue; // on the sprint: part of the sprint block, not a delivery
     const epics = ancestorsOf(issue) ?? []; // closest first; all of them are epics
     const { family, prs, commits, history } = gathered(issue.number);
     const closedParts = family.filter(deliveredPart);
@@ -528,12 +579,17 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     }
   }
 
+  const sprint = covers.map(coverFact).filter((c) => c.parts.remaining > 0);
+  const concluded = entries.filter((e) => !e.hidden && e.status === "concluido");
+
   return {
     scope: "GeoCloud",
     repository: input.repository,
     window: input.window,
     generatedAt: input.generatedAt,
     entries,
+    sprint: { epics: sprint, totals: { covers: sprint.length, remainingParts: sprint.reduce((sum, c) => sum + c.parts.remaining, 0) } },
+    delivered: { issues: concluded.length, parts: concluded.reduce((sum, e) => sum + Math.max(1, e.subIssues?.done ?? 0), 0) },
     internal: { count: internal.length, items: internal },
     gitWork: gitWorkOf(input, inWindow),
     ignored,

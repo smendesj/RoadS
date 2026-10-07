@@ -157,6 +157,28 @@ export type ProgressEntry = {
   sources: string[]; // issue and PR links, for the team, never printed in the e-mail body
 };
 
+/**
+ * One cover of the sprint (an item of the Project on Development, an epic or not): what is left of it. `issues` are
+ * its deliveries (its children that are not epics, through any epic in between); `parts` are the leaves of its
+ * whole tree (a cover with no children is its own single part); `open` are the deliveries still open.
+ */
+export type SprintCover = {
+  issue: number;
+  title: string; // as written on GitHub
+  /** One sentence in plain language from the writer; empty when none was written. */
+  summary: string;
+  issues: { total: number; done: number };
+  parts: { total: number; done: number; remaining: number };
+  open: { issue: number; title: string }[];
+};
+
+/** The block "Em andamento na sprint": the covers with parts still to do, and the sums of the e-mail's chip. */
+export type SprintBlock = {
+  epics: SprintCover[];
+  /** `covers`: the covers with something left; `remainingParts`: the sum of what is left in them. */
+  totals: { covers: number; remainingParts: number };
+};
+
 export type ProgressContent = {
   window: ReportWindow;
   headline: string;
@@ -166,6 +188,8 @@ export type ProgressContent = {
   nextSteps: { id?: string; text: string }[];
   usage: UsageModel;
   shots?: Shot[];
+  /** What is left of the sprint's covers; absent in reports made before the block existed. */
+  sprint?: SprintBlock;
   gaps?: CoverageGap[];
   /**
    * How the reader signs in to RoadS for the first time: the account and its temporary password, which the

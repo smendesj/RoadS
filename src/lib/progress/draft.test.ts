@@ -88,6 +88,19 @@ function validBody(): Body {
         { id: "shot-1", caption: "Tela de exemplo", mime: "image/png", issue: 101, path: `${"a".repeat(64)}.png` },
         { id: "shot-2", caption: "Outra tela de exemplo", mime: "image/jpeg", issue: 102, data: jpeg(2048) },
       ],
+      sprint: {
+        epics: [
+          {
+            issue: 900,
+            title: "Capa de exemplo A",
+            summary: "Uma frase de exemplo sobre a capa.",
+            issues: { total: 3, done: 1 },
+            parts: { total: 8, done: 5, remaining: 3 },
+            open: [{ issue: 910, title: "Entrega aberta de exemplo" }],
+          },
+        ],
+        totals: { covers: 1, remainingParts: 3 },
+      },
       gaps: [{ at: "2026-03-02T20:00:00-03:00", ref: "PR 12", nearestMessageMinutes: 120 }],
       access: { account: "reader@example.test", password: "Tmp-pass-1234" },
     },
@@ -131,6 +144,8 @@ test("every field of the contract survives, and the list of kept fields is compl
   // A print carries either `path` or `data`: the two sample prints together use every field.
   assert.deepEqual([...new Set(content.shots!.flatMap(keys))].sort(), [...KEPT_FIELDS.shot].sort());
   assert.deepEqual(keys(content.gaps![0]), [...KEPT_FIELDS.gap].sort());
+  assert.deepEqual(keys(content.sprint!), [...KEPT_FIELDS.sprint].sort());
+  assert.deepEqual(keys(content.sprint!.epics[0]), [...KEPT_FIELDS.cover].sort());
   // ...and the parser hands every one of them back.
   const r = parseDraft(validBody());
   assert.equal(r.ok, true);
@@ -465,4 +480,33 @@ test("hostile input is refused instead of throwing", () => {
     },
   };
   assert.equal(parseDraft(trap).ok, false);
+});
+
+test("the sprint block is optional, rebuilt from what it knows, and its sums are made again from the covers", () => {
+  assert.equal(parseBent((b) => delete b.content.sprint).ok, true);
+  const r = parseBent((b) => {
+    const cover = b.content.sprint!.epics[0];
+    b.content.sprint!.epics.push({ ...cover, issue: 901, parts: { total: 4, done: 4, remaining: 0 }, open: [] }); // all done: not counted as going
+    b.content.sprint!.totals = { covers: 99, remainingParts: 99 };
+    delete (cover as { summary?: string }).summary;
+    (cover as Record<string, unknown>).sentinel = SENTINEL;
+  });
+  assert.equal(r.ok, true);
+  if (r.ok) {
+    assert.deepEqual(r.content.sprint!.totals, { covers: 1, remainingParts: 3 });
+    assert.equal(r.content.sprint!.epics[0].summary, "");
+    assert.ok(!JSON.stringify(r.content).includes(SENTINEL));
+  }
+});
+
+test("a bad sprint block is refused naming its field, never the value", () => {
+  refused((b) => (b.content.sprint!.epics[0].parts.done = 99), /content\.sprint\.epics\[0\]\.parts/);
+  refused((b) => (b.content.sprint!.epics[0].issues.done = 99), /content\.sprint\.epics\[0\]\.issues/);
+  refused((b) => (b.content.sprint!.epics[0].title = unsafe(SENTINEL.length)), /content\.sprint\.epics\[0\]\.title/);
+  refused((b) => b.content.sprint!.epics.push({ ...b.content.sprint!.epics[0] }), /content\.sprint\.epics\[1\]\.issue/);
+  refused((b) => (b.content.sprint!.epics[0].open = Array.from({ length: 31 }, (_, i) => ({ issue: i + 1, title: "x" }))), /content\.sprint\.epics\[0\]\.open/);
+  refused((b) => (b.content.sprint = unsafe("nope")), /content\.sprint/);
+  const long = parseBent((b) => (b.content.sprint!.epics[0].title = SENTINEL.repeat(40)));
+  assert.equal(long.ok, false);
+  if (!long.ok) assert.ok(!long.error.includes(SENTINEL));
 });
