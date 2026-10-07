@@ -22,12 +22,21 @@ function sprintLine(sprint: SprintSyncSummary): string {
 }
 
 // What the Sincronizar buttons say after a sync that ran: how many issues the Roadmap took in and let go.
-export function roadmapSyncMessage(roadmap: { added: number; removed: number; issuesCreated: number; untyped?: number; error?: string; sprint?: SprintSyncSummary }): string {
+export function roadmapSyncMessage(roadmap: {
+  added: number;
+  removed: number;
+  issuesCreated: number;
+  untyped?: number;
+  error?: string;
+  sprint?: SprintSyncSummary;
+  retitled?: number;
+}): string {
   if (roadmap.error) return roadmap.error;
   return (
     `${roadmap.added} issue(s) adicionada(s), ${roadmap.removed} encerrada(s) ou fora do Project removida(s)` +
     (roadmap.issuesCreated ? `, ${roadmap.issuesCreated} issue(s) criada(s) para itens sem issue.` : ".") +
     (roadmap.untyped ? ` ${roadmap.untyped} issue(s) aberta(s) sem label type:* ficaram de fora até ganharem tipo.` : "") +
+    (roadmap.retitled ? ` ${roadmap.retitled} título(s) do Roadmap acompanharam a renomeação da issue no GitHub.` : "") +
     (roadmap.sprint ? sprintLine(roadmap.sprint) : "")
   );
 }

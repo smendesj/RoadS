@@ -117,6 +117,10 @@ O que mudou e ainda não foi escrito nos arquivos. Quem monta: `src/lib/frontlig
   mantém o sprint atual e o Project em acordo é só o RoadS (seção 4, `sync-board`).
 - Um `add` pode nomear `atual` em `lane_id`: é a issue que já estava em Development no Project quando entrou no
   Roadmap, e entra direto no sprint atual.
+- Um `modify` pode trazer `title` e `reason` `"title follows the issue on GitHub"`: a issue foi renomeada no GitHub
+  e o título do item no Roadmap a acompanhou. É o `title` de `item` que vale para escrever o arquivo. O RoadS só
+  acompanha uma **renomeação** (o título da issue mudou desde a última sincronização); um título que uma pessoa
+  escreveu no Roadmap fica enquanto o da issue não muda.
 - O `id` de cada mudança é um UUID gerado pelo banco. O prefixo `done-` é **reservado ao plugin** (ele monta ids
   próprios para registrar conclusões, que nunca são confirmadas ao RoadS): o RoadS nunca emite um id assim, e o
   plugin recusa a busca inteira se vier um.
@@ -150,6 +154,8 @@ resumo, nunca os cartões do quadro. Quem monta: `src/lib/frontlights/sync.ts`.
   `sprint`.
 - Uma sincronização que falha é **`200`** com `{ "ok": false, "reason": "…", "message": "…" }` (seção 3), não um
   erro HTTP. `roadmap.error` aparece quando o quadro sincronizou e o Roadmap não.
+- **`roadmap.retitled`** (opcional, número): quantos títulos do Roadmap acompanharam a renomeação da issue no
+  GitHub nesta sincronização (cada um vira um `modify` com `title` na fila). Ausente quando nenhum.
 - **`roadmap.sprint`** (opcional, só contagens): o que a sincronização fez para manter o sprint atual do
   Roadmap (a lane `atual`) e o Project em acordo. `pulled`: issues que o Project pôs no sprint atual;
   `released`: issues que o Project tirou dele (voltaram ao seu bloco); `written`: Statuses que o RoadS escreveu
@@ -269,3 +275,7 @@ repositório, `roads-script/push` e `roads-script/attach`.
   `add` pode nomear `atual` em `lane_id`. Os moves enfileirados antes desta data não têm `origin`.
 - **2026-10-06:** o acordo entre o sprint atual do Roadmap e o Project é feito só pelo RoadS (Status Development é
   o sprint atual; vale quem mexeu por último). Nada é pedido ao plugin, que não escreve no Project.
+- **2026-10-06 (aditivo):** o título de um item do Roadmap acompanha a renomeação da issue no GitHub: vem como
+  `modify` com `title` e `reason` `"title follows the issue on GitHub"`, e o resumo do `POST /sync-board` pode
+  trazer `roadmap.retitled` (quantos títulos acompanharam; ausente quando nenhum). Os 19 itens do plano MVP que
+  tinham ficado com o nome antigo foram acertados de uma vez e enfileirados do mesmo jeito.

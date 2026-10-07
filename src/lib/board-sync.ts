@@ -32,6 +32,7 @@ import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { planRotation, SPRINT_IDS, type SprintDates, type SprintId } from "@/lib/sprint-rotation";
 import { parseSlices, slicesQuery } from "@/lib/slices";
+import { planTitleFollow, type TitleCandidate } from "@/lib/title-follow";
 import { CURRENT_SPRINT, EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintSyncDeps, type SprintSyncSummary } from "@/lib/sprint-status-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { NEW_ITEM_TITLE } from "@/lib/types";
@@ -59,6 +60,8 @@ export type RoadmapReconcile = {
   error?: string;
   /** What the current sprint and the Project's Development did for each other; absent when there was no card to judge. */
   sprint?: SprintSyncSummary;
+  /** How many Roadmap titles followed a rename of their issue on GitHub. */
+  retitled?: number;
 };
 
 export type SyncResult =
@@ -172,6 +175,14 @@ export async function syncBoard(): Promise<SyncResult> {
       console.error("syncBoard: failed to persist snapshot", persistError);
     }
 
+    // An issue renamed on GitHub renames its item in the Roadmap; a failure here doesn't fail the board sync.
+    const retitled = cards.size
+      ? await readOpen().then(followIssueTitles).catch((e) => {
+          console.error("syncBoard: following issue titles failed", e);
+          return 0;
+        })
+      : 0;
+
     // The Roadmap follows the repo's open issues; a failure here doesn't fail the board sync.
     const roadmap: RoadmapReconcile = await reconcileRoadmapWithIssues(token, onProject, readOpen, cards).catch((e) => {
       console.error("syncBoard: roadmap reconcile failed", e);
@@ -182,7 +193,7 @@ export async function syncBoard(): Promise<SyncResult> {
     // settled which issues are in the sprint; a failure keeps the slices of the last sync.
     await syncSlices(token).catch((e) => console.error("syncBoard: slices failed", e));
 
-    return { ok: true, columns, syncedAt, roadmap: sprint ? { ...roadmap, sprint } : roadmap };
+    return { ok: true, columns, syncedAt, roadmap: { ...roadmap, ...(sprint ? { sprint } : {}), ...(retitled ? { retitled } : {}) } };
   } catch (e) {
     return { ok: false, reason: "error", message: e instanceof Error ? e.message : "Erro desconhecido" };
   }
@@ -255,6 +266,53 @@ async function rotateSprints(doneUrls: Set<string>): Promise<void> {
 }
 
 type Admin = ReturnType<typeof createAdminClient>;
+
+// An issue renamed on GitHub renames its item in the Roadmap (src/lib/title-follow.ts has the rule). Each rename is
+// queued as a modify so FrontlightS writes the new title; if the queue refuses, the title goes back and the next
+// sync tries again. What every issue is called is remembered per item, to tell a rename from a title a person wrote.
+async function followIssueTitles(open: OpenIssue[]): Promise<number> {
+  const admin = createAdminClient();
+  const { data: items, error } = await admin.from("roadmap_items").select("id, title, github_title, github_issue_url");
+  if (error) throw error;
+
+  const byNumber = new Map(open.map((i) => [i.number, i]));
+  const candidates: TitleCandidate[] = [];
+  for (const item of items ?? []) {
+    const issue = byNumber.get(Number(item.github_issue_url?.match(ISSUE_URL)?.[1]));
+    if (issue) candidates.push({ id: item.id, title: item.title, githubTitle: item.github_title, issueTitle: issue.title });
+  }
+  const plan = planTitleFollow(candidates);
+  const before = new Map(candidates.map((c) => [c.id, c]));
+  const renamed = new Set(plan.rename.map((r) => r.id));
+
+  let done = 0;
+  for (const r of plan.rename) {
+    const seen = plan.seen.find((x) => x.id === r.id)!.githubTitle;
+    const { error: updateError } = await admin.from("roadmap_items").update({ title: r.to, github_title: seen }).eq("id", r.id);
+    if (updateError) throw updateError;
+    const { error: queueError } = await admin.from("roadmap_sync_queue").insert({
+      item_id: r.id,
+      action: "modify",
+      payload: { title: r.to, reason: "title follows the issue on GitHub" },
+    });
+    if (queueError) {
+      await admin.from("roadmap_items").update({ title: r.from, github_title: before.get(r.id)!.githubTitle }).eq("id", r.id);
+      throw queueError;
+    }
+    done++;
+  }
+
+  const onlySeen = plan.seen.filter((x) => !renamed.has(x.id));
+  for (let i = 0; i < onlySeen.length; i += 10) {
+    await Promise.all(
+      onlySeen.slice(i, i + 10).map(async (x) => {
+        const { error: seenError } = await admin.from("roadmap_items").update({ github_title: x.githubTitle }).eq("id", x.id);
+        if (seenError) throw seenError;
+      })
+    );
+  }
+  return done;
+}
 
 // The Dashboard's Slices: every sub-issue of the issues in the current sprint, stored with the board snapshot.
 async function syncSlices(token: string): Promise<void> {

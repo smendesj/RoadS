@@ -66,3 +66,12 @@ test("a failure of the sprint step is reported next to the counts, never hidden"
     `${BASE} A sprint atual não acompanhou o Project: fila ilegível.`
   );
 });
+
+
+test("the summary says how many Roadmap titles followed a rename on GitHub, and nothing when none did", () => {
+  assert.equal(roadmapSyncMessage({ added: 0, removed: 0, issuesCreated: 0, retitled: 0 }), BASE);
+  assert.equal(
+    roadmapSyncMessage({ added: 0, removed: 0, issuesCreated: 0, retitled: 3 }),
+    `${BASE} 3 título(s) do Roadmap acompanharam a renomeação da issue no GitHub.`
+  );
+});

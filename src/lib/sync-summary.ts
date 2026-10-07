@@ -4,7 +4,7 @@ import { syncFailureMessage } from "./sync-message.ts";
 // What /api/frontlights/sync-board hands back after running the same sync as the Sincronizar
 // button: when it ran and what the Roadmap took in, never the board's cards (titles and links).
 // `sprint` is counts only (docs/frontlights-contract.md, section 4); it is absent when the step didn't run.
-type RoadmapChange = { added: number; removed: number; issuesCreated: number; error?: string; sprint?: SprintSyncSummary };
+type RoadmapChange = { added: number; removed: number; issuesCreated: number; error?: string; sprint?: SprintSyncSummary; retitled?: number };
 type Result =
   | { ok: true; syncedAt: string; columns: unknown[]; roadmap: RoadmapChange }
   | { ok: false; reason: string; message?: string };
