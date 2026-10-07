@@ -37,6 +37,10 @@ Um JSON, gravado onde o Frontlights pedir (`{draft}`):
   - `hidden` é opcional: `true` esconde a entrega do e-mail, `false` mostra uma que o coletor escondeu. O
     coletor esconde sozinho o que foi entregue antes do período e o que é interno; uma entrega escondida
     pode ficar sem texto.
+  - **Epic é cabeçalho, não entrega.** Uma issue `type:epic` só agrupa: nunca tem entrada nem print. A entrega é a
+    issue mais alta que não é epic (a "raiz de trabalho"), e os fatos trazem o epic acima dela em `entries[].epic`
+    (o mais próximo, com as entregas dele prontas) e `entries[].epicPath` (a cadeia inteira, do mais externo ao mais
+    próximo). Use isso para agrupar no texto, em linguagem simples ("MVP · 1A: ..."), sem número de issue.
   - **Entrega feita de partes.** Uma entrega pode ser uma issue com sub-issues, e estas com outras sub-issues. O
     coletor conta as **folhas** da árvore inteira, em qualquer nível, e o e-mail e a visão semanal mostram
     sozinhos, logo abaixo da frase, algo como "3 de 8 partes prontas" (sem número de issue). **Não repita essa
@@ -84,8 +88,8 @@ código e tabelas fiquem legíveis em tela cheia). Eles ficam na pasta de prints
 
 - `issue` é o número inteiro da issue de uma entrega deste resumo. O print sai logo abaixo dessa entrega, no
   e-mail e no resumo semanal.
-  Para uma entrega feita de partes, o print de qualquer parte entra com o número da **entrega** (a issue sem
-  pai, a que está nos fatos), nunca com o de uma sub-issue: o RoadS só conhece as entregas.
+  Para uma entrega feita de partes, o print de qualquer parte entra com o número da **entrega** (a raiz de
+  trabalho, a que está nos fatos), nunca com o de uma sub-issue nem o de um epic: o RoadS só conhece as entregas.
 - Sem `issue`, o print é geral e sai no fim, antes do uso do Claude.
 - Só os arquivos listados saem; os demais são ignorados. Use só dados de teste e recorte a identidade de quem
   estava logado.

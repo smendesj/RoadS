@@ -89,6 +89,15 @@ export type PartsSlices = {
   blocked: { title: string }[];
 };
 
+/** The epic above a delivery: only a header for it (an epic is a grouper, never an entry and never needs a print). */
+export type EpicContext = {
+  /** The closest epic above the delivery. */
+  issue: number;
+  title: string;
+  /** The deliveries under that epic (not their leaves): how many there are, and how many are closed as completed. */
+  parts: { total: number; done: number };
+};
+
 export type FactEntry = {
   id: string; // "gc-<issue>": the key edits are stored under
   issue: number;
@@ -99,6 +108,10 @@ export type FactEntry = {
   subIssues: { total: number; done: number } | null;
   /** Only for an issue that has sub-issues. Kept in facts.json: the assembled draft does not carry it. */
   slices?: PartsSlices;
+  /** Only for a delivery with an epic above it; kept in facts.json like `slices`: the assembled draft does not carry it. */
+  epic?: EpicContext;
+  /** Every epic above the delivery, the outermost first and the closest last (as written on GitHub). */
+  epicPath?: { issue: number; title: string }[];
   hidden: boolean;
   hiddenReason: string | null;
   evidence: string[];
@@ -121,9 +134,10 @@ export type ProgressFacts = {
   /**
    * What was looked at and deliberately left out, so a missing issue is never a mystery. `cut` counts the issues
    * whose sub-issues GitHub counts but the collector did not read (a tree too deep or too big, or sub-issues of
-   * another repository): their entries carry a line saying the parts may be underestimated.
+   * another repository): their entries carry a line saying the parts may be underestimated. `epics` counts the
+   * epics treated as groupers (an epic whose ancestors are all epics): none of them is an entry.
    */
-  ignored: { backlog: number; quiet: number; settled: number; children: number; cut: number };
+  ignored: { backlog: number; quiet: number; settled: number; children: number; cut: number; epics: number };
 };
 
 /* ---------- Window and hide list ---------- */
@@ -177,6 +191,9 @@ export function formatSaoPaulo(at: string): string {
 }
 
 /* ---------- What looks internal ---------- */
+
+/** An epic only groups deliveries: the label is the repository's own `type:epic`. */
+export const isEpic = (issue: { labels: string[] }): boolean => issue.labels.some((l) => l.trim().toLowerCase() === "type:epic");
 
 const TITLE_REF = /\(#(\d+)\)/g;
 const TEST_SYNC =
@@ -251,10 +268,12 @@ export function buildFacts(input: FactsInput): ProgressFacts {
   // says closed it. A PR that merely mentions an issue elsewhere (its body, a comment) delivers nothing.
   const prsOfIssue = new Map<number, GhPr[]>();
   const prHasIssue = new Set<number>();
+  const prTargets = new Map<number, Set<number>>();
   for (const p of input.prs) {
     const targets = new Set<number>([...p.title.matchAll(TITLE_REF)].map((m) => Number(m[1])).concat(p.closing));
     for (const t of input.timelines) if (t.closers.includes(p.number)) targets.add(t.issue);
     targets.delete(p.number);
+    prTargets.set(p.number, targets);
     if (targets.size > 0) prHasIssue.add(p.number);
     for (const n of targets) prsOfIssue.set(n, [...(prsOfIssue.get(n) ?? []), p]);
   }
@@ -264,6 +283,31 @@ export function buildFacts(input: FactsInput): ProgressFacts {
 
   const batch = batchMembers(input.issues);
   const issueOf = new Map(input.issues.map((i) => [i.number, i]));
+  // The issues above one, the closest first; null when the chain leaves what was collected (then nothing is known above it).
+  const ancestorsOf = (i: GhIssue): GhIssue[] | null => {
+    const chain: GhIssue[] = [];
+    const seen = new Set([i.number]);
+    for (let p = i.parent; p != null; ) {
+      const up = issueOf.get(p);
+      if (!up || seen.has(p)) return null;
+      seen.add(p);
+      chain.push(up);
+      p = up.parent;
+    }
+    return chain;
+  };
+  // An epic groups: it is no delivery. The delivery ("work root") is the highest issue that is not an epic, so an
+  // issue is one when everything above it is an epic (or nothing is), and the epics above it are only its header.
+  const groupsOnly = (i: GhIssue): boolean => isEpic(i) && (ancestorsOf(i)?.every(isEpic) ?? false);
+  const isWorkRoot = (i: GhIssue): boolean => !isEpic(i) && (ancestorsOf(i)?.every(isEpic) ?? false);
+  // A PR that cites nothing but epics belongs to no delivery.
+  const epicOnly = new Set<number>();
+  for (const [number, targets] of prTargets) {
+    if (targets.size > 0 && [...targets].every((n) => { const i = issueOf.get(n); return !!i && groupsOnly(i); })) {
+      prHasIssue.delete(number);
+      epicOnly.add(number);
+    }
+  }
   const closedAtOf = (n: number): string | null => {
     const i = issueOf.get(n);
     return i && i.state === "closed" ? i.closedAt : null;
@@ -328,16 +372,27 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     (i.labels.some((l) => BLOCKED_LABEL.test(l.trim())) ||
       boardStatusAt(boardItem.get(i.number) ?? null, timelineOf.get(i.number)?.statusHistory ?? [], input.window.end) === "Blocker");
 
-  const internalReason = (i: GhIssue, atEnd: ReturnType<typeof boardStatusAt>, familyPrs: GhPr[]): string | null => {
-    if (hide.issues.includes(i.number) || hide.patterns.some((p) => patternMatches(p, i.title))) return "lista local (hide.json)";
+  // The parts of an epic are the deliveries under it, through any epics in between: a cancelled one is no part.
+  const epicParts = (epic: GhIssue): { total: number; done: number } => {
+    const roots = descendantsOf(epic.number).filter((i) => isWorkRoot(i) && !cancelled(i));
+    return { total: roots.length, done: roots.filter((i) => i.state === "closed").length };
+  };
+
+  // The local hide list names an issue or a title; naming an epic hides every delivery under it.
+  const hiddenLocally = (i: GhIssue): boolean => hide.issues.includes(i.number) || hide.patterns.some((p) => patternMatches(p, i.title));
+  const internalReason = (i: GhIssue, atEnd: ReturnType<typeof boardStatusAt>, familyPrs: GhPr[], epics: GhIssue[], hasParts: boolean): string | null => {
+    if (hiddenLocally(i) || epics.some(hiddenLocally)) return "lista local (hide.json)";
     if (TEST_SYNC.test(i.title)) return "teste de sincronização";
     if (i.state === "closed" && i.stateReason === "not_planned") return "fechada como não planejada";
     // Whatever the team moved to the sprint board is real work, whatever it is called.
     if (atEnd === "Development" || atEnd === "Blocker") return null;
-    const labels = i.labels.map((l) => l.toLowerCase());
-    if (labels.some((l) => INTERNAL_LABELS.has(l)) && !labels.some((l) => FEATURE_LABELS.has(l))) return "rótulo de teste/chore/infra";
-    const head = i.body.slice(0, 400);
-    if (FOLLOW_UP_BODY.some((re) => re.test(head))) return "pendência de revisão";
+    // The label and the body tell small stray tickets from real work; an issue already broken into parts is real work.
+    if (!hasParts) {
+      const labels = i.labels.map((l) => l.toLowerCase());
+      if (labels.some((l) => INTERNAL_LABELS.has(l)) && !labels.some((l) => FEATURE_LABELS.has(l))) return "rótulo de teste/chore/infra";
+      const head = i.body.slice(0, 400);
+      if (FOLLOW_UP_BODY.some((re) => re.test(head))) return "pendência de revisão";
+    }
     if (batch.has(i.number) && i.assignees.length === 0 && familyPrs.length === 0) {
       return "planejamento criado em lote";
     }
@@ -346,13 +401,18 @@ export function buildFacts(input: FactsInput): ProgressFacts {
 
   const entries: FactEntry[] = [];
   const internal: InternalItem[] = [];
-  const ignored = { backlog: 0, quiet: 0, settled: 0, children: 0, cut: input.issues.filter(incomplete).length };
+  const ignored = { backlog: 0, quiet: 0, settled: 0, children: 0, cut: input.issues.filter(incomplete).length, epics: 0 };
 
   for (const issue of [...input.issues].sort(byNumber)) {
-    if (issue.parent != null) {
+    if (groupsOnly(issue)) {
+      ignored.epics++;
+      continue;
+    }
+    if (!isWorkRoot(issue)) {
       ignored.children++;
       continue;
     }
+    const epics = ancestorsOf(issue) ?? []; // closest first; all of them are epics
     const { family, prs, commits, history } = gathered(issue.number);
     const closedParts = family.filter(deliveredPart);
     const item = boardItem.get(issue.number) ?? null;
@@ -371,7 +431,7 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     ];
     const active = activity.some(inWindow);
 
-    const reason = internalReason(issue, atEnd, prs);
+    const reason = internalReason(issue, atEnd, prs, epics, family.length > 0);
     if (reason) {
       if (active) internal.push({ ref: `#${issue.number}`, title: issue.title, reason });
       continue;
@@ -432,6 +492,12 @@ export function buildFacts(input: FactsInput): ProgressFacts {
             },
           }
         : {}),
+      ...(epics.length > 0
+        ? {
+            epic: { issue: epics[0].number, title: epics[0].title, parts: epicParts(epics[0]) },
+            epicPath: [...epics].reverse().map((e) => ({ issue: e.number, title: e.title })),
+          }
+        : {}),
       hidden: hiddenReason !== null,
       hiddenReason,
       evidence: evidenceLines({
@@ -446,16 +512,20 @@ export function buildFacts(input: FactsInput): ProgressFacts {
         closedInWindow: closedParts.filter((p) => inWindow(p.closedAt)).length,
         lastPartClosed: closedParts.map((p) => p.closedAt as string).filter(inWindow).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1) ?? null,
         cut: [issue, ...family].some(incomplete),
+        epic: epics.length > 0 ? { path: [...epics].reverse().map((e) => e.title), parts: epicParts(epics[0]) } : null,
       }),
       // The draft parser takes at most MAX_SOURCES links: the issue and the PR that delivered it come first.
       sources: unique([issue.url, ...(decision.delivery?.url ? [decision.delivery.url] : []), ...prs.map((p) => p.url)]).slice(0, MAX_SOURCES),
     });
   }
 
-  // A PR that cites no issue at all is housekeeping.
+  // A PR that cites no issue at all is housekeeping, and so is one that cites nothing but an epic (a grouper,
+  // never a delivery): it is listed with its reason instead of being lost.
   for (const p of [...input.prs].sort(byNumber)) {
     if (prHasIssue.has(p.number)) continue;
-    if (inWindow(p.createdAt) || inWindow(p.mergedAt)) internal.push({ ref: `PR #${p.number}`, title: p.title, reason: "PR sem issue" });
+    if (inWindow(p.createdAt) || inWindow(p.mergedAt)) {
+      internal.push({ ref: `PR #${p.number}`, title: p.title, reason: epicOnly.has(p.number) ? "PR que cita só um epic (agrupador)" : "PR sem issue" });
+    }
   }
 
   return {
@@ -486,6 +556,8 @@ function evidenceLines(a: {
   lastPartClosed: string | null;
   /** Some issue of the family has sub-issues that were not read. */
   cut: boolean;
+  /** The epics above the issue (outermost first) and how far the closest one has come. */
+  epic: { path: string[]; parts: { total: number; done: number } } | null;
 }): string[] {
   const end = Date.parse(a.windowEnd);
   const lines: string[] = [];
@@ -532,6 +604,7 @@ function evidenceLines(a: {
   if (a.closedInWindow > 0 && a.lastPartClosed) {
     lines.push(`${a.closedInWindow} sub-issue${a.closedInWindow > 1 ? "s" : ""} fechada${a.closedInWindow > 1 ? "s" : ""} no período, a última em ${formatSaoPaulo(a.lastPartClosed)}`);
   }
+  if (a.epic) lines.push(`Dentro do epic ${a.epic.path.join(" > ")}: ${a.epic.parts.done} de ${a.epic.parts.total} entregas dele prontas`);
   if (a.cut) lines.push("Leitura das sub-issues cortada (árvore funda ou grande demais, ou sub-issues de outro repositório): a contagem de partes pode estar abaixo do real");
   if (a.decision.reason === "board_development") {
     lines.push(`Sem commits nem PR até ${formatSaoPaulo(new Date(end - 60_000).toISOString())}: o quadro diz Development, mas ainda não há código`);

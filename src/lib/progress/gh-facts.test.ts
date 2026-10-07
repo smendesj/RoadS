@@ -481,6 +481,24 @@ test("review follow-ups, chore and test labels are internal; a feature label kee
   assert.deepEqual(out.entries.map((e) => [e.issue, e.status]), [[904, "em_validacao"]]);
 });
 
+test("an issue already broken into parts is real work, even if its body names a review or it carries a chore label", () => {
+  const born = (hour: number) => ({ createdAt: `2026-03-09T0${hour}:00:00-03:00` }); // hours apart: no batch
+  const out = facts({
+    issues: [
+      issue(930, { assignees: [], body: "PRD: achado A1 da revisão independente do PR 12.", ...born(1), ...closedIn("2026-03-10T10:00:00-03:00") }),
+      issue(931, { parent: 930, ...born(2), ...closedIn("2026-03-10T09:00:00-03:00") }),
+      issue(932, { assignees: [], labels: ["type:chore"], ...born(3), ...closedIn("2026-03-10T10:00:00-03:00") }),
+      issue(933, { parent: 932, ...born(4), ...closedIn("2026-03-10T09:00:00-03:00") }),
+      // The same texts on a small stray ticket (no parts) stay internal.
+      issue(934, { assignees: [], body: "PRD: achado A1 da revisão independente do PR 12.", ...born(5) }),
+      issue(935, { assignees: [], labels: ["type:chore"], ...born(6) }),
+    ],
+    projectItems: [board(930, "Done"), board(932, "Done")],
+  });
+  assert.deepEqual(out.entries.map((e) => e.issue), [930, 932]);
+  assert.deepEqual(out.internal.items.map((i) => i.ref), ["#934", "#935"]);
+});
+
 test("an issue on the sprint board is real work even if it carries a chore label", () => {
   const out = facts({
     issues: [issue(910, { labels: ["type:chore"] })],
@@ -606,4 +624,117 @@ test("entries come out in issue order with the stable id the edits are stored un
   assert.deepEqual(out.entries.map((e) => e.id), ["gc-10", "gc-20", "gc-30"]);
   assert.equal(out.scope, "GeoCloud");
   assert.deepEqual(out.window, WINDOW);
+});
+
+/* ---------- Epics are groupers, not deliveries ---------- */
+
+const epic = (number: number, over: Partial<GhIssue> = {}): GhIssue => issue(number, { title: `Epic ${number}`, labels: ["type:epic"], createdAt: OLD, ...over });
+const part = (number: number, parent: number, over: Partial<GhIssue> = {}): GhIssue => issue(number, { parent, createdAt: OLD, ...over });
+
+/**
+ * 1000 (epic) > 1010 (epic) > 1020 (epic) > three deliveries and an old one:
+ *   1021 a leaf closed in the window, with its PR; 1022 has parts, one of them has a part (PR on the grandchild);
+ *   1023 waits on the sprint board; 1024 was delivered long before the window.
+ */
+function epicTree(over: Partial<FactsInput> = {}) {
+  return facts({
+    issues: [
+      epic(1000),
+      epic(1010, { parent: 1000 }),
+      epic(1020, { parent: 1010 }),
+      part(1021, 1020, closedIn("2026-03-10T10:00:00-03:00")),
+      part(1022, 1020),
+      part(1023, 1020),
+      part(1024, 1020, closedIn("2026-03-02T10:00:00-03:00")),
+      part(1031, 1022),
+      part(1032, 1022, closedIn("2026-03-10T09:00:00-03:00")),
+      part(1033, 1022),
+      part(1041, 1031, closedIn("2026-03-10T11:00:00-03:00")),
+      issue(1100, { createdAt: OLD }), // an issue with no epic above it stays its own delivery
+    ],
+    prs: [pr(2021, { title: "Entrega (#1021)" }), pr(2041, { title: "Parte (#1041)", mergedAt: "2026-03-10T12:00:00-03:00" })],
+    projectItems: [board(1010, "Development"), board(1023, "Development"), board(1100, "Development")],
+    ...over,
+  });
+}
+
+test("an epic is never a delivery: each work root under it is, with the rules of any other issue", () => {
+  const out = epicTree();
+  assert.deepEqual(out.entries.map((e) => [e.issue, e.status]), [[1021, "concluido"], [1022, "em_andamento"], [1023, "proximo"], [1100, "proximo"]]);
+  assert.equal(out.ignored.epics, 3); // 1000, 1010 (on the sprint board and all) and 1020
+  assert.equal(out.ignored.children, 4); // 1031, 1032, 1033 and 1041 hang from a delivery
+  assert.equal(out.ignored.quiet, 1); // 1024: delivered before the window, nothing since
+});
+
+test("a work root takes the parts, the PRs and the closures of its own subtree, at any depth", () => {
+  const [one, two] = epicTree().entries;
+  assert.equal(one.subIssues, null);
+  assert.equal("slices" in one, false);
+  assert.deepEqual(two.subIssues, { total: 3, done: 2 }); // 1041, 1032 and 1033
+  assert.deepEqual(two.slices, {
+    closed: [
+      { title: "Funcionalidade 1032", closedAt: "2026-03-10T09:00:00-03:00" },
+      { title: "Funcionalidade 1041", closedAt: "2026-03-10T11:00:00-03:00" },
+    ],
+    blocked: [],
+  });
+  assert.ok(two.sources.includes(`https://github.com/${REPO}/pull/2041`) && !two.sources.includes(`https://github.com/${REPO}/pull/2021`));
+  assert.ok(!one.sources.includes(`https://github.com/${REPO}/pull/2041`));
+});
+
+test("a delivery names the epics above it: the closest one with its parts, and the whole chain from the outermost", () => {
+  const [one, two, , plain] = epicTree().entries;
+  const chain = [{ issue: 1000, title: "Epic 1000" }, { issue: 1010, title: "Epic 1010" }, { issue: 1020, title: "Epic 1020" }];
+  assert.deepEqual(one.epicPath, chain);
+  assert.deepEqual(one.epic, { issue: 1020, title: "Epic 1020", parts: { total: 4, done: 2 } }); // 1021 and 1024 done, 1022 and 1023 not
+  assert.deepEqual(two.epic, one.epic);
+  assert.equal("epic" in plain || "epicPath" in plain, false);
+});
+
+test("the parts of an epic are its deliveries: a cancelled one is no part, and one under another epic counts", () => {
+  const out = facts({
+    issues: [
+      epic(1300),
+      epic(1301, { parent: 1300 }),
+      part(1302, 1300, closedIn("2026-03-10T10:00:00-03:00")),
+      part(1303, 1300, { state: "closed", stateReason: "not_planned", closedAt: "2026-03-09T10:00:00-03:00" }),
+      part(1304, 1301),
+      part(1305, 1301, closedIn("2026-03-10T10:00:00-03:00")),
+    ],
+    prs: [pr(2302, { title: "Entrega (#1302)" })],
+    projectItems: [board(1304, "Development")],
+  });
+  assert.deepEqual(out.entries.map((e) => [e.issue, e.epic?.issue, e.epic?.parts]), [
+    [1302, 1300, { total: 3, done: 2 }], // 1302, 1304 and 1305 under 1300 through 1301; 1303 was cancelled
+    [1304, 1301, { total: 2, done: 1 }],
+    [1305, 1301, { total: 2, done: 1 }],
+  ]);
+  assert.equal(out.ignored.epics, 2);
+});
+
+test("an epic below a delivery is just one more part of it, and an epic with nothing in it is only counted", () => {
+  const out = facts({
+    issues: [issue(1400, { createdAt: OLD }), epic(1401, { parent: 1400 }), part(1402, 1401, closedIn("2026-03-10T10:00:00-03:00")), epic(1500)],
+    projectItems: [board(1400, "Development")],
+  });
+  assert.deepEqual(out.entries.map((e) => [e.issue, e.subIssues]), [[1400, { total: 1, done: 1 }]]);
+  assert.equal(out.ignored.epics, 1); // 1500; 1401 is inside a delivery
+  assert.equal(out.ignored.children, 2);
+});
+
+test("the local hide list reaches the deliveries under an epic it names, by number or by title", () => {
+  for (const hide of [{ issues: [1000], patterns: [] }, { issues: [], patterns: ["^epic 1010$"] }]) {
+    const out = epicTree({ hide });
+    assert.deepEqual(out.entries.map((e) => e.issue), [1100], JSON.stringify(hide));
+    assert.deepEqual(out.internal.items.filter((i) => i.ref.startsWith("#")).map((i) => [i.ref, i.reason]), [["#1021", "lista local (hide.json)"], ["#1022", "lista local (hide.json)"]]);
+  }
+});
+
+test("a PR that cites only an epic belongs to no delivery: it is listed as internal, not lost", () => {
+  const out = epicTree({
+    prs: [pr(2021, { title: "Entrega (#1021)" }), pr(2999, { title: "Integra o passo (#1010)" }), pr(2998, { title: "Entrega e epic (#1010) (#1021)", createdAt: "2026-03-09T12:00:00-03:00", mergedAt: "2026-03-09T13:00:00-03:00" })],
+  });
+  const internal = out.internal.items.filter((i) => i.ref.startsWith("PR"));
+  assert.deepEqual(internal.map((i) => [i.ref, /epic/i.test(i.reason)]), [["PR #2999", true]]);
+  assert.ok(out.entries[0].sources.includes(`https://github.com/${REPO}/pull/2998`)); // it also cites 1021: that one is a delivery PR
 });

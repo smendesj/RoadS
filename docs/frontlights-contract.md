@@ -236,15 +236,30 @@ o plugin lê para escrever os textos. Entra aqui porque o plugin depende de cada
 campo novo opcional é aditivo. O Frontlights 0.24.0 é o que passa a usar os campos abaixo; quem não os conhece os
 ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada entrada seguem como eram.
 
-- **A família.** Uma entrega (`entries[]`) é uma issue **sem pai**. Suas sub-issues, **em qualquer profundidade**,
+- **A entrega é a raiz de trabalho; o epic só agrupa.** Uma issue com o rótulo `type:epic` **nunca é uma entrega**
+  (não vira entrada, não pede print). A entrega (`entries[]`) é a issue **mais alta que não é epic**: para toda issue com
+  atividade no período, o ancestral mais alto que não é epic (ela mesma, se não há epic acima). Uma issue sem epic acima
+  segue sendo a própria entrega. Um epic dentro de uma entrega é só mais uma parte dela. Todas as regras abaixo valem
+  para a subárvore de cada entrega, e `hide.json` por número ou título de um epic esconde as entregas sob ele.
+- **A família.** As sub-issues de uma entrega, **em qualquer profundidade**,
   são lidas e contam para ela: um PR ou commit que cita só uma neta é trabalho da capa, e o fechamento de uma parte
   (como concluída) é atividade da capa. Criar sub-issues não é atividade (é planejamento). Uma sub-issue tocada no
-  período traz a capa junto, mesmo parada e fora da coluna Development. Quem monta: `src/lib/progress/gh-client.ts`
-  (a leitura, com limites) e `gh-facts.ts` (a conta).
+  período traz a entrega junto (e os epics acima dela), mesmo parada e fora da coluna Development. Quem monta:
+  `src/lib/progress/gh-client.ts` (a leitura, com limites) e `gh-facts.ts` (a conta). A leitura percorre os epics
+  (um pedido cada, para achar as entregas) e só desce até as partes nas entregas com novidade (tocadas no período, na
+  coluna Development/Blocker ou com parte tocada); as demais ficam só com nome e estado, o bastante para o epic contá-las.
+  As regras de rótulo (`chore`, `infra`, teste) e de corpo ("pendência de revisão") são para tickets avulsos: uma issue
+  já decomposta em partes é trabalho de verdade e não é tratada como interna por elas.
 - **`entries[].subIssues`** `{ total, done }` (ou `null` sem sub-issues) conta as **folhas da árvore inteira**: uma
   sub-issue com filhas conta pelas filhas, nunca por ela mesma. Uma folha fechada como **não planejada** não é parte:
   fica fora de `total` e de `done`. Até aqui o campo contava só os filhos diretos; o formato é o mesmo, o que ele conta
   mudou.
+- **`entries[].epic`** `{ issue, title, parts: { total, done } }` e **`entries[].epicPath`** `[{ issue, title }]`
+  (opcionais, só em entrega com epic acima; só no `facts.json`, o rascunho montado nunca os leva). `epic` é o epic
+  **mais próximo**; `parts` conta as **entregas** sob ele (através de epics intermediários, não as folhas): quantas
+  há e quantas estão fechadas como concluídas, sem contar as canceladas. `epicPath` traz a cadeia inteira, do mais
+  externo ao mais próximo, com o título do GitHub, para o texto agrupar ("MVP · 1A: …"). Um PR que cita **só** epics
+  não pertence a entrega nenhuma: entra em `internal` com a razão "PR que cita só um epic (agrupador)".
 - **A situação** continua só do coletor. Uma entrega com **parte fechada** (como concluída) até o fim do período
   nunca fica `proximo`, mesmo sem PR nem commit: a parte entregue é trabalho feito.
 - **`entries[].slices`** (opcional, só em entrega que tem sub-issues): evidência para quem escreve. **Só existe no
@@ -256,15 +271,16 @@ ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada en
     Blocker do Project #7; um `blocker` solto não vale, pode ser "bloqueia a release") **ou** cujo cartão no
     Project estava em Blocker no fim do período. Sub-issue em geral não tem cartão, então na prática é o rótulo. A
     relação "bloqueada por" do GitHub não é lida.
+- **`ignored.epics`** (número): quantos epics foram tratados como agrupador (nenhum é entrada).
 - **`ignored.cut`** (número): quantas issues tinham sub-issues que o GitHub conta e o coletor **não leu** (árvore
-  mais funda que 6 níveis abaixo da capa, mais de 400 sub-issues sob uma capa, ou sub-issues de outro repositório). A
-  leitura não estoura em silêncio: a entrega afetada traz uma linha de `evidence` ("Leitura das sub-issues
-  cortada…") e o coletor imprime um aviso. Sob uma issue cortada, o `subIssues` conta o que o GitHub diz que há
-  embaixo dela, e o que está mais fundo fica de fora: **a contagem pode estar abaixo do real**.
+  mais funda que 6 níveis abaixo da entrega, mais de 400 sub-issues sob uma entrega, ou sub-issues de outro
+  repositório). A leitura não estoura em silêncio: a entrega afetada traz uma linha de `evidence` ("Leitura das
+  sub-issues cortada…") e o coletor imprime um aviso. Sob uma issue cortada, o `subIssues` conta o que o GitHub diz
+  que há embaixo dela, e o que está mais fundo fica de fora: **a contagem pode estar abaixo do real**.
 - O e-mail e a visão semanal mostram, sozinhos, "X de Y partes prontas" abaixo da frase da entrega (nunca para
   `proximo`, nunca com número de issue). Quem escreve o texto não repete a contagem (`docs/progress-draft.md`).
-- **Prints:** o print de uma parte entra em `captions.json` com o número da **entrega** (a capa); o RoadS não aceita
-  número de sub-issue ali.
+- **Prints:** o print de uma parte entra em `captions.json` com o número da **entrega** (a raiz de trabalho, nunca o
+  de um epic); o RoadS não aceita número de sub-issue ali.
 
 ## 6. O registro das chamadas
 
@@ -322,3 +338,8 @@ repositório, `roads-script/push` e `roads-script/attach`.
   atividade da capa, uma capa com parte entregue nunca fica `proximo`, e há dois campos novos opcionais:
   `entries[].slices` (`closed` e `blocked`, só no `facts.json`) e `ignored.cut`. E-mail e visão semanal mostram "X de
   Y partes prontas". Nenhuma rota mudou e a `schemaVersion` segue 1.
+- **2026-10-07 (aditivo, mesmo dia):** `type:epic` passa a ser agrupador, não entrega. A entrega é a raiz de trabalho
+  (o ancestral mais alto que não é epic), com as mesmas regras sobre a sua subárvore; `entries[].epic` e
+  `entries[].epicPath` (só no `facts.json`) dão o epic como cabeçalho, e `ignored.epics` conta os agrupadores. Muda o
+  que é uma entrada: antes, só a issue sem pai; agora, cada raiz de trabalho sob um epic. Uma issue já decomposta em
+  partes deixa de ser tida por interna só pelo rótulo ou pelo corpo.

@@ -4,6 +4,7 @@
 // header: errors are explained in Portuguese and never echo the token, the URL or what GitHub answered.
 import type { ReportWindow } from "../progress-report.ts";
 import { MAIN_BRANCH } from "./gh-status.ts";
+import { isEpic } from "./gh-facts.ts";
 import type { FactsInput, GhCommit, GhIssue, GhPr, GhProjectItem, GhTimeline } from "./gh-facts.ts";
 
 const API = "https://api.github.com";
@@ -14,13 +15,16 @@ const PARALLEL = 4;
 const PR_CHUNK = 20;
 
 /**
- * How far the tree of sub-issues is followed: `depth` levels below an issue that has no parent (GitHub allows
- * eight levels in all, and a hundred sub-issues under each), and `family` sub-issues read under one such issue
- * (each of them costs a request). Past either limit the rest is NOT read, and the issue that was cut keeps what
- * GitHub says it has, so buildFacts shows the gap in `ignored.cut` and in the entry's evidence. Both leave about
- * twice the room the largest umbrella of the product takes today, and the tree only grows.
+ * How far the tree of sub-issues is followed below a DELIVERY (the highest issue that is not an epic: an epic only
+ * groups, see isEpic): `depth` levels below it and `family` sub-issues read under it (GitHub allows a hundred under
+ * each issue, and each one read costs a request). The epics above a delivery are read to find it and cost it
+ * nothing. Past either limit the rest is NOT read, and the issue that was cut keeps what GitHub says it has, so
+ * buildFacts shows the gap in `ignored.cut` and in the entry's evidence. Both leave about twice the room the
+ * largest delivery of the product takes today, and the tree only grows.
  */
 export const TREE_LIMITS = { depth: 6, family: 400 } as const;
+/** GitHub's own limit on how deep sub-issues nest: no issue has more than seven above it. */
+const MAX_NESTING = 8;
 
 export type GithubErrorKind = "token" | "rate_limit" | "forbidden" | "not_found" | "server" | "network" | "graphql" | "http" | "parse" | "read_only";
 
@@ -475,10 +479,10 @@ export async function collectGithubData(
     if (!one.pull_request) issues.set(one.number, issueFromRest(one, repository));
   }
 
-  // A sub-issue touched in the window brings the issues above it, quiet or not: the umbrella is the entry, and
-  // its parts (this one among them) are what the report counts.
+  // A sub-issue touched in the window brings the issues above it, quiet or not: the delivery is the entry, and
+  // its parts (this one among them) are what the report counts; the epics above it are only its header.
   const asked = new Set<number>();
-  for (let hop = 0; hop < TREE_LIMITS.depth; hop++) {
+  for (let hop = 0; hop < MAX_NESTING - 1; hop++) {
     const above = [...new Set([...issues.values()].map((i) => i.parent))].filter((p): p is number => p != null && !issues.has(p) && !asked.has(p));
     if (above.length === 0) break;
     await mapPool(above, PARALLEL, async (n) => {
@@ -488,27 +492,36 @@ export async function collectGithubData(
     });
   }
 
-  // Where an issue hangs: the issue without a parent above it, and how many levels down it is.
-  const place = (n: number): { root: number; depth: number } => {
-    let root = n;
-    let depth = 0;
+  // Where an issue hangs inside a delivery: the highest issue above it (or itself) that is not an epic, and how many
+  // levels down it is. Null for an epic with nothing but epics above it: it only groups.
+  const placeOf = (n: number): { root: number; below: number } | null => {
+    const chain = [n];
     const seen = new Set([n]);
-    for (let p = issues.get(root)?.parent; p != null && issues.has(p) && !seen.has(p); p = issues.get(root)?.parent) {
-      root = p;
+    for (let p = issues.get(n)?.parent; p != null && issues.has(p) && !seen.has(p); p = issues.get(p)?.parent) {
+      chain.push(p);
       seen.add(p);
-      depth++;
     }
-    return { root, depth };
+    let top = -1;
+    chain.forEach((m, k) => {
+      if (!isEpic(issues.get(m) as GhIssue)) top = k;
+    });
+    return top < 0 ? null : { root: chain[top], below: top };
   };
+  // The deliveries that have news (touched in the window, on the sprint board, or with a touched part below): the
+  // others are known by name and state, so an epic can count its parts, but are not read.
+  const wanted = new Set<number>();
   const familySize = new Map<number, number>();
   for (const i of issues.values()) {
-    const { root } = place(i.number);
-    if (root !== i.number) familySize.set(root, (familySize.get(root) ?? 0) + 1);
+    const place = placeOf(i.number);
+    if (!place) continue;
+    wanted.add(place.root);
+    if (place.below > 0) familySize.set(place.root, (familySize.get(place.root) ?? 0) + 1);
   }
 
-  // Every issue is read (its timeline is where its PRs and commits are), level by level: what the list showed
-  // first, then the sub-issues each one names, and theirs. An issue's sub-issues come in whole or not at all
-  // when they would pass TREE_LIMITS; what GitHub counts under it stays on the issue, so the gap shows.
+  // Every issue that matters is read (its timeline is where its PRs and commits are), level by level: what the list
+  // showed first, then the sub-issues each one names, and theirs. Inside a delivery an issue's sub-issues come in
+  // whole or not at all when they would pass TREE_LIMITS; what GitHub counts under it stays on the issue, so the gap
+  // shows. An epic names its deliveries, all of them, and only those with news are read down.
   const timelines = new Map<number, GhTimeline>();
   const details = new Map<number, IssueDetail>();
   const read = async (n: number): Promise<void> => {
@@ -530,12 +543,15 @@ export async function collectGithubData(
       const detail = details.get(n) as IssueDetail;
       if (issue.subIssues === null && detail.childSummary) issue.subIssues = detail.childSummary;
       const fresh = detail.children.filter((k) => !issues.has(k.number));
-      const { root, depth } = place(n);
-      if (fresh.length === 0 || depth >= TREE_LIMITS.depth || (familySize.get(root) ?? 0) + fresh.length > TREE_LIMITS.family) continue;
-      familySize.set(root, (familySize.get(root) ?? 0) + fresh.length);
+      if (fresh.length === 0) continue;
+      const place = placeOf(n);
+      if (place) {
+        if (place.below >= TREE_LIMITS.depth || (familySize.get(place.root) ?? 0) + fresh.length > TREE_LIMITS.family) continue;
+        familySize.set(place.root, (familySize.get(place.root) ?? 0) + fresh.length);
+      }
       for (const kid of fresh) {
         issues.set(kid.number, kid);
-        next.push(kid.number);
+        if (place || isEpic(kid) || wanted.has(kid.number)) next.push(kid.number);
       }
     }
     level = next;

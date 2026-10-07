@@ -415,3 +415,48 @@ test("a tree is collected with GET requests and GraphQL queries only, token in t
     assert.ok(!call.url.href.includes(TOKEN) && !JSON.stringify(call.body ?? {}).includes(TOKEN));
   }
 });
+
+/* ---------- Epics above the deliveries ---------- */
+
+const EPIC = { labels: [{ name: "type:epic" }] };
+const upTo = (n: number) => ({ parent_issue_url: `https://api.github.com/repos/${REPO}/issues/${n}` });
+
+test("an epic is read to find its deliveries, but only the deliveries with news are read down to their parts", async () => {
+  const gh = treeGithub({
+    listed: [oldIssue(2001, { state: "closed", state_reason: "completed", closed_at: "2026-03-10T12:00:00Z", ...upTo(2000) })],
+    rest: { 2000: oldIssue(2000, EPIC) },
+    kids: {
+      2000: [closedKid(2001, "2026-03-10T12:00:00Z"), { number: 2002 }, closedKid(2003, "2026-02-01T12:00:00Z")],
+      2001: [closedKid(2011, "2026-03-10T12:00:00Z")],
+      2002: [{ number: 2012 }],
+    },
+  });
+  const { facts } = await factsOf(gh);
+  assert.deepEqual([...gh.reads].sort((a, b) => a - b), [2000, 2001, 2011]); // not 2002, 2003 or 2012: nothing happened there
+  assert.deepEqual(facts.entries.map((e) => e.issue), [2001]);
+  assert.deepEqual(facts.entries[0].epic, { issue: 2000, title: "Guarda-chuva 2000", parts: { total: 3, done: 2 } }); // 2002 is still known, and open
+  assert.equal(facts.ignored.epics, 1);
+  assert.equal(facts.ignored.quiet, 2); // 2002 and 2003
+  assert.equal(facts.ignored.cut, 0);
+});
+
+test("the epics above a delivery cost it neither depth nor size: its own parts keep the whole allowance", async () => {
+  const above = Array.from({ length: TREE_LIMITS.depth }, (_, k) => 3000 + k); // as many epics as parts levels are allowed
+  const work = 3100;
+  const chain = Object.fromEntries(Array.from({ length: TREE_LIMITS.depth + 3 }, (_, k) => [work + k, [{ number: work + k + 1 }]]));
+  const gh = treeGithub({
+    listed: [oldIssue(work, { created_at: "2026-03-09T12:00:00Z", ...upTo(above[above.length - 1]) })],
+    rest: Object.fromEntries(above.map((n, k) => [n, oldIssue(n, { ...EPIC, ...(k > 0 ? upTo(n - 1) : {}) })])),
+    kids: {
+      ...Object.fromEntries(above.map((n, k) => [n, [k + 1 < above.length ? { number: above[k + 1], labels: ["type:epic"] } : { number: work }]])),
+      ...chain,
+    },
+    board: [boardNode(work, "Development")],
+  });
+  const { facts } = await factsOf(gh);
+  const reads = [...gh.reads].sort((a, b) => a - b);
+  assert.deepEqual(reads, [...above, ...Array.from({ length: TREE_LIMITS.depth + 1 }, (_, k) => work + k)]);
+  assert.deepEqual(facts.entries.map((e) => [e.issue, e.epicPath?.length, e.epic?.issue]), [[work, above.length, above[above.length - 1]]]);
+  assert.equal(facts.ignored.cut, 1); // the part at the last level read still has one below it
+  assert.equal(facts.ignored.epics, above.length);
+});
