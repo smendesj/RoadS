@@ -174,7 +174,7 @@ test("a draft of another period waiting in RoadS becomes a plain message that na
   });
   assert.equal(await w.run("--draft", "rascunho.json"), 1);
   assert.match(w.output(), /Já existe no RoadS um rascunho de outro período \(02\/03\/2026 00:00 a 04\/03\/2026 20:05\)/);
-  assert.match(w.output(), /Marque o resumo anterior como enviado no RoadS, ou descarte-o, antes de enviar este/);
+  assert.match(w.output(), /Marque o resumo anterior como enviado no RoadS antes de enviar este/);
   assert.match(w.output(), /nada foi alterado/);
   assert.doesNotMatch(w.output(), /other_draft_pending/);
 

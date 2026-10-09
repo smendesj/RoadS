@@ -264,7 +264,7 @@ export function otherDraftMessage(draft: unknown, status: string): string {
       : null;
   return (
     `Já existe no RoadS um rascunho de outro período${range ? ` (${range})` : ""} (${status}); nada foi alterado. ` +
-    "Marque o resumo anterior como enviado no RoadS, ou descarte-o, antes de enviar este."
+    "Marque o resumo anterior como enviado no RoadS antes de enviar este."
   );
 }
 
