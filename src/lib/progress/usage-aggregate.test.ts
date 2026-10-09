@@ -388,6 +388,61 @@ test("a window that makes no sense is refused", () => {
   assert.throws(() => run([], { from: "2026-09-30", to: "2026-09-28" }), /to/);
 });
 
+/* ---------- a window cut at instants (--start/--end) ---------- */
+
+// The previous report was collected on 28/09 at 20:05 São Paulo; this one on 30/09 at 20:10.
+const cut = (list: UsageEvent[], extra: Partial<UsageOptions> = {}) =>
+  buildUsage(list, { start: "2026-09-28T23:05:00Z", end: "2026-09-30T20:10:00-03:00", now: NOW, ...extra });
+
+/** A typed request and its answer, a minute apart, at `hhmm` of `day` (São Paulo). */
+const exchange = (id: string, hhmm: string, day: string, usage: [number, number, number, number] = [1, 1, 1, 1]) => [
+  userLine({ at: at(hhmm, day) }),
+  assistantLine({ at: at(hhmm, day, "30"), id, usage }),
+];
+
+test("with instants the first and the last day are partial: only what is inside the window counts on them", () => {
+  const list = events(
+    A,
+    ...exchange("before", "19:00", "2026-09-28", [100, 100, 100, 100]), // the previous report's
+    ...exchange("start", "20:05", "2026-09-28"), // the request at 20:05:00 is the first instant in
+    ...exchange("evening", "20:30", "2026-09-28"),
+    ...exchange("last", "20:09", "2026-09-30"), // 20:09:00 and 20:09:30: before the 20:10 end
+    ...exchange("after", "20:10", "2026-09-30", [100, 100, 100, 100]) // the next report's
+  );
+  const { usage } = cut(list);
+  assert.deepEqual(usage.window, { start: "2026-09-28T20:05:00-03:00", end: "2026-09-30T20:10:00-03:00" });
+  // A day with nothing inside the window still prints, with zeros.
+  assert.deepEqual(usage.days.map((d) => [d.date, d.messages, d.humanPrompts]), [["2026-09-28", 4, 2], ["2026-09-29", 0, 0], ["2026-09-30", 2, 1]]);
+  assert.equal(usage.days[0].firstPromptAt, new Date(at("20:05")).toISOString());
+  assert.equal(usage.days[0].lastPromptAt, new Date(at("20:30")).toISOString());
+  assert.equal(usage.days[0].sessions[0].start, new Date(at("20:05")).toISOString());
+  assert.equal(usage.days[2].sessions[0].end, new Date(at("20:09", "2026-09-30", "30")).toISOString());
+  // Only the three answers inside the window: neither 19:00 nor 20:10 brings its 400 tokens.
+  assert.deepEqual(usage.totals.tokens, { input: 3, output: 3, cacheRead: 3, cacheWrite: 3 });
+  assert.equal(usage.totals.messages, 6);
+  assert.equal(usage.totals.activeDays, 2);
+  assert.equal(usage.days[0].hourly[19], 0);
+  assert.equal(usage.days[0].hourly[20], 4);
+});
+
+test("the same transcript read by whole days counts what the instants leave out", () => {
+  const list = events(A, ...exchange("before", "19:00", "2026-09-28"), ...exchange("evening", "20:30", "2026-09-28"));
+  assert.equal(run(list).usage.days[0].messages, 4);
+  assert.equal(cut(list).usage.days[0].messages, 2);
+});
+
+test("a window that ends right at midnight has no partial day after it", () => {
+  const { usage } = buildUsage([], { start: "2026-09-28T20:05:00-03:00", end: "2026-09-30T00:00:00-03:00", now: NOW });
+  assert.deepEqual(usage.days.map((d) => d.date), ["2026-09-28", "2026-09-29"]);
+});
+
+test("instants without offset, an end not after the start, or both ways of naming the period are refused", () => {
+  assert.throws(() => cut([], { start: "2026-09-28T20:05:00" }), /--start: instante inválido/);
+  assert.throws(() => cut([], { end: "2026-09-28T20:05:00-03:00" }), /--end precisa ser depois de --start/);
+  assert.throws(() => cut([], { from: "2026-09-28", to: "2026-09-29" }), /não os dois juntos/);
+  assert.throws(() => buildUsage([], { start: "2026-09-28T20:05:00-03:00", now: NOW }), /--start e --end andam juntos/);
+});
+
 /* ---------- several connected projects ---------- */
 
 const PRODUCTS: ProductRule[] = [

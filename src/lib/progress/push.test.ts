@@ -141,6 +141,7 @@ test("the secret never shows up in anything it prints", async () => {
     { status: 400, body: { error: "content.window.end: o fim vem antes do início" } },
     { status: 401, body: { error: "unauthorized" } },
     { status: 409, body: { error: "period_already_sent" } },
+    { status: 409, body: { error: "other_draft_pending", draft: { period_start: "2026-03-02T03:00:00.000Z", period_end: "2026-03-04T03:00:00.000Z" } } },
     { status: 500, body: { error: "internal_error" } },
     { status: 502 },
     "network-error",
@@ -165,6 +166,22 @@ test("a period that was already sent becomes a plain message in Portuguese", asy
   assert.equal(code, 1);
   assert.match(w.output(), /já foi enviado/i);
   assert.doesNotMatch(w.output(), /period_already_sent/);
+});
+
+test("a draft of another period waiting in RoadS becomes a plain message that names that period", async () => {
+  const w = world({
+    reply: { status: 409, body: { error: "other_draft_pending", draft: { period_start: "2026-03-02T03:00:00.000Z", period_end: "2026-03-04T23:05:12.345+00:00" } } },
+  });
+  assert.equal(await w.run("--draft", "rascunho.json"), 1);
+  assert.match(w.output(), /Já existe no RoadS um rascunho de outro período \(02\/03\/2026 00:00 a 04\/03\/2026 20:05\)/);
+  assert.match(w.output(), /Marque o resumo anterior como enviado no RoadS, ou descarte-o, antes de enviar este/);
+  assert.match(w.output(), /nada foi alterado/);
+  assert.doesNotMatch(w.output(), /other_draft_pending/);
+
+  // Without a readable period the message still says what to do.
+  const bare = world({ reply: { status: 409, body: { error: "other_draft_pending", draft: { period_start: "ontem" } } } });
+  assert.equal(await bare.run("--draft", "rascunho.json"), 1);
+  assert.match(bare.output(), /rascunho de outro período \(HTTP 409\)/);
 });
 
 test("the other answers of the server are explained too", async () => {

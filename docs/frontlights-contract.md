@@ -207,12 +207,17 @@ que atravessa a porta. Quem faz o envio é o plugin, por `scripts/progress/push.
 `{ "schemaVersion": 1, "produto": "GeoCloud", "content": { … } }` (`schemaVersion` e `produto` opcionais; o
 produto só pode ser `GeoCloud`). Até 4 MB.
 
-- `200 { "schemaVersion": 1, "id": "…", "created": true, "url": "…" }`. Enviar de novo **atualiza** o `content` do
-  rascunho e mantém as edições do usuário e o link das imagens; um novo envio invalida a conferência dos números.
+- `200 { "schemaVersion": 1, "id": "…", "created": true, "url": "…" }`. Enviar de novo (com o mesmo início de período)
+  **atualiza** o `content` do rascunho e mantém as edições do usuário e o link das imagens; um novo envio invalida a conferência dos números.
 - `400 { "error": "…" }`: o rascunho é inválido (a mensagem diz o **campo**, nunca o valor; a exceção são os
   números das issues de entregas sem print) ou fala outra `schemaVersion`.
 - `409 { "error": "period_already_sent" | "concurrent_push" }`: o período já foi enviado e está congelado, ou dois
   envios se cruzaram.
+- `409 { "error": "other_draft_pending", "draft": { "period_start": "…", "period_end": "…" } }`: já existe um
+  rascunho de **outro** período (o início, como instante, é diferente do `content.window.start` enviado). Nada é
+  alterado: o rascunho de outro resumo nunca é sobrescrito. `draft` traz o período desse rascunho (instantes UTC,
+  como o banco guarda) para quem envia dizer qual resolver antes: marcá-lo como enviado no RoadS (ou descartá-lo).
+  O mesmo início é um reenvio do mesmo resumo (o fim pode ter avançado) e atualiza o rascunho como sempre.
 
 ### `POST /progress-report/shots`
 
@@ -235,6 +240,16 @@ Não é rota: é o arquivo que o coletor (`scripts/progress/github.ts`) grava em
 o plugin lê para escrever os textos. Entra aqui porque o plugin depende de cada campo. Valem as regras da seção 2:
 campo novo opcional é aditivo. O Frontlights 0.24.0 é o que passa a usar os campos abaixo; quem não os conhece os
 ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada entrada seguem como eram.
+
+- **O período por instante.** Os dois coletores (`scripts/progress/github.ts` e `scripts/progress/usage.ts`) aceitam,
+  além de `--from AAAA-MM-DD --to AAAA-MM-DD` (dias de São Paulo, o `--to` incluído, como sempre), `--start <instante>
+  --end <instante>`: ISO-8601 com deslocamento explícito ou `Z` (por exemplo `2026-10-07T20:05:12-03:00`), período
+  semiaberto `[start, end)`. As duas formas juntas, só uma de `--start`/`--end`, instante sem deslocamento ou inválido,
+  e `--end` que não vem depois de `--start` são recusados. O `window` de `facts.json` e de `usage.json` é exatamente
+  esse período, escrito com `-03:00` (os milissegundos ficam quando há). Cada resumo começa no instante em que o
+  anterior foi coletado: o `--start` é o `period_end` do último enviado (o `window.start` do `GET`), então o trabalho
+  feito num dia de envio depois da coleta entra no resumo seguinte. Todo filtro usa os instantes; no `usage.json` o
+  primeiro e o último dia passam a ser parciais (contam só o que cai dentro do período).
 
 - **A entrega é a raiz de trabalho; o epic só agrupa.** Uma issue com o rótulo `type:epic` **nunca é uma entrega**
   (não vira entrada, não pede print). A entrega (`entries[]`) é a issue **mais alta que não é epic**: para toda issue com

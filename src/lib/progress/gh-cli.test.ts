@@ -132,6 +132,38 @@ test("wrong arguments are explained in Portuguese and nothing is sent to GitHub"
   }
 });
 
+test("--start/--end write exactly that window, with -03:00, and ask GitHub from that instant", async () => {
+  const h = harness();
+  const code = await runGithubCli(["--start", "2026-03-09T23:05:12.345Z", "--end", "2026-03-10T20:10:00-03:00"], h.deps);
+  assert.equal(code, 0, h.err.join("\n"));
+  assert.deepEqual(facts(h.written).window, { start: "2026-03-09T20:05:12.345-03:00", end: "2026-03-10T20:10:00-03:00" });
+  const issues = h.gh.urls.map((u) => new URL(u)).find((u) => u.pathname === `/repos/${REPO}/issues`);
+  assert.equal(issues?.searchParams.get("since"), "2026-03-09T23:05:12Z");
+  const commits = h.gh.urls.map((u) => new URL(u)).find((u) => u.pathname === `/repos/${REPO}/commits`);
+  assert.equal(commits?.searchParams.get("until"), "2026-03-10T23:10:00Z");
+  // The direct commit on main at 17:00 is before the 20:05 start: not this window's work.
+  assert.deepEqual(facts(h.written).gitWork, []);
+  assert.match(h.out.join("\n"), /de 09\/03\/2026 20:05 a 10\/03\/2026 20:10 \(o fim não entra\)/);
+});
+
+test("--start/--end with --from/--to, half a pair, an instant without offset or an end not after the start are refused", async () => {
+  const cases: [string[], RegExp][] = [
+    [["--from", "2026-03-09", "--to", "2026-03-10", "--start", "2026-03-09T20:05:00-03:00", "--end", "2026-03-10T20:00:00-03:00"], /não os dois juntos/],
+    [["--start", "2026-03-09T20:05:00-03:00"], /--start e --end andam juntos/],
+    [["--end", "2026-03-10T20:00:00-03:00"], /--start e --end andam juntos/],
+    [["--start", "2026-03-09T20:05:00", "--end", "2026-03-10T20:00:00-03:00"], /--start: instante inválido/],
+    [["--start", "2026-03-09T20:05:00-03:00", "--end", "2026-02-30T20:00:00-03:00"], /--end: instante inválido/],
+    [["--start", "2026-03-10T20:00:00-03:00", "--end", "2026-03-10T23:00:00Z"], /--end precisa ser depois de --start/],
+  ];
+  for (const [argv, expected] of cases) {
+    const h = harness();
+    assert.equal(await runGithubCli(argv, h.deps), 2, argv.join(" "));
+    assert.match(h.err.join("\n"), expected, argv.join(" "));
+    assert.equal(h.gh.urls.length, 0);
+    assert.equal(h.written.size, 0);
+  }
+});
+
 test("a missing token stops the run before any request", async () => {
   const h = harness({}, {});
   assert.equal(await runGithubCli(["--from", "2026-03-09", "--to", "2026-03-10"], h.deps), 1);

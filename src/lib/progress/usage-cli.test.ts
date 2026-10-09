@@ -221,6 +221,45 @@ test("a bad command line stops with a message in Portuguese and writes nothing",
   }
 });
 
+test("--start/--end cut the window at instants: usage.json carries exactly that window and only what is inside it", () => {
+  const fake = fakeClaudeDir();
+  try {
+    // The cut is at 09:02 on 28/09: the request at 09:00 and its answer at 09:01 belong to the previous report.
+    const r = run(fake.dir, ["--start", "2026-09-28T12:02:00Z", "--end", "2026-09-29T00:00:00-03:00", "--root", fake.root]);
+    assert.equal(r.code, 0, r.err);
+    const usage = readJson<UsageModel>(path.join(fake.dir, ".frontlights", "progress", "usage.json"));
+    assert.deepEqual(usage.window, { start: "2026-09-28T09:02:00-03:00", end: "2026-09-29T00:00:00-03:00" });
+    assert.deepEqual(usage.days.map((d) => d.date), ["2026-09-28"]);
+    // Left: the subagent's answer (09:02:30) and m2 (09:03); no typed request.
+    assert.deepEqual(usage.totals, { sessions: 1, messages: 2, humanPrompts: 0, activeDays: 1, tokens: { input: 6, output: 7, cacheRead: 53, cacheWrite: 4 } });
+    assert.equal(usage.days[0].firstPromptAt, null);
+    assert.match(r.out, /28\/09\/2026 09:02 a 29\/09\/2026 00:00 \(o fim não entra\)/);
+  } finally {
+    fake.cleanup();
+  }
+});
+
+test("--start/--end mixed with --from/--to, half a pair, or a bad instant stop the run with a clear message", () => {
+  const fake = fakeClaudeDir();
+  try {
+    const out = path.join(fake.dir, "out");
+    const cases: [string[], RegExp][] = [
+      [["--from", "2026-09-28", "--to", "2026-09-29", "--start", "2026-09-28T09:02:00-03:00", "--end", "2026-09-29T00:00:00-03:00"], /não os dois juntos/],
+      [["--start", "2026-09-28T09:02:00-03:00"], /--start e --end andam juntos/],
+      [["--start", "2026-09-28T09:02:00", "--end", "2026-09-29T00:00:00-03:00"], /--start: instante inválido/],
+      [["--start", "2026-09-28T09:02:00-03:00", "--end", "2026-09-28T09:02:00-03:00"], /--end precisa ser depois de --start/],
+    ];
+    for (const [args, expected] of cases) {
+      const r = run(fake.dir, [...args, "--root", fake.root, "--out", out]);
+      assert.equal(r.code, 2, `${args.join(" ")}\n${r.out}${r.err}`);
+      assert.match(r.err, expected, args.join(" "));
+    }
+    assert.throws(() => readdirSync(out), /ENOENT/, "nothing written");
+  } finally {
+    fake.cleanup();
+  }
+});
+
 /** A made-up ~/.claude with one session in each of three made-up projects, plus one of a fourth. */
 function threeProjectsDir(): { dir: string; root: string; out: string; cleanup: () => void } {
   const dir = mkdtempSync(path.join(tmpdir(), "usage-cli-3p-"));

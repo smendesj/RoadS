@@ -1,6 +1,7 @@
 // Collector of Claude usage for "Resumo para a diretoria".
 //
 //   node --experimental-strip-types scripts/progress/usage.ts --from 2026-09-28 --to 2026-09-30
+//   node --experimental-strip-types scripts/progress/usage.ts --start 2026-10-07T20:05:12-03:00 --end 2026-10-09T20:10:00-03:00
 //
 // Reads the local transcripts (READ ONLY, ~/.claude/projects/**/*.jsonl) and writes, in
 // .frontlights/progress/ (git-ignored): usage.json (a UsageModel), activity.json (the minutes with a
@@ -12,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { CountMethod } from "../../src/lib/progress-report.ts";
+import { choosePeriod, windowFromInstants } from "../../src/lib/progress/period.ts";
 import { buildUsage, cleanLabel } from "../../src/lib/progress/usage-aggregate.ts";
 import { formatUsageReport } from "../../src/lib/progress/usage-report.ts";
 import { GEOCLOUD_RULE, mergeOverrides, readOverrides, readProducts } from "../../src/lib/progress/usage-scope.ts";
@@ -23,8 +25,11 @@ const DAY_MS = 86_400_000;
 const HELP = `Uso do Claude para o resumo da diretoria (GeoCloud por padrão; vários projetos conectados via scope.json).
 
   node --experimental-strip-types scripts/progress/usage.ts --from AAAA-MM-DD --to AAAA-MM-DD [opções]
+  node --experimental-strip-types scripts/progress/usage.ts --start <instante> --end <instante> [opções]
 
   --from, --to      primeiro e último dia (São Paulo), os dois incluídos
+  --start, --end    instantes ISO com deslocamento (por exemplo 2026-10-07T20:05:12-03:00); --start entra no
+                    período, --end não; o primeiro e o último dia contam só o que cai dentro do período
   --method          real (padrão: cada resposta da API uma vez) ou stats (como o painel /stats)
   --include id      força uma sessão para dentro do escopo (8 primeiros caracteres do id; repetível)
   --exclude id      força uma sessão para fora do escopo (repetível)
@@ -38,7 +43,7 @@ scope.json também aceita "products": [{ "name": "...", "roots": ["C:/pasta"] },
 
 class CliError extends Error {}
 
-const VALUE_FLAGS = new Set(["from", "to", "method", "include", "exclude", "note", "label", "root", "out"]);
+const VALUE_FLAGS = new Set(["from", "to", "start", "end", "method", "include", "exclude", "note", "label", "root", "out"]);
 
 /** Errors of the person's own input (a file they wrote, an id they typed) stop the run with code 2. */
 function asCliError<T>(read: () => T): T {
@@ -100,10 +105,9 @@ function main(): void {
     return;
   }
   const one = (name: string): string | undefined => flags.get(name)?.[flags.get(name)!.length - 1];
-  const from = one("from");
-  const to = one("to");
-  if (!from) throw new CliError("--from é obrigatório (AAAA-MM-DD)");
-  if (!to) throw new CliError("--to é obrigatório (AAAA-MM-DD)");
+  const chosen = choosePeriod({ from: one("from"), to: one("to"), start: one("start"), end: one("end") });
+  if (!chosen.ok) throw new CliError(chosen.error);
+  const period = chosen.period;
   const method = (one("method") ?? "real") as CountMethod;
   if (method !== "real" && method !== "stats") throw new CliError("--method deve ser real ou stats");
 
@@ -127,17 +131,23 @@ function main(): void {
   // The title is set by the person, never written in the code: the option wins, config.json is the fallback.
   const label = cleanLabel(one("label")) ?? cleanLabel(readConfigLabel(path.join(outDir, "config.json")));
 
-  // Validate the dates before reading anything big: an unknown day is the most likely typo.
-  const windowStart = Date.parse(`${from}T00:00:00-03:00`);
-  if (Number.isNaN(windowStart)) throw new CliError(`--from: data inválida («${from}»); use AAAA-MM-DD`);
+  // Validate the period before reading anything big: an unknown day or a bad instant is the most likely typo.
+  let windowStart: number;
+  if (period.kind === "instants") {
+    const range = windowFromInstants(period.start, period.end);
+    if (!range.ok) throw new CliError(range.error);
+    windowStart = Date.parse(range.window.start);
+  } else {
+    windowStart = Date.parse(`${period.from}T00:00:00-03:00`);
+    if (Number.isNaN(windowStart)) throw new CliError(`--from: data inválida («${period.from}»); use AAAA-MM-DD`);
+  }
 
   const stats: ReadStats = { read: 0, skipped: 0, unreadable: 0 };
   const events = readUsageEvents(projectsDir, { modifiedSince: windowStart - 2 * DAY_MS, repos: [...new Set(products.flatMap((p) => p.repos))] }, stats);
   let result;
   try {
     result = buildUsage(events, {
-      from,
-      to,
+      ...(period.kind === "days" ? { from: period.from, to: period.to } : { start: period.start, end: period.end }),
       method,
       scope: mergeOverrides(fromFile, fromCli),
       products,

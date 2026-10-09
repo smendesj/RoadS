@@ -44,7 +44,13 @@ export type ReportStore = {
 };
 
 export type IngestInput = { produto: Produto; content: ProgressContent };
-export type IngestResult = { status: 200; id: string; created: boolean } | { status: 409; error: "period_already_sent" | "concurrent_push" };
+/** The period of the draft that is already there, when it is another report's: what the person must settle first. */
+export type PendingPeriod = Pick<StoredReport, "period_start" | "period_end">;
+
+export type IngestResult =
+  | { status: 200; id: string; created: boolean }
+  | { status: 409; error: "period_already_sent" | "concurrent_push" }
+  | { status: 409; error: "other_draft_pending"; draft: PendingPeriod };
 
 export async function ingestDraft(
   store: Pick<ReportStore, "findDraft" | "findByPeriod" | "insert" | "updateDraft">,
@@ -63,6 +69,12 @@ export async function ingestDraft(
 
     const draft = await store.findDraft(produto);
     if (draft) {
+      // A draft of another period (another report, not sent yet) is never written over: its numbers, and the
+      // edits the user made to it, would be lost under this one. The same start is a re-push of the same
+      // report (its end may have moved later), and refreshes it as always.
+      if (Date.parse(draft.period_start) !== Date.parse(period.period_start)) {
+        return { status: 409, error: "other_draft_pending", draft: { period_start: draft.period_start, period_end: draft.period_end } };
+      }
       // The numbers may have changed, so the user must check them again: a new push voids the conference.
       const patch: DraftPatch = { content, ...period, rev: draft.rev + 1, checked_at: null, checked_by: null };
       if (await store.updateDraft(draft.id, patch)) return { status: 200, id: draft.id, created: false };
@@ -80,6 +92,7 @@ export async function ingestDraft(
 export type ReceiveResult =
   | { status: 200; body: { id: string; created: boolean; url: string } }
   | { status: 400 | 409; body: { error: string } }
+  | { status: 409; body: { error: "other_draft_pending"; draft: PendingPeriod } }
   | UnsupportedSchema;
 
 /** POST: validate the body, then ingest it. Everything but the secret check and the HTTP plumbing. */
@@ -90,7 +103,11 @@ export async function receiveDraft(store: Pick<ReportStore, "findDraft" | "findB
   const parsed = parseDraft(body);
   if (!parsed.ok) return { status: 400, body: { error: parsed.error } };
   const result = await ingestDraft(store, { produto: parsed.produto, content: parsed.content });
-  if (result.status === 409) return { status: 409, body: { error: result.error } };
+  if (result.status === 409) {
+    // Another report's draft is waiting: its period goes back, so the person knows which one to settle first.
+    if (result.error === "other_draft_pending") return { status: 409, body: { error: result.error, draft: result.draft } };
+    return { status: 409, body: { error: result.error } };
+  }
   return { status: 200, body: { id: result.id, created: result.created, url: `${PRODUCTION_ORIGIN}/resumo` } };
 }
 

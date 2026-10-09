@@ -880,3 +880,82 @@ test("an item on Blocker is still an entry, as bloqueado: only Development makes
   assert.deepEqual(out.entries.map((e) => [e.issue, e.status]), [[3200, "bloqueado"]]);
   assert.deepEqual(out.sprint.epics, []);
 });
+
+/* ---------- A window cut at instants (--start/--end), not at midnight ---------- */
+
+// The previous report was collected on 09/03 at 20:05 São Paulo; this one is collected on 11/03 at 20:10.
+const CUT = { start: "2026-03-09T20:05:00-03:00", end: "2026-03-11T20:10:00-03:00" };
+const DAYS_OF_CUT = { start: "2026-03-09T00:00:00-03:00", end: "2026-03-12T00:00:00-03:00" };
+
+/** A delivery merged (and closed) at `at`, opened the day before. */
+const deliveredAt = (n: number, at: string) => ({
+  issue: issue(n, { createdAt: "2026-03-08T09:00:00-03:00", ...closedIn(at) }),
+  pr: pr(n + 1000, { title: `Entrega (#${n})`, createdAt: "2026-03-08T10:00:00-03:00", firstCommitAt: "2026-03-08T09:30:00-03:00", closedAt: at, mergedAt: at }),
+});
+
+function cutFacts(window: { start: string; end: string }) {
+  const items = [
+    deliveredAt(4000, "2026-03-09T19:00:00-03:00"), // merged an hour before the start: the previous report told it
+    deliveredAt(4001, "2026-03-09T20:05:00-03:00"), // exactly at the start: in
+    deliveredAt(4002, "2026-03-09T20:30:00-03:00"), // just after the start: in
+    deliveredAt(4003, "2026-03-11T20:09:59-03:00"), // just before the end: in
+    deliveredAt(4004, "2026-03-11T20:10:00-03:00"), // exactly at the end: the next report's
+  ];
+  return buildFacts({
+    repository: REPO,
+    window,
+    generatedAt: "2026-03-11T20:10:05-03:00",
+    issues: items.map((i) => i.issue),
+    prs: items.map((i) => i.pr),
+    timelines: [],
+    projectItems: [],
+    mainCommits: [
+      c("aaaaaa1", "2026-03-09T20:04:59-03:00"),
+      c("bbbbbb2", "2026-03-09T20:05:00-03:00"),
+      c("ccccccc3", "2026-03-11T20:09:59-03:00"),
+      c("ddddddd4", "2026-03-11T20:10:00-03:00"),
+    ],
+  });
+}
+
+test("a window cut at instants keeps what happened before the start out, and what happened after it in", () => {
+  const out = cutFacts(CUT);
+  const concluded = out.entries.filter((e) => e.status === "concluido" && !e.hidden).map((e) => e.issue);
+  assert.deepEqual(concluded, [4001, 4002, 4003]);
+  // Merged at 19:00 on the start day, before the cut: nothing of it happened in this window.
+  assert.ok(!out.entries.some((e) => e.issue === 4000));
+  // Merged right at the end: the window ends before it, so it is no delivery yet (the next report tells it).
+  const late = out.entries.find((e) => e.issue === 4004);
+  assert.ok(!late || (late.status !== "concluido" && late.deliveredAt === null));
+  assert.equal(out.entries.find((e) => e.issue === 4002)?.deliveredAt, "2026-03-09T20:30:00-03:00");
+  assert.deepEqual(out.window, CUT);
+  assert.deepEqual(out.delivered, { issues: 3, parts: 3 });
+});
+
+test("the git work of a window cut at instants starts at the start and stops before the end", () => {
+  const refs = cutFacts(CUT).gitWork.map((w) => w.ref);
+  // Same instant: by ref, so the PR merged right at the start comes before the commit made then.
+  assert.deepEqual(refs, ["PR #5001 mesclado", "commit bbbbbb2", "PR #5002 mesclado", "PR #5003 mesclado", "commit ccccccc"]);
+  // The same data read by whole days takes in the 19:00 merge and the commits around the cuts.
+  const byDays = cutFacts(DAYS_OF_CUT);
+  assert.ok(byDays.entries.some((e) => e.issue === 4000 && e.status === "concluido"));
+  assert.ok(byDays.gitWork.some((w) => w.ref === "commit aaaaaa1"));
+  assert.ok(byDays.gitWork.some((w) => w.ref === "commit ddddddd"));
+});
+
+test("a delivery merged before the start instant and closed after it is hidden as delivered before the window", () => {
+  const merged = "2026-03-09T19:00:00-03:00"; // before the 20:05 start
+  const out = facts({
+    window: CUT,
+    issues: [issue(4100, { createdAt: "2026-03-08T09:00:00-03:00", ...closedIn("2026-03-09T21:00:00-03:00") })],
+    prs: [pr(5100, { title: "Entrega (#4100)", createdAt: "2026-03-08T10:00:00-03:00", firstCommitAt: "2026-03-08T09:30:00-03:00", closedAt: merged, mergedAt: merged })],
+  });
+  assert.deepEqual(out.entries.map((e) => [e.issue, e.hidden, e.hiddenReason]), [[4100, true, "entregue antes da janela"]]);
+  // Read by whole days, the same merge is inside the window and the delivery shows.
+  const byDays = facts({
+    window: DAYS_OF_CUT,
+    issues: [issue(4100, { createdAt: "2026-03-08T09:00:00-03:00", ...closedIn("2026-03-09T21:00:00-03:00") })],
+    prs: [pr(5100, { title: "Entrega (#4100)", createdAt: "2026-03-08T10:00:00-03:00", firstCommitAt: "2026-03-08T09:30:00-03:00", closedAt: merged, mergedAt: merged })],
+  });
+  assert.deepEqual(byDays.entries.map((e) => [e.issue, e.hidden]), [[4100, false]]);
+});

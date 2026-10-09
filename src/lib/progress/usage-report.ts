@@ -1,6 +1,7 @@
 // What the collector prints for the person: the "conferência" table (one line per day) to check the numbers
 // against what they remember of the week, and the sessions the scope rule was not sure about. Portuguese,
 // numbers and instants only. Pure on purpose: no "server-only", no "@/" imports.
+import { instantRangeLabel } from "./period.ts";
 import type { UsageResult, SessionSummary } from "./usage-aggregate.ts";
 
 const SAO_PAULO_MS = -3 * 3_600_000;
@@ -76,8 +77,14 @@ export function formatUsageReport(result: UsageResult): string[] {
   const names = usage.products ?? [];
   const subject = several ? `em ${names.slice(0, -1).join(", ")} e ${names[names.length - 1]}` : `no ${usage.scope}`;
 
+  // A window cut at an instant (--start/--end) says its hours: its first and last day are partial.
+  const atMidnight = (iso: string): boolean => formatClock(iso) === "00:00" && Date.parse(iso) % 60_000 === 0;
+  const span =
+    atMidnight(usage.window.start) && atMidnight(usage.window.end)
+      ? `${longDate(first)} a ${longDate(last)}`
+      : `${instantRangeLabel(usage.window) ?? `${longDate(first)} a ${longDate(last)}`} (o fim não entra)`;
   lines.push(
-    `Uso do Claude ${subject}, ${longDate(first)} a ${longDate(last)} (${
+    `Uso do Claude ${subject}, ${span} (${
       real ? "contagem real: cada resposta da API uma vez" : "contagem do /stats: cada linha do histórico, como o painel do Claude Code"
     })`
   );

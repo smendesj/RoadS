@@ -213,6 +213,61 @@ test("after a report is sent, the next push starts a new draft", async () => {
   assert.equal(db.rows.length, 2);
 });
 
+test("a draft of another period is never written over: 409 other_draft_pending with its period, and no write", async () => {
+  const db = fakeDatabase();
+  await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
+  const row = db.rows[0];
+  row.overrides = { headline: { value: "Minha frase" } };
+  row.checked_at = "2026-03-04T16:00:00.000Z";
+  const before = JSON.stringify(db.rows);
+  db.calls.length = 0;
+
+  // The next report starts where the first one would end, but the first was never sent.
+  const next = content("Outro resumo.", { start: "2026-03-04T20:05:12-03:00", end: "2026-03-06T20:10:00-03:00" });
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: next });
+  assert.deepEqual(result, { status: 409, error: "other_draft_pending", draft: { period_start: "2026-03-02T03:00:00.000Z", period_end: "2026-03-04T03:00:00.000Z" } });
+  assert.ok(!db.calls.includes("insert") && !db.calls.includes("updateDraft"));
+  assert.equal(JSON.stringify(db.rows), before, "nothing changed");
+
+  // The route answers the same, with the period of the draft that is waiting.
+  const out = await receiveDraft(db.store, { produto: "GeoCloud", content: next });
+  assert.deepEqual(out, { status: 409, body: { error: "other_draft_pending", draft: { period_start: "2026-03-02T03:00:00.000Z", period_end: "2026-03-04T03:00:00.000Z" } } });
+  assert.equal(JSON.stringify(db.rows), before, "nothing changed");
+});
+
+test("an earlier start than the waiting draft's is another period too", async () => {
+  const db = fakeDatabase();
+  await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content("x", { start: "2026-03-01T23:59:59-03:00", end: WINDOW.end }) });
+  assert.equal(result.status, 409);
+  assert.equal(result.status === 409 && result.error, "other_draft_pending");
+  assert.deepEqual(db.rows[0].content, content());
+});
+
+test("the same start, written with another offset, is the same report: the draft is refreshed with the later end", async () => {
+  const db = fakeDatabase();
+  const first = content("Primeira coleta.", { start: "2026-03-04T20:05:12.345-03:00", end: "2026-03-06T19:00:00-03:00" });
+  await ingestDraft(db.store, { produto: "GeoCloud", content: first });
+  // A re-push of that report, collected later: same start instant (in UTC), a later end.
+  const again = content("Segunda coleta.", { start: "2026-03-04T23:05:12.345Z", end: "2026-03-06T20:10:00-03:00" });
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: again });
+  assert.deepEqual(result, { status: 200, id: "id-1", created: false });
+  assert.equal(db.rows.length, 1);
+  assert.equal(db.rows[0].content.headline, "Segunda coleta.");
+  assert.equal(db.rows[0].period_start, "2026-03-04T23:05:12.345Z");
+  assert.equal(db.rows[0].period_end, "2026-03-06T23:10:00.000Z");
+  assert.equal(db.rows[0].rev, 1);
+});
+
+test("a draft the database returns with its own offset format still counts as the same start", async () => {
+  const db = fakeDatabase();
+  await ingestDraft(db.store, { produto: "GeoCloud", content: content() });
+  db.rows[0].period_start = "2026-03-02T03:00:00+00:00"; // how Postgres writes a timestamptz
+  const result = await ingestDraft(db.store, { produto: "GeoCloud", content: content("Reenvio.") });
+  assert.deepEqual(result, { status: 200, id: "id-1", created: false });
+  assert.equal(db.rows[0].content.headline, "Reenvio.");
+});
+
 test("if another push creates the draft first, this push is applied to that draft", async () => {
   const db = fakeDatabase();
   db.hooks.beforeInsert = () => {

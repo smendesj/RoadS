@@ -23,6 +23,7 @@ import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assembleDraft } from "../../src/lib/progress/assemble.ts";
 import { MAX_PAYLOAD_BYTES, MAX_SHOTS, MAX_SHOT_BYTES, parseDraft } from "../../src/lib/progress/draft.ts";
+import { instantRangeLabel } from "../../src/lib/progress/period.ts";
 import { checkShotBytes } from "../../src/lib/progress/shot-store.ts";
 import type { ProgressContent, Shot } from "../../src/lib/progress-report.ts";
 
@@ -251,6 +252,22 @@ export async function uploadShots(root: string, headers: Record<string, string>,
   return null;
 }
 
+/**
+ * What to say when RoadS holds a draft of another period: that draft is never written over, so the person settles
+ * it first. Its period is shown in São Paulo time when the answer carries one that reads as two instants.
+ */
+export function otherDraftMessage(draft: unknown, status: string): string {
+  const d = draft as { period_start?: unknown; period_end?: unknown } | null | undefined;
+  const range =
+    typeof d?.period_start === "string" && typeof d?.period_end === "string" && Number.isFinite(Date.parse(d.period_start)) && Number.isFinite(Date.parse(d.period_end))
+      ? instantRangeLabel({ start: d.period_start, end: d.period_end })
+      : null;
+  return (
+    `Já existe no RoadS um rascunho de outro período${range ? ` (${range})` : ""} (${status}); nada foi alterado. ` +
+    "Marque o resumo anterior como enviado no RoadS, ou descarte-o, antes de enviar este."
+  );
+}
+
 /** Runs the command line; returns the exit code (0 sent or valid, 1 refused or failed, 2 wrong command line). */
 export async function runPush(argv: string[], deps: PushDeps): Promise<number> {
   const fail = (line: string) => {
@@ -343,7 +360,7 @@ export async function runPush(argv: string[], deps: PushDeps): Promise<number> {
     return fail("Não consegui falar com o servidor (confira a internet e o endereço). Nada foi confirmado.");
   }
 
-  const answer = (await response.json().catch(() => null)) as { id?: unknown; created?: unknown; url?: unknown; error?: unknown } | null;
+  const answer = (await response.json().catch(() => null)) as { id?: unknown; created?: unknown; url?: unknown; error?: unknown; draft?: unknown } | null;
   const status = `HTTP ${response.status}`;
   if (response.status === 200) {
     const id = typeof answer?.id === "string" && /^[\w-]{1,64}$/.test(answer.id) ? answer.id : "(sem id)";
@@ -352,6 +369,7 @@ export async function runPush(argv: string[], deps: PushDeps): Promise<number> {
     return 0;
   }
   if (response.status === 409) {
+    if (answer?.error === "other_draft_pending") return fail(otherDraftMessage(answer.draft, status));
     return answer?.error === "period_already_sent"
       ? fail(`Esse período já foi enviado por e-mail e está congelado (${status}); o rascunho não foi alterado. Gere o resumo da janela seguinte.`)
       : fail(`Outro envio estava acontecendo ao mesmo tempo (${status}). Tente de novo.`);

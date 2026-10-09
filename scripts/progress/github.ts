@@ -1,5 +1,7 @@
 // Collects the GitHub facts of a report window into .frontlights/progress/facts.json (read-only on
 // GitHub). Usage: node --experimental-strip-types scripts/progress/github.ts --from 2026-09-28 --to 2026-09-30
+// or, to start exactly where the previous report stopped (half-open [start, end), offset required):
+//   node --experimental-strip-types scripts/progress/github.ts --start 2026-10-07T20:05:12-03:00 --end 2026-10-09T20:10:00-03:00
 // The token is GITHUB_TOKEN from .env.local and is never printed; the logic lives in src/lib/progress/gh-cli.ts.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";

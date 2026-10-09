@@ -5,17 +5,27 @@
 //
 // There is deliberately no "active time": adding up short gaps undercounted a 13-hour day by half. A day
 // is its sessions, its first and last prompt and its messages per hour.
-import type { CountMethod, DayUsage, TokenCount, UsageModel } from "../progress-report.ts";
+import type { CountMethod, DayUsage, ReportWindow, TokenCount, UsageModel } from "../progress-report.ts";
+import { choosePeriod, windowFromInstants } from "./period.ts";
 import { friendlyModel } from "./usage-parse.ts";
 import type { UsageEvent } from "./usage-parse.ts";
 import { GEOCLOUD_RULE, decideScope, emptyTally, scopeMatcher } from "./usage-scope.ts";
 import type { ProductRule, ScopeBasis, ScopeOverrides, ToolTally } from "./usage-scope.ts";
 
+/**
+ * The window is given either as São Paulo days (`from`/`to`, both included) or as exact instants
+ * (`start`/`end`, half-open [start, end), ISO with an offset), never both. With instants the first and the
+ * last day are partial: only what happened inside the window counts on them.
+ */
 export type UsageOptions = {
   /** First São Paulo day of the window, YYYY-MM-DD. */
-  from: string;
+  from?: string;
   /** Last São Paulo day, inclusive. */
-  to: string;
+  to?: string;
+  /** First instant of the window, included (ISO with offset, e.g. 2026-10-07T20:05:12-03:00). */
+  start?: string;
+  /** Instant the window ends, excluded. */
+  end?: string;
   /** "real" (default) counts every API answer once; "stats" sums every line, as the /stats panel does. */
   method?: CountMethod;
   /** The person's decisions about which sessions are in or out, by id prefix. */
@@ -101,6 +111,27 @@ const hourOf = (ms: number): number => new Date(ms + SAO_PAULO_MS).getUTCHours()
 const startOfDay = (day: string): number => Date.parse(`${day}T00:00:00-03:00`);
 const addDays = (day: string, n: number): string => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
 const isDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`)) && addDays(s, 0) === s;
+
+/** The half-open window [fromMs, toMs) the options name, and how usage.json writes it. Throws "--…" messages. */
+function usageWindow(options: Pick<UsageOptions, "from" | "to" | "start" | "end">): { fromMs: number; toMs: number; window: ReportWindow } {
+  const chosen = choosePeriod(options);
+  if (!chosen.ok) throw new Error(chosen.error);
+  const period = chosen.period;
+  if (period.kind === "instants") {
+    const range = windowFromInstants(period.start, period.end);
+    if (!range.ok) throw new Error(range.error);
+    return { fromMs: Date.parse(range.window.start), toMs: Date.parse(range.window.end), window: range.window };
+  }
+  const { from, to } = period;
+  if (!isDay(from)) throw new Error(`--from: data inválida («${String(from)}»); use AAAA-MM-DD`);
+  if (!isDay(to)) throw new Error(`--to: data inválida («${String(to)}»); use AAAA-MM-DD`);
+  if (to < from) throw new Error("--to: a data final vem antes da inicial");
+  return {
+    fromMs: startOfDay(from),
+    toMs: startOfDay(addDays(to, 1)),
+    window: { start: `${from}T00:00:00-03:00`, end: `${addDays(to, 1)}T00:00:00-03:00` },
+  };
+}
 
 /* ---------- accumulators ---------- */
 
@@ -201,19 +232,15 @@ function realView(day: DayFacts, answers: readonly Answer[]): View {
  * session seen keeps it.
  */
 export function buildUsage(events: Iterable<UsageEvent>, options: UsageOptions): UsageResult {
-  const { from, to } = options;
-  if (!isDay(from)) throw new Error(`--from: data inválida («${String(from)}»); use AAAA-MM-DD`);
-  if (!isDay(to)) throw new Error(`--to: data inválida («${String(to)}»); use AAAA-MM-DD`);
-  if (to < from) throw new Error("--to: a data final vem antes da inicial");
+  const { fromMs, toMs, window } = usageWindow(options);
   const method: CountMethod = options.method ?? "real";
   const rules: readonly ProductRule[] = options.products?.length ? options.products : [GEOCLOUD_RULE];
   const matcher = scopeMatcher(rules);
   const activityIndex = Math.max(0, rules.findIndex((r) => r.name.toLowerCase() === (options.activityProduct ?? "GeoCloud").toLowerCase()));
 
-  const fromMs = startOfDay(from);
-  const toMs = startOfDay(addDays(to, 1));
+  // Every São Paulo day the window touches, the partial first and last ones included.
   const dayList: string[] = [];
-  for (let d = from; d <= to; d = addDays(d, 1)) dayList.push(d);
+  for (let d = dayOf(fromMs), last = dayOf(toMs - 1); d <= last; d = addDays(d, 1)) dayList.push(d);
 
   const sessions = new Map<string, SessionState>();
   const owners = new Map<string, string>();
@@ -470,7 +497,7 @@ export function buildUsage(events: Iterable<UsageEvent>, options: UsageOptions):
   const usage: UsageModel = {
     scope: "GeoCloud",
     ...(rules.length > 1 ? { products: rules.map((r) => r.name) } : {}),
-    window: { start: `${from}T00:00:00-03:00`, end: `${addDays(to, 1)}T00:00:00-03:00` },
+    window,
     generatedAt: (options.now ?? new Date()).toISOString(),
     ...(label === undefined ? {} : { label }),
     method,

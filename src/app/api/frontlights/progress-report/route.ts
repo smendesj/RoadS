@@ -20,8 +20,9 @@ export const GET = door("/progress-report", async () => {
 // POST { schemaVersion?, produto?, content } -> 200 { id, created, url } | 400 { error } (the draft is
 // invalid, or names a version of the contract this server does not speak; the error names the field, never
 // its value, except the issue numbers of deliveries that lack a print) | 409 { error } (that period was
-// already sent, or two pushes collided).
-// Pushing again refreshes `content` and keeps the user's edits (`overrides`) and the image link.
+// already sent, or two pushes collided) | 409 { error: "other_draft_pending", draft: { period_start,
+// period_end } } (a draft of another period is waiting; it is never written over).
+// Pushing again (same period start) refreshes `content` and keeps the user's edits (`overrides`) and the image link.
 export const POST = door("/progress-report", async (request) => {
   const body = await request.json().catch(() => null);
   return answerJson(await receiveDraft(supabaseReportStore(createAdminClient()), body));

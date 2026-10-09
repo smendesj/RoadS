@@ -7,6 +7,7 @@ import type { UsageModel } from "../progress-report.ts";
 import { findCoverageGaps, messageTimesFromUsage } from "./gaps.ts";
 import { GithubError, collectGithubData, createGithubClient } from "./gh-client.ts";
 import { buildFacts, parseHideList, windowFromDates } from "./gh-facts.ts";
+import { choosePeriod, instantRangeLabel, windowFromInstants } from "./period.ts";
 import { amountLabel } from "./report-view.ts";
 
 export const DEFAULT_FACTS_PATH = ".frontlights/progress/facts.json";
@@ -25,18 +26,27 @@ export type CliDeps = {
 };
 
 const USAGE = [
-  "Uso: node --experimental-strip-types scripts/progress/github.ts --from AAAA-MM-DD --to AAAA-MM-DD [--messages usage.json] [--out arquivo.json]",
+  "Uso: node --experimental-strip-types scripts/progress/github.ts (--from AAAA-MM-DD --to AAAA-MM-DD | --start <instante> --end <instante>) [--messages usage.json] [--out arquivo.json]",
   "  --from, --to   dias de São Paulo; --to entra no período",
+  "  --start, --end instantes ISO com deslocamento (por exemplo 2026-10-07T20:05:12-03:00); --start entra no período, --end não",
   "  --messages     JSON do coletor de uso, para calcular as lacunas de cobertura",
   `  --out          onde gravar os fatos (padrão: ${DEFAULT_FACTS_PATH})`,
 ].join("\n");
 
 export async function runGithubCli(argv: string[], deps: CliDeps): Promise<number> {
-  let values: { from?: string; to?: string; messages?: string; out?: string; help?: boolean };
+  let values: { from?: string; to?: string; start?: string; end?: string; messages?: string; out?: string; help?: boolean };
   try {
     values = parseArgs({
       args: argv,
-      options: { from: { type: "string" }, to: { type: "string" }, messages: { type: "string" }, out: { type: "string" }, help: { type: "boolean" } },
+      options: {
+        from: { type: "string" },
+        to: { type: "string" },
+        start: { type: "string" },
+        end: { type: "string" },
+        messages: { type: "string" },
+        out: { type: "string" },
+        help: { type: "boolean" },
+      },
       strict: true,
     }).values;
   } catch {
@@ -47,11 +57,13 @@ export async function runGithubCli(argv: string[], deps: CliDeps): Promise<numbe
     deps.log(USAGE);
     return 0;
   }
-  const range = values.from && values.to ? windowFromDates(values.from, values.to) : null;
-  if (!range) {
-    deps.error(`Faltam --from e --to.\n${USAGE}`);
+  const chosen = choosePeriod(values);
+  if (!chosen.ok) {
+    deps.error(`${chosen.error}\n${USAGE}`);
     return 2;
   }
+  const period = chosen.period;
+  const range = period.kind === "days" ? windowFromDates(period.from, period.to) : windowFromInstants(period.start, period.end);
   if (!range.ok) {
     deps.error(`${range.error}\n${USAGE}`);
     return 2;
@@ -99,7 +111,11 @@ export async function runGithubCli(argv: string[], deps: CliDeps): Promise<numbe
     deps.writeText(out, `${JSON.stringify(facts, null, 2)}\n`);
 
     const count = (s: string) => facts.entries.filter((e) => e.status === s && !e.hidden).length;
-    deps.log(`Fatos do GitHub (GeoCloud) de ${values.from} a ${values.to}, horário de São Paulo.`);
+    deps.log(
+      period.kind === "days"
+        ? `Fatos do GitHub (GeoCloud) de ${period.from} a ${period.to}, horário de São Paulo.`
+        : `Fatos do GitHub (GeoCloud) de ${instantRangeLabel(window)} (o fim não entra), horário de São Paulo.`
+    );
     deps.log(`Entradas visíveis: ${facts.entries.filter((e) => !e.hidden).length} (${ENTRY_STATUSES.map((s) => `${STATUS_LABEL[s]} ${count(s)}`).join(", ")}).`);
     deps.log(`Concluído: ${amountLabel(facts.delivered.parts, facts.delivered.issues)}. Em andamento na sprint: ${amountLabel(facts.sprint.totals.remainingParts, facts.sprint.totals.covers)}.`);
     deps.log(`Ocultas por sugestão: ${facts.entries.filter((e) => e.hidden).length}. Internos: ${facts.internal.count}.`);
