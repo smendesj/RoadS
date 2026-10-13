@@ -288,7 +288,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                       onMoveTo={(target) => moveToLane(target, item.id)}
                       isEditing={editingId === item.id}
                       editDraft={editingId === item.id ? editDraft : null}
-                      onDragStart={() => setDraggingId(item.id)}
+                      onDragStart={(e) => (touchDrag.touchOwnsDrag() ? e.preventDefault() : setDraggingId(item.id))}
                       onDragEnd={() => setDraggingId(null)}
                       onTouchDragStart={(e) => touchDrag.start(e, item.id, lane.id)}
                       lifted={touchDrag.lifted === item.id}
@@ -368,7 +368,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                               onMoveTo={(target) => moveToLane(target, item.id)}
                               isEditing={false}
                               editDraft={null}
-                              onDragStart={() => setDraggingId(item.id)}
+                              onDragStart={(e) => (touchDrag.touchOwnsDrag() ? e.preventDefault() : setDraggingId(item.id))}
                               onDragEnd={() => setDraggingId(null)}
                               onTouchDragStart={(e) => touchDrag.start(e, item.id, g.id)}
                               lifted={touchDrag.lifted === item.id}

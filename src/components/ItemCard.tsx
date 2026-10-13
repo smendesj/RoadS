@@ -47,7 +47,7 @@ export function ItemCard({
   laneId?: string;
   moveTargets?: { id: string; label: string }[];
   onMoveTo?: (laneId: string) => void;
-  onDragStart: () => void;
+  onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
   onDragEnd: () => void;
   /** A finger on the card: held, it lifts and follows the finger (src/lib/use-touch-drag.ts). */
   onTouchDragStart?: (e: React.TouchEvent<HTMLDivElement>) => void;
@@ -71,8 +71,9 @@ export function ItemCard({
       onDragEnd={onDragEnd}
       onTouchStart={canDrag && !isEditing ? onTouchDragStart : undefined}
       // On a touch screen a long press drags the card: no text selection, no link menu getting in the way.
+      // `relative` keeps the screen-reader-only select inside the card (it is absolute): loose, it widened the page.
       style={canDrag && !isEditing ? { WebkitTouchCallout: "none" } : undefined}
-      className={`flex ${canDrag ? "cursor-move pointer-coarse:select-none" : ""} ${lifted ? "opacity-40" : ""} flex-col gap-2.5 rounded-xl border border-rs-border bg-rs-card ${
+      className={`flex ${canDrag ? "cursor-move pointer-coarse:select-none pointer-coarse:[-webkit-user-drag:none]" : ""} ${lifted ? "opacity-40" : ""} relative flex-col gap-2.5 rounded-xl border border-rs-border bg-rs-card ${
         compact ? "p-2.5" : "p-3.5"
       }`}
     >
@@ -223,13 +224,14 @@ export function ItemCard({
               Excluir
             </button>
           )}
-          {/* Below lg a select moves the card too, with a mouse; a touch screen holds and drags the card instead. */}
+          {/* Below lg a select moves the card too, with a mouse; a touch screen holds and drags the card instead,
+              and keeps the select only for screen readers (a way to move a card without dragging). */}
           {onMoveTo && moveTargets.length > 0 && (
             <select
               value=""
               onChange={(e) => e.target.value && onMoveTo(e.target.value)}
               aria-label="Mover para"
-              className="ml-auto min-w-0 max-w-[65%] rounded-lg border border-rs-border bg-rs-card px-2 py-1 text-base font-bold text-rs-text-soft sm:text-xs lg:hidden pointer-coarse:hidden"
+              className="ml-auto min-w-0 max-w-[65%] rounded-lg border border-rs-border bg-rs-card px-2 py-1 text-base font-bold text-rs-text-soft sm:text-xs lg:hidden pointer-coarse:sr-only"
             >
               <option value="">Mover para…</option>
               {moveTargets

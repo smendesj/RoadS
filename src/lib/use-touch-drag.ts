@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { dropMove, edgeScrollSpeed, LONG_PRESS_MS, pressAfterMove, pressAfterTime, type PressState } from "@/lib/touch-drag";
+import { dropMove, edgeScrollSpeed, LONG_PRESS_MS, pressAfterMove, pressAfterTime, touchOwnsDrag, type PressState } from "@/lib/touch-drag";
 
 // Dragging a Roadmap card with a finger (src/lib/touch-drag.ts has the rules). The desktop keeps the browser's own
 // drag and drop; this only listens to touch. Touch events, not pointer events: once the browser starts panning it
@@ -14,6 +14,9 @@ type Press = {
   itemId: string;
   from: string;
   card: HTMLElement;
+  /** Where the touch started; its listeners live there (see start). */
+  target: EventTarget;
+  touchId: number;
   startX: number;
   startY: number;
   x: number;
@@ -37,6 +40,7 @@ function touchDragController({ setLifted, setOver }: Ports) {
   let press: Press | null = null;
   let drop: (itemId: string, toLane: string) => void = () => {};
   let over: string | null = null;
+  let lastTouchAt: number | null = null;
 
   const laneAt = (x: number, y: number): string | null => {
     const el = document.elementFromPoint(x, y);
@@ -58,6 +62,7 @@ function touchDragController({ setLifted, setOver }: Ports) {
   // While the card is up, the areas under the finger scroll toward an edge it comes near.
   const scrollLoop = () => {
     if (!press || press.state !== "active") return;
+    if (!press.card.isConnected) return end(false); // the card left the page (a reload replaced it)
     let el = document.elementFromPoint(press.x, press.y) as HTMLElement | null;
     while (el) {
       const axis = el.dataset?.dragScroll;
@@ -84,6 +89,7 @@ function touchDragController({ setLifted, setOver }: Ports) {
     press.offsetY = press.y - r.top;
     const ghost = press.card.cloneNode(true) as HTMLElement;
     ghost.setAttribute("data-touch-ghost", "");
+    ghost.setAttribute("aria-hidden", "true");
     ghost.removeAttribute("draggable");
     Object.assign(ghost.style, {
       position: "fixed",
@@ -110,8 +116,9 @@ function touchDragController({ setLifted, setOver }: Ports) {
 
   const onMove = (e: TouchEvent) => {
     if (!press) return;
-    const t = e.touches[0];
-    if (!t || e.touches.length > 1) return end(false);
+    if (e.touches.length > 1) return end(false); // a second finger: pinching or scrolling, not dragging
+    const t = finger(e.touches);
+    if (!t) return;
     if (press.state === "waiting") {
       press.state = pressAfterMove(press.state, t.clientX - press.startX, t.clientY - press.startY);
       press.x = t.clientX;
@@ -119,12 +126,15 @@ function touchDragController({ setLifted, setOver }: Ports) {
       if (press.state === "cancelled") end(false);
       return;
     }
-    e.preventDefault(); // the card is up: the finger moves it, not the page
+    // The card is up: the finger moves it, not the page. A move the browser marks as not cancelable (it already took
+    // the touch as a scroll) can't be held back; the card still follows the finger, and the page may move with it.
+    if (e.cancelable) e.preventDefault();
     track(t.clientX, t.clientY);
   };
 
   const onEnd = (e: TouchEvent) => {
-    const wasActive = press?.state === "active";
+    if (!press || !finger(e.changedTouches)) return; // another finger lifting is not this drag ending
+    const wasActive = press.state === "active";
     if (wasActive) e.preventDefault(); // no click on whatever is under the finger after a drop
     end(wasActive);
   };
@@ -135,6 +145,12 @@ function touchDragController({ setLifted, setOver }: Ports) {
     if (press) e.preventDefault(); // a long press is ours, not the browser's menu
   };
 
+  // The touch that started the drag, among the touches of an event.
+  const finger = (list: TouchList): Touch | null => {
+    for (let i = 0; i < list.length; i++) if (list[i].identifier === press?.touchId) return list[i];
+    return null;
+  };
+
   function end(dropIt: boolean) {
     const p = press;
     if (!p) return;
@@ -143,11 +159,12 @@ function touchDragController({ setLifted, setOver }: Ports) {
     cancelAnimationFrame(p.frame);
     p.ghost?.remove();
     for (const { el, value } of p.snapped) el.style.scrollSnapType = value;
-    document.removeEventListener("touchmove", onMove);
-    document.removeEventListener("touchend", onEnd);
-    document.removeEventListener("touchcancel", onCancel);
+    p.target.removeEventListener("touchmove", onMove as EventListener);
+    p.target.removeEventListener("touchend", onEnd as EventListener);
+    p.target.removeEventListener("touchcancel", onCancel);
     document.removeEventListener("contextmenu", onContextMenu);
-    const target = dropIt ? laneAt(p.x, p.y) : null;
+    // A card that left the page mid-gesture (a reload replaced it) never drops anywhere.
+    const target = dropIt && p.card.isConnected ? laneAt(p.x, p.y) : null;
     over = null;
     setOver(null);
     setLifted(null);
@@ -157,12 +174,18 @@ function touchDragController({ setLifted, setOver }: Ports) {
 
   /** Wire to a draggable card's onTouchStart. */
   function start(e: React.TouchEvent<HTMLElement>, itemId: string, from: string) {
+    lastTouchAt = Date.now();
     if (press || e.touches.length !== 1) return;
     const t = e.touches[0];
+    // A touch keeps going to the node it started on even if that node leaves the page, where the document would
+    // no longer hear it: the listeners go on that node, so a drag can always end.
+    const target = e.target as EventTarget;
     press = {
       itemId,
       from,
       card: e.currentTarget,
+      target,
+      touchId: t.identifier,
       startX: t.clientX,
       startY: t.clientY,
       x: t.clientX,
@@ -175,21 +198,27 @@ function touchDragController({ setLifted, setOver }: Ports) {
       frame: 0,
       snapped: [],
     };
-    document.addEventListener("touchmove", onMove, { passive: false });
-    document.addEventListener("touchend", onEnd, { passive: false });
-    document.addEventListener("touchcancel", onCancel);
+    target.addEventListener("touchmove", onMove as EventListener, { passive: false });
+    target.addEventListener("touchend", onEnd as EventListener, { passive: false });
+    target.addEventListener("touchcancel", onCancel);
     document.addEventListener("contextmenu", onContextMenu);
   }
 
   return {
     start,
     cancel: () => end(false),
+    /** True right after a finger held a card: a browser drag then is the browser's own long press (touchOwnsDrag). */
+    touchOwnsDrag: () => touchOwnsDrag(lastTouchAt, Date.now()),
     /** What a drop does; set after every render, so it always sees the Roadmap as it is now. */
     onDrop: (fn: typeof drop) => {
       drop = fn;
     },
   };
 }
+
+// iOS decides at touchstart whether a touch's moves may be held back, from the listeners already in place: one
+// that is there all along (and does nothing) lets the drag hold the page still once the card lifts.
+const noop = () => {};
 
 export function useTouchDrag(onDrop: (itemId: string, toLane: string) => void) {
   const [lifted, setLifted] = useState<string | null>(null);
@@ -198,6 +227,12 @@ export function useTouchDrag(onDrop: (itemId: string, toLane: string) => void) {
   useEffect(() => {
     controller.onDrop(onDrop);
   });
-  useEffect(() => controller.cancel, [controller]);
-  return { start: controller.start, lifted, over };
+  useEffect(() => {
+    window.addEventListener("touchmove", noop, { passive: false });
+    return () => {
+      window.removeEventListener("touchmove", noop);
+      controller.cancel();
+    };
+  }, [controller]);
+  return { start: controller.start, touchOwnsDrag: controller.touchOwnsDrag, lifted, over };
 }

@@ -31,3 +31,10 @@ export function edgeScrollSpeed(pos: number, start: number, end: number): number
 export function dropMove(from: string, to: string | null): { from: string; to: string } | null {
   return to && to !== from ? { from, to } : null;
 }
+
+/** For this long after a finger last held a card, a browser drag on it is the browser's own long press: it gives way. */
+export const NATIVE_DRAG_GUARD_MS = 1_500;
+
+export function touchOwnsDrag(lastTouchAt: number | null, now: number): boolean {
+  return lastTouchAt !== null && now - lastTouchAt < NATIVE_DRAG_GUARD_MS;
+}

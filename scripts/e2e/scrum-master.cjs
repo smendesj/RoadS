@@ -162,8 +162,28 @@ const { BASE, expect, sleep, svc } = L;
         }
       };
 
+      // Safety: a real (non-[TESTE]) item dragged into a zz-test lane would be deleted with that lane by the cleanup
+      // (on delete cascade). Checked after the gestures, and the suite stops before cleanup if one is found.
+      const realInTestLanes = async () =>
+        ((await svc.from("roadmap_items").select("id, title, lane_id").like("lane_id", "zz-test-%")).data ?? []).filter((r) => !r.title.startsWith("[TESTE]"));
+      // Held for 400 ms: the lifted copy must be the [TESTE] card, or the gesture is cancelled before anything moves.
+      const holdTestCard = async (at) => {
+        await touch("touchStart", at.x, at.y);
+        await sleep(400);
+        const held = await phone.page.locator("[data-touch-ghost]").innerText().catch(() => "");
+        if (!held.includes("[TESTE] criado e editado pelo SM")) {
+          await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+          throw new Error(`the finger lifted something else: ${held.slice(0, 60)}`);
+        }
+      };
+
+      // The select stays only for screen readers: on a touch screen it takes no room on the card.
       const select = phone.page.locator('select[aria-label="Mover para"]');
-      expect("phone: no 'Mover para' select on a touch screen", (await select.count()) === 0 || !(await select.first().isVisible()));
+      const box = (await select.count()) ? await select.first().boundingBox() : null;
+      expect("phone: no 'Mover para' select to see on a touch screen (kept for screen readers)", !box || (box.width <= 1 && box.height <= 1), JSON.stringify(box));
+      // Nothing (a loose absolute element, say) widens the page past the phone, which would zoom the whole page out.
+      const widths = await phone.page.evaluate(() => [window.innerWidth, document.documentElement.scrollWidth]);
+      expect("phone: the Roadmap is as wide as the phone, not zoomed out", widths[0] === 390 && widths[1] === 390, JSON.stringify(widths));
 
       // Source and target on screen together: the phone's width, the page's height.
       await L.fitWholePage(phone.page);
@@ -180,8 +200,7 @@ const { BASE, expect, sleep, svc } = L;
       // Held, then dropped on nothing (the page's title): it goes back and nothing is saved.
       await phoneCard().scrollIntoViewIfNeeded();
       from = await centre(phoneCard());
-      await touch("touchStart", from.x, from.y);
-      await sleep(400);
+      await holdTestCard(from);
       const ghost = await phone.page.locator("[data-touch-ghost]").count();
       const title = await centre(phone.page.locator("h1", { hasText: "Roadmap" }));
       await glide(from, title);
@@ -194,8 +213,7 @@ const { BASE, expect, sleep, svc } = L;
       await phoneCard().scrollIntoViewIfNeeded();
       from = await centre(phoneCard());
       const target = await centre(phone.page.locator('[data-lane-id="zz-test-a"]'));
-      await touch("touchStart", from.x, from.y);
-      await sleep(400);
+      await holdTestCard(from);
       await glide(from, target, 20);
       const lit = await phone.page.locator('[data-lane-id="zz-test-a"][data-drop-target]').count();
       await touch("touchEnd");
@@ -210,8 +228,7 @@ const { BASE, expect, sleep, svc } = L;
       await phoneCard().scrollIntoViewIfNeeded();
       const before = await phone.page.evaluate(() => window.scrollY);
       from = await centre(phoneCard());
-      await touch("touchStart", from.x, from.y);
-      await sleep(400);
+      await holdTestCard(from);
       await glide(from, { x: from.x, y: 6 }, 10);
       await sleep(800);
       const after = await phone.page.evaluate(() => window.scrollY);
@@ -221,6 +238,13 @@ const { BASE, expect, sleep, svc } = L;
       expect("phone: a cancelled touch puts the card back and saves nothing", (await lane(created.id)) === "zz-test-a" && (await phone.page.locator("[data-touch-ghost]").count()) === 0);
 
       expect("phone: no console errors while dragging", phone.problems.length === 0, phone.problems.slice(0, 3).join(" | "));
+      const strays = await realInTestLanes();
+      expect("phone: no real item ended up in a test lane", strays.length === 0, strays.map((r) => r.id).join(","));
+      if (strays.length) {
+        // Never let the cleanup delete a real item with its test lane: stop here, before it, so a person moves it back.
+        console.error("STOP: real items in test lanes, cleanup skipped:", strays.map((r) => r.id).join(","));
+        process.exit(1);
+      }
       await phone.context.close();
       // Back where the rest of this suite expects it.
       await svc.from("roadmap_items").update({ lane_id: "zz-test-sprint" }).eq("id", created.id);

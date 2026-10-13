@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dropMove, edgeScrollSpeed, LONG_PRESS_MS, MOVE_TOLERANCE_PX, pressAfterMove, pressAfterTime } from "./touch-drag.ts";
+import { dropMove, edgeScrollSpeed, LONG_PRESS_MS, MOVE_TOLERANCE_PX, pressAfterMove, pressAfterTime, touchOwnsDrag } from "./touch-drag.ts";
 
 test("holding a card still for 250 ms lifts it", () => {
   assert.equal(LONG_PRESS_MS, 250);
@@ -38,4 +38,12 @@ test("dropping on another sprint or group moves the card; on its own, or on noth
   assert.deepEqual(dropMove("tipo-feature", "atual"), { from: "tipo-feature", to: "atual" });
   assert.equal(dropMove("atual", "atual"), null);
   assert.equal(dropMove("atual", null), null);
+});
+
+test("a browser drag that starts right after a finger held the card is the browser's long press, and gives way", () => {
+  const now = 10_000;
+  assert.equal(touchOwnsDrag(now - 600, now), true, "the native long press fires about 500 ms in");
+  assert.equal(touchOwnsDrag(now - 1_400, now), true);
+  assert.equal(touchOwnsDrag(now - 2_000, now), false, "a mouse drag long after a touch is a mouse drag");
+  assert.equal(touchOwnsDrag(null, now), false, "no touch yet: a desktop drag");
 });
