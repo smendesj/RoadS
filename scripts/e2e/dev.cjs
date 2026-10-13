@@ -5,6 +5,8 @@ const { BASE, expect, sleep } = L;
   const t0 = new Date().toISOString();
   await L.ensureFixtures();
   const browser = await L.launch();
+  // The Dashboard's own sync and its button are checked past the brake, whatever production synced lately.
+  const restoreSnapshot = await L.ageSnapshot();
   try {
     const s = await L.newSession(browser, "dev");
     const { page } = s;
@@ -119,6 +121,7 @@ const { BASE, expect, sleep } = L;
   } catch (e) {
     expect("run completed without an exception", false, L.scrub(e && e.message ? e.message : e).slice(0, 200));
   } finally {
+    await restoreSnapshot();
     await browser.close();
     await L.cleanup(t0);
   }

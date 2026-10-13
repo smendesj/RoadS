@@ -158,4 +158,17 @@ async function cleanup(since) {
   await svc.from("profiles").update({ role: "dev", must_reset_password: false }).eq("id", ids.dev);
 }
 
-module.exports = { E2E_UA, cleanupCalls, BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, scrub, fitWholePage };
+// The local server reads production's board snapshot, which production pages refresh every few minutes. A check of
+// what happens past the brake makes the snapshot old for its duration, then puts the old time back, but only if
+// nothing wrote a newer snapshot meanwhile (a real sync in production wins).
+async function ageSnapshot() {
+  const { data } = await svc.from("board_sync_state").select("synced_at").eq("id", true).single();
+  const aged = new Date(Date.now() - 60 * 60_000).toISOString();
+  await svc.from("board_sync_state").update({ synced_at: aged }).eq("id", true);
+  return async () => {
+    await svc.from("board_sync_state").update({ synced_at: data.synced_at }).eq("id", true).eq("synced_at", aged);
+  };
+}
+
+module.exports = {
+  ageSnapshot, E2E_UA, cleanupCalls, BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, scrub, fitWholePage };

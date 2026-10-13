@@ -5,10 +5,9 @@
 // endpoint any signed-in user can call directly.
 
 import { syncBoard, type SyncColumn, type SyncResult } from "@/lib/board-sync";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { cooldownFor } from "@/lib/auto-sync";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import type { SliceGroup } from "@/lib/slices";
-import { brakedSync } from "@/lib/sync-claim";
 
 // Client entry point for the manual "Board sincronizado" button — dev, scrum_master
 // and admin can all trigger it (it's a read-refresh, not an edit, so there's no
@@ -26,32 +25,8 @@ export async function syncBoardAsViewer(opts?: { auto?: boolean }): Promise<Sync
 
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
   if (!profile?.role) return { ok: false, reason: "unauthenticated", message: "Entre para sincronizar o board." };
-  return brakedSync(
-    {
-      now: () => Date.now(),
-      // No token, no claim: a server without one (the local e2e) never holds production's brake.
-      configured: () => Boolean(process.env.GITHUB_TOKEN),
-      latestSnapshot: getLatestBoardSnapshot,
-      // The conditional update is the claim: only one caller moves sync_claimed_at forward past the cutoff.
-      claim: async (brakeMs) => {
-        const admin = createAdminClient();
-        const now = new Date();
-        const cutoff = new Date(now.getTime() - brakeMs).toISOString();
-        const { data, error } = await admin
-          .from("board_sync_state")
-          .update({ sync_claimed_at: now.toISOString() })
-          .eq("id", true)
-          .or(`sync_claimed_at.is.null,sync_claimed_at.lt."${cutoff}"`)
-          .select("sync_claimed_at");
-        if (error) throw error;
-        if (data?.length) return { claimed: true, claimedAt: data[0].sync_claimed_at as string };
-        const { data: row } = await admin.from("board_sync_state").select("sync_claimed_at").eq("id", true).maybeSingle();
-        return { claimed: false, claimedAt: (row?.sync_claimed_at as string | null) ?? null };
-      },
-      run: syncBoard,
-    },
-    { auto }
-  );
+
+  return syncBoard({ brakeMs: cooldownFor({ auto }) });
 }
 
 export async function getLatestBoardSnapshot(): Promise<{ columns: SyncColumn[]; syncedAt: string; slices: SliceGroup[] } | null> {

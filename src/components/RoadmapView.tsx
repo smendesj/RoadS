@@ -44,9 +44,13 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   const [groups, setGroups] = useState<RoadmapGroup[]>([]);
   const [boardLoaded, setBoardLoaded] = useState(false);
 
+  // A reload started before a move reads the board before it: its answer is dropped, so the card doesn't jump back.
+  const moveGeneration = useRef(0);
   function reloadBoard() {
+    const generation = moveGeneration.current;
     getRoadmapBoard()
       .then(({ lanes, groups }) => {
+        if (generation !== moveGeneration.current) return;
         setLanes(lanes);
         setGroups(groups);
         setBoardLoaded(true);
@@ -137,6 +141,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
     setGroups(next.groups);
 
     movesInFlight.current++;
+    moveGeneration.current++;
     moveRoadmapItemLane(itemId, targetLaneId)
       .then(() => {
         movesInFlight.current--;

@@ -72,3 +72,9 @@ test("a snapshot that is missing or cannot be read does not stand in the way of 
   assert.equal(await supabaseSnapshotReader(fakeClient({ board_sync_state: { data: null } }).client)(), null);
   assert.equal(await supabaseSnapshotReader(fakeClient({ board_sync_state: { error: { message: "boom" } } }).client)(), null);
 });
+
+test("when the run was held by the claim (another sync under way), the answer says it did not run", async () => {
+  const { port } = deps(null, { ...RAN, cached: true, retryInMs: 12_000 });
+  const answer = await syncBoardAnswer(port);
+  assert.equal(answer.ok && answer.ran, false);
+});

@@ -88,7 +88,7 @@ test("a sync the page ran by itself is worth a line only when it changed somethi
   }
 });
 test("a press the brake held back says so and when the next sync can run, never a made-up result", () => {
-  assert.equal(brakeMessage(20_000), "Sincronizado há menos de 30 s; a próxima sincronização pode sair em 20 s.");
-  assert.equal(brakeMessage(400), "Sincronizado há menos de 30 s; a próxima sincronização pode sair em 1 s.");
-  assert.equal(brakeMessage(undefined), "Sincronizado há menos de 30 s; tente de novo em instantes.");
+  assert.equal(brakeMessage(20_000), "Uma sincronização começou há menos de 30 s ou ainda está em andamento; a próxima pode sair em 20 s.");
+  assert.equal(brakeMessage(400), "Uma sincronização começou há menos de 30 s ou ainda está em andamento; a próxima pode sair em 1 s.");
+  assert.equal(brakeMessage(undefined), "Uma sincronização começou há menos de 30 s ou ainda está em andamento; tente de novo em instantes.");
 });

@@ -39,6 +39,8 @@ import { parseSlices, slicesQuery } from "@/lib/slices";
 import { planTitleFollow, type TitleCandidate } from "@/lib/title-follow";
 import { CURRENT_SPRINT, EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintSyncDeps, type SprintSyncSummary } from "@/lib/sprint-status-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { brakedSync } from "@/lib/sync-claim";
+import { SYNC_COOLDOWN_MS } from "@/lib/sync-cooldown";
 import { NEW_ITEM_TITLE } from "@/lib/types";
 
 const STATUS_META: Record<string, { key: string; tone: "neutral" | "brand" | "red" | "green" }> = {
@@ -94,7 +96,38 @@ const QUERY = `
   }
 `;
 
-export async function syncBoard(): Promise<SyncResult> {
+/** A claimed run that hasn't finished after this long is taken as stuck (a function killed by its timeout). */
+const MAX_RUN_MS = 2 * 60_000;
+
+// The one door to the sync, for every caller: the brake and the claim of src/lib/sync-claim.ts in front of the run.
+// `brakeMs` is the caller's brake: 30 s for a press, FrontlightS and the cron; 5 min for a page's own sync.
+export async function syncBoard({ brakeMs = SYNC_COOLDOWN_MS }: { brakeMs?: number } = {}): Promise<SyncResult> {
+  const admin = createAdminClient();
+  return brakedSync(
+    {
+      now: () => Date.now(),
+      configured: () => Boolean(process.env.GITHUB_TOKEN),
+      latestSnapshot: async () => {
+        const { data } = await admin.from("board_sync_state").select("columns, synced_at").eq("id", true).maybeSingle();
+        return data ? { columns: data.columns as SyncColumn[], syncedAt: data.synced_at as string } : null;
+      },
+      claim: async (ms) => {
+        const { data, error } = await admin.rpc("claim_board_sync", { p_brake_ms: ms, p_max_run_ms: MAX_RUN_MS });
+        if (error) throw error;
+        const row = (data as { claimed: boolean; claimed_at: string | null }[] | null)?.[0];
+        return { claimed: row?.claimed ?? false, claimedAt: row?.claimed_at ?? null };
+      },
+      finish: async (claimedAt) => {
+        const { error } = await admin.rpc("finish_board_sync", { p_claimed_at: claimedAt });
+        if (error) throw error;
+      },
+      run: runBoardSync,
+    },
+    { brakeMs }
+  ).catch((e): SyncResult => ({ ok: false, reason: "error", message: e instanceof Error ? e.message : "Erro ao sincronizar." }));
+}
+
+async function runBoardSync(): Promise<SyncResult> {
   const token = process.env.GITHUB_TOKEN;
   if (!token) return { ok: false, reason: "not_configured" };
 

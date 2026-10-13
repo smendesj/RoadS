@@ -139,9 +139,16 @@ async function call(ctx, id, args, pagePath) {
       const cooled = await call(dev.context, A.syncBoardAsViewer, [], "/roadmap");
       expect("dev -> syncBoardAsViewer inside the 30s cooldown returns the stored snapshot (ok, no GitHub call)", cooled.kind === "ok" && /"ok":true/.test(cooled.returned) && cooled.text.includes(justNow.slice(0, 19)), cooled.returned.slice(0, 70));
     } finally {
-      await svc.from("board_sync_state").update({ synced_at: snap.synced_at }).eq("id", true);
+      // Back to the old time, unless a real sync in production wrote a newer one meanwhile.
+      await svc.from("board_sync_state").update({ synced_at: snap.synced_at }).eq("id", true).eq("synced_at", justNow);
     }
-    const staleAgain = await call(dev.context, A.syncBoardAsViewer, [], "/roadmap");
+    const restoreSnapshot = await L.ageSnapshot();
+    let staleAgain;
+    try {
+      staleAgain = await call(dev.context, A.syncBoardAsViewer, [], "/roadmap");
+    } finally {
+      await restoreSnapshot();
+    }
     expect("dev -> outside the cooldown the sync really runs (and fails closed here: no token)", /not_configured/.test(staleAgain.returned), staleAgain.returned.slice(0, 70));
 
     // ------------------------------------------------------------------ SCRUM MASTER
