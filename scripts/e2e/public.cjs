@@ -21,6 +21,9 @@ const { BASE, expect, sleep } = L;
     for (const path of ["/login", "/cadastro", "/redefinir-senha"]) {
       await page.goto(BASE + path, { waitUntil: "load" });
       expect(`public page ${path} loads for a visitor`, new URL(page.url()).pathname === path, page.url());
+      // The same mark as the NavBar: the gradient diamond with the two chevrons, not a plain square.
+      const mark = page.locator("[data-brand-mark]");
+      expect(`public page ${path} shows the RoadS mark with its two chevrons`, (await mark.count()) === 1 && (await mark.locator("path").count()) === 2, `marks=${await mark.count()}`);
     }
 
     // ---- /cadastro: the page's own checks (no account is created)

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { boardCard, projectCard, statusByUrl, withIssueStatus, withStatusWrites } from "./board.ts";
+import { boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, statusByUrl, withIssueStatus, withStatusWrites } from "./board.ts";
 
 const node = (repo: string, status: string | null, number = 1) => ({
   content: { number, title: `Issue ${number}`, url: `https://github.com/${repo}/issues/${number}`, repository: { nameWithOwner: repo } },
@@ -109,4 +109,55 @@ test("withStatusWrites moves a card to the column of the Status written and reco
 test("withStatusWrites ignores a card the snapshot doesn't have", () => {
   const columns = [{ key: "open", title: "Open", count: 1, items: [{ title: "a", ref: "#1", url: "u1" }] }];
   assert.deepEqual(withStatusWrites(columns, [{ url: "nope", status: "Development" }]), columns);
+});
+
+// The order of the Kanban view on GitHub, as the views query returns it (13/10/2026: Created, newest first).
+const views = (sort: { field: string; direction: string }[], name = "Kanban") => [
+  { name: "Tabela", sortByFields: { nodes: [{ direction: "DESC", field: { name: "Closed" } }] } },
+  { name, sortByFields: { nodes: sort.map((s) => ({ direction: s.direction, field: { name: s.field } })) } },
+];
+
+test("kanbanSort reads the sort of the view named Kanban, field by field", () => {
+  assert.deepEqual(kanbanSort(views([{ field: "Created", direction: "DESC" }])), [{ field: "Created", direction: "DESC" }]);
+  assert.deepEqual(kanbanSort(views([{ field: "Title", direction: "ASC" }, { field: "Updated", direction: "DESC" }])), [
+    { field: "Title", direction: "ASC" },
+    { field: "Updated", direction: "DESC" },
+  ]);
+});
+
+test("kanbanSort with no Kanban view, or one sorted by a field RoadS cannot read, keeps GitHub's manual order", () => {
+  assert.deepEqual(kanbanSort(views([{ field: "Created", direction: "DESC" }], "Board")), []);
+  assert.deepEqual(kanbanSort(views([{ field: "Priority", direction: "ASC" }])), []);
+  assert.deepEqual(kanbanSort(undefined), []);
+});
+
+const entry = (n: number, createdAt: string, updatedAt = createdAt, title = `Issue ${n}`) => ({
+  card: { title, ref: `#${n}`, url: `u${n}` },
+  createdAt,
+  updatedAt,
+});
+
+test("sortCards puts the newest issue first when the Kanban view sorts by Created, newest first", () => {
+  // Read from the Project in its manual order: #951, #8, #979, #185.
+  const cards = [entry(951, "2026-09-20T10:00:00Z"), entry(8, "2025-01-02T10:00:00Z"), entry(979, "2026-10-05T12:00:00Z"), entry(185, "2025-03-01T10:00:00Z")];
+  assert.deepEqual(sortCards(cards, [{ field: "Created", direction: "DESC" }]).map((c) => c.ref), ["#979", "#951", "#185", "#8"]);
+});
+
+test("sortCards applies the next field to break a tie, then GitHub's manual order", () => {
+  const cards = [entry(1, "2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z", "b"), entry(2, "2026-10-01T00:00:00Z", "2026-10-03T00:00:00Z", "a"), entry(3, "2026-10-01T00:00:00Z", "2026-10-03T00:00:00Z", "a")];
+  assert.deepEqual(sortCards(cards, [{ field: "Title", direction: "ASC" }]).map((c) => c.ref), ["#2", "#3", "#1"]);
+  assert.deepEqual(sortCards(cards, [{ field: "Created", direction: "ASC" }, { field: "Updated", direction: "DESC" }]).map((c) => c.ref), ["#2", "#3", "#1"]);
+  assert.deepEqual(sortCards(cards, []).map((c) => c.ref), ["#1", "#2", "#3"], "no sort: the order read from GitHub");
+});
+
+test("otherRepoCounts counts, per Status, the cards of other repositories that the RoadS board leaves out", () => {
+  const counts = otherRepoCounts([
+    node("Essencis-Labs/ELIMS", "Open", 1),
+    node("Essencis-Labs/ELIMS", "Open", 2),
+    node("Essencis-Labs/ELIMS", "Done", 3),
+    node("Essencis-Labs/GeoCloudAI", "Open", 4),
+    node("Essencis-Labs/ELIMS", "Someday", 5),
+    node("Essencis-Labs/ELIMS", null, 6),
+  ]);
+  assert.deepEqual(Object.fromEntries(counts), { Open: 2, Done: 1 });
 });

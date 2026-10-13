@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { BrandMark } from "@/components/BrandMark";
 import { SessionGuard } from "@/components/SessionGuard";
 import { UserMenu } from "@/components/UserMenu";
 import { useTheme } from "@/lib/theme-provider";
@@ -45,16 +46,7 @@ export function NavBar({
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-rs-border bg-rs-card px-4 py-3 sm:px-6 md:h-[72px] md:flex-nowrap md:py-0 lg:px-10">
-      <div className="flex items-center gap-2.5">
-        <div className="relative flex h-[42px] w-[42px] shrink-0 items-center justify-center">
-          <div className="absolute h-[30px] w-[30px] rotate-[45deg] rounded-[9px] bg-linear-to-br from-rs-brand to-rs-brand-text" />
-          <svg width="27" height="21" viewBox="0 0 20 16" fill="none" className="relative">
-            <path d="M1 2 L8 8 L1 14" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-            <path d="M10 2 L17 8 L10 14" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-          </svg>
-        </div>
-        <span className="text-xl font-extrabold tracking-tight text-rs-text">RoadS</span>
-      </div>
+      <BrandMark />
 
       <div
         className={`order-last flex w-full gap-1.5 rounded-[10px] bg-rs-bg p-1 md:order-none md:w-auto ${

@@ -98,3 +98,58 @@ export function withStatusWrites<C extends { key: string; count: number; items: 
   }
   return next;
 }
+
+/** The Project view whose order the Dashboard's Kanban follows. */
+export const KANBAN_VIEW = "Kanban";
+const SORTABLE = ["Created", "Updated", "Title"] as const;
+
+export type SortKey = { field: (typeof SORTABLE)[number]; direction: "ASC" | "DESC" };
+
+type ProjectView = { name?: string; sortByFields?: { nodes?: { direction?: string; field?: { name?: string } | null }[] } | null };
+
+/**
+ * How the Kanban view on GitHub sorts its cards. A sort on a field RoadS doesn't read (a custom field, say) can't be
+ * followed in part without lying about the order, so it falls back to none: the Project's manual order.
+ */
+export function kanbanSort(views: ProjectView[] | undefined): SortKey[] {
+  const nodes = views?.find((v) => v.name === KANBAN_VIEW)?.sortByFields?.nodes ?? [];
+  const keys: SortKey[] = [];
+  for (const n of nodes) {
+    const field = n.field?.name;
+    if (!(SORTABLE as readonly string[]).includes(field ?? "") || (n.direction !== "ASC" && n.direction !== "DESC")) return [];
+    keys.push({ field: field as SortKey["field"], direction: n.direction });
+  }
+  return keys;
+}
+
+export type SortableCard = { card: BoardCard; createdAt: string; updatedAt: string };
+
+const sortValue = (e: SortableCard, field: SortKey["field"]) =>
+  field === "Created" ? e.createdAt : field === "Updated" ? e.updatedAt : e.card.title.toLocaleLowerCase("pt-BR");
+
+/** The cards in the Kanban view's order; a tie on every field keeps the order they were read in (the Project's manual one). */
+export function sortCards(entries: SortableCard[], sort: SortKey[]): BoardCard[] {
+  return entries
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => {
+      for (const { field, direction } of sort) {
+        const x = sortValue(a.e, field);
+        const y = sortValue(b.e, field);
+        if (x !== y) return (x < y ? -1 : 1) * (direction === "ASC" ? 1 : -1);
+      }
+      return a.i - b.i;
+    })
+    .map(({ e }) => e.card);
+}
+
+/** Per Status, how many cards of other repositories (ELIMS) the Project holds that the RoadS board leaves out. */
+export function otherRepoCounts(nodes: ProjectNode[]): Map<BoardStatus, number> {
+  const counts = new Map<BoardStatus, number>();
+  for (const node of nodes) {
+    const status = node.fieldValueByName?.name as BoardStatus | undefined;
+    if (!node.content?.number || node.content.repository?.nameWithOwner === BOARD_REPO) continue;
+    if (!status || !BOARD_STATUSES.includes(status)) continue;
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+  }
+  return counts;
+}

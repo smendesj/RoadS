@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useTransition, type ReactNode } fr
 import { SyncButton } from "@/components/SyncButton";
 import { badgeClass } from "@/lib/tones";
 import { syncDashboard, type DashboardModel } from "@/lib/actions/dashboard";
+import { useAutoSync } from "@/lib/use-auto-sync";
 import { useLocalTime } from "@/lib/use-local-time";
 
 type SyncContextValue = {
@@ -53,6 +54,18 @@ export function DashboardSyncProvider({
       }
     });
   }
+
+  // The page keeps itself in step with GitHub (src/lib/auto-sync.ts), quietly: no spinner, and a notice only when
+  // the sync actually ran. A failure says so like the button does.
+  useAutoSync(() => {
+    syncDashboard({ auto: true })
+      .then((result) => {
+        setModel(result.model);
+        setError(result.error);
+        if (result.notice) setNotice(result.notice);
+      })
+      .catch((e) => console.error("auto sync failed", e));
+  }, canSync);
 
   return (
     <SyncContext.Provider value={{ model, error, notice, isPending, canSync, sync }}>{children}</SyncContext.Provider>
@@ -179,6 +192,18 @@ export function SlicesPanel() {
         <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">Nenhuma sub-issue nas issues da sprint atual.</div>
       )}
     </div>
+  );
+}
+
+// The Project's ELIMS cards are never shown (only GeoCloud is RoadS's), so the gap to GitHub's counts is said here.
+export function ElimsNote() {
+  const { model } = useSync();
+  const elims = model.columns.reduce((sum, c) => sum + (c.elims ?? 0), 0);
+  if (elims === 0) return null;
+  return (
+    <p data-elims-note className="text-[13px] text-rs-text-faint">
+      {elims === 1 ? "1 issue do ELIMS no Project #7 não aparece aqui." : `${elims} issues do ELIMS no Project #7 não aparecem aqui.`}
+    </p>
   );
 }
 

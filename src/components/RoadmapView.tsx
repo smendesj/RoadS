@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { SyncButton } from "@/components/SyncButton";
 import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { syncBoardAsViewer } from "@/lib/actions/sync";
+import { retryDelay, touchesCurrentSprint } from "@/lib/auto-sync";
+import { useAutoSync } from "@/lib/use-auto-sync";
 import { orderGroups } from "@/lib/group-order";
 import { isStack } from "@/lib/issue-fields";
 import { moveItem } from "@/lib/roadmap-move";
@@ -67,6 +69,36 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
     });
   }
 
+  // Kept in step with GitHub by itself (src/lib/auto-sync.ts), quietly; the board reloads only when the sync ran.
+  useAutoSync(() => {
+    syncBoardAsViewer({ auto: true })
+      .then((result) => {
+        if (result.ok && !result.cached) reloadBoard();
+      })
+      .catch((e) => console.error("auto sync failed", e));
+  }, viewer !== null);
+
+  // A move into or out of the current sprint changes the Status on the Project, so it is synced at once. If the
+  // button's 30-second brake holds it, it goes again the moment the brake lets go.
+  const retryTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (retryTimer.current) window.clearTimeout(retryTimer.current);
+  }, []);
+  function syncAfterMove() {
+    syncBoardAsViewer()
+      .then((result) => {
+        if (!result.ok) return setSyncMessage(syncFailureMessage(result));
+        if (result.cached) {
+          if (retryTimer.current) window.clearTimeout(retryTimer.current);
+          retryTimer.current = window.setTimeout(syncAfterMove, retryDelay(result.syncedAt, Date.now()) + 500);
+          return;
+        }
+        setSyncMessage(roadmapSyncMessage(result.roadmap));
+        reloadBoard();
+      })
+      .catch((e) => console.error("sync after move failed", e));
+  }
+
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
@@ -85,15 +117,20 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   function moveToLane(targetLaneId: string, itemId: string | null = draggingId) {
     if (!itemId) return;
     setDraggingId(null);
+    const from = [...lanes, ...groups].find((l) => l.items.some((it) => it.id === itemId))?.id;
     const next = moveItem({ lanes, groups }, itemId, targetLaneId);
     if (!next) return;
     setLanes(next.lanes);
     setGroups(next.groups);
 
-    moveRoadmapItemLane(itemId, targetLaneId).catch((e) => {
-      console.error("moveRoadmapItemLane failed, reloading board", e);
-      reloadBoard();
-    });
+    moveRoadmapItemLane(itemId, targetLaneId)
+      .then(() => {
+        if (from && touchesCurrentSprint(from, targetLaneId)) syncAfterMove();
+      })
+      .catch((e) => {
+        console.error("moveRoadmapItemLane failed, reloading board", e);
+        reloadBoard();
+      });
   }
 
   const moveTargets = [

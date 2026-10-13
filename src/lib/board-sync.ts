@@ -8,8 +8,12 @@ import "server-only";
 // fine-grained PAT from the wrong account reads back as "no_access", not an error).
 // Without a token at all, this reports "not_configured" instead of faking success.
 //
-// Runs from two places: the Dashboard's and Roadmap's manual buttons (via syncBoardAsViewer in
-// actions/sync.ts, which checks the caller has a real session first) and
+// Each column lists its cards in the order of the Project's "Kanban" view (kanbanSort in board.ts), and counts the
+// ELIMS cards it leaves out, so the Dashboard can say why its totals are smaller than GitHub's.
+//
+// Runs from two places: the Dashboard and the Roadmap (via syncBoardAsViewer in actions/sync.ts, which checks
+// the caller has a real session first): their buttons, the pages keeping themselves in step on their own, and a
+// move into or out of the current sprint (src/lib/auto-sync.ts has when and the brakes); and
 // the daily cron route (src/app/api/cron/sync-board, gated on CRON_SECRET
 // instead — there's no user session in a cron invocation). Both funnel through
 // syncBoard(), which also persists the result to board_sync_state so a page
@@ -26,7 +30,7 @@ import "server-only";
 // session) and writes with the admin client.
 
 import { createGeoCloudIssue, GEOCLOUD_REPO, setProjectStatus } from "@/lib/github";
-import { BOARD_REPO, boardCard, projectCard, withStatusWrites, type ProjectCard } from "@/lib/board";
+import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
 import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
@@ -50,6 +54,8 @@ export type SyncColumn = {
   tone: "neutral" | "brand" | "red" | "green";
   count: number;
   items: { title: string; ref: string; url: string }[];
+  /** Cards of this Status on Project #7 from other repositories (ELIMS), which the board never shows: only counted. */
+  elims?: number;
 };
 
 export type RoadmapReconcile = {
@@ -65,18 +71,19 @@ export type RoadmapReconcile = {
 };
 
 export type SyncResult =
-  | { ok: true; columns: SyncColumn[]; syncedAt: string; roadmap: RoadmapReconcile }
+  | { ok: true; columns: SyncColumn[]; syncedAt: string; roadmap: RoadmapReconcile; /** The brake answered with the last snapshot: nothing was read from GitHub. */ cached?: true }
   | { ok: false; reason: "not_configured" | "no_access" | "unauthenticated" | "error"; message?: string };
 
 const QUERY = `
   query($after: String) {
     organization(login: "Essencis-Labs") {
       projectV2(number: 7) {
+        views(first: 20) { nodes { name sortByFields(first: 5) { nodes { direction field { ... on ProjectV2FieldCommon { name } } } } } }
         items(first: 100, after: $after) {
           pageInfo { hasNextPage endCursor }
           nodes {
             id
-            content { ... on Issue { number title url repository { nameWithOwner } } }
+            content { ... on Issue { number title url createdAt updatedAt repository { nameWithOwner } } }
             fieldValueByName(name: "Status") {
               ... on ProjectV2ItemFieldSingleSelectValue { name updatedAt }
             }
@@ -94,7 +101,10 @@ export async function syncBoard(): Promise<SyncResult> {
   const onProject = new Set<number>();
   const cards = new Map<number, ProjectCard>();
   const counts = new Map<string, number>();
-  const itemsByStatus = new Map<string, { title: string; ref: string; url: string }[]>();
+  const itemsByStatus = new Map<string, SortableCard[]>();
+  const byUrl = new Map<string, SortableCard>();
+  const elims = new Map<BoardStatus, number>();
+  let sort: SortKey[] = [];
 
   try {
     let after: string | null = null;
@@ -119,6 +129,10 @@ export async function syncBoard(): Promise<SyncResult> {
         };
       }
 
+      // The order of the Kanban view on GitHub, so the Dashboard lists each column the same way.
+      if (page === 0) sort = kanbanSort(project.views?.nodes);
+      for (const [status, n] of otherRepoCounts(project.items.nodes)) elims.set(status, (elims.get(status) ?? 0) + n);
+
       const items = project.items;
       for (const node of items.nodes) {
         // On the project whatever its Status; an issue taken off the project leaves the Roadmap too.
@@ -129,7 +143,9 @@ export async function syncBoard(): Promise<SyncResult> {
         if (!entry) continue;
         counts.set(entry.status, (counts.get(entry.status) ?? 0) + 1);
         const list = itemsByStatus.get(entry.status) ?? [];
-        list.push(entry.card);
+        const sortable = { card: entry.card, createdAt: node.content.createdAt ?? "", updatedAt: node.content.updatedAt ?? "" };
+        list.push(sortable);
+        byUrl.set(entry.card.url, sortable);
         itemsByStatus.set(entry.status, list);
       }
 
@@ -142,7 +158,8 @@ export async function syncBoard(): Promise<SyncResult> {
       title,
       tone: meta.tone,
       count: counts.get(title) ?? 0,
-      items: itemsByStatus.get(title) ?? [],
+      items: sortCards(itemsByStatus.get(title) ?? [], sort),
+      elims: elims.get(title as BoardStatus) ?? 0,
     }));
     const syncedAt = new Date().toISOString();
 
@@ -161,7 +178,8 @@ export async function syncBoard(): Promise<SyncResult> {
         const run = await syncSprintWithProject(token, cards, await readOpen());
         sprint = run.summary;
         // What was written to the Project shows on the Dashboard now, not only after the next sync.
-        columns = withStatusWrites(columns, run.written);
+        // A card moved by a write goes to its place in the column, not to the bottom.
+        columns = withStatusWrites(columns, run.written).map((c) => ({ ...c, items: sortCards(c.items.map((i) => byUrl.get(i.url)!), sort) }));
       } catch (e) {
         console.error("syncBoard: sprint and project sync failed", e);
         sprint = { ...EMPTY_SPRINT_SUMMARY, error: e instanceof Error ? e.message : "Erro ao alinhar a sprint atual com o Project." };

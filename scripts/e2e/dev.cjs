@@ -25,6 +25,11 @@ const { BASE, expect, sleep } = L;
     expect("login: unknown e-mail gets the SAME message (no user enumeration)", wrongPassword === unknownUser);
 
     // ------------------------------------------------ valid login
+    // The Dashboard syncs by itself on opening (src/lib/auto-sync.ts): a server action POST nobody clicked for.
+    const autoSyncs = [];
+    page.on("request", (r) => {
+      if (r.method() === "POST" && r.headers()["next-action"] && new URL(r.url()).pathname === "/dashboard") autoSyncs.push(r.url());
+    });
     await L.login(s);
     await menu.waitFor();
     expect("login: lands on /dashboard, not on the forced-reset page", page.url().endsWith("/dashboard"), page.url());
@@ -34,6 +39,7 @@ const { BASE, expect, sleep } = L;
 
     // ------------------------------------------------ dashboard
     await sleep(1500);
+    expect("dashboard: opening it asks the server for a sync without anyone clicking", autoSyncs.length >= 1, `posts=${autoSyncs.length}`);
     // The blocks it keeps (Sprint, and the Slices of its issues under it) and the ones it dropped.
     const block = (title) => page.getByText(title, { exact: true }).count();
     expect("dashboard: has the Sprint block, the Slices block and the 'Concluídas' KPI", (await block("Sprint")) === 1 && (await block("Slices")) === 1 && (await block("Concluídas")) === 1);

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { BrandMark } from "@/components/BrandMark";
 import { useRouter } from "next/navigation";
 import { touchActivity } from "@/lib/idle-storage";
 import { createClient } from "@/lib/supabase/client";
@@ -42,10 +43,8 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-rs-bg p-6">
       <div className="flex w-full max-w-sm flex-col gap-6 rounded-2xl border border-rs-border bg-rs-card p-8">
-        <div className="flex items-center gap-2.5">
-          <div className="h-3.5 w-3.5 rounded-[4px] bg-rs-brand" />
-          <span className="text-xl font-extrabold tracking-tight text-rs-text">RoadS</span>
-        </div>
+        <BrandMark />
+
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">

@@ -107,13 +107,15 @@ export async function getDashboard(fallbackColumns: SyncColumn[]): Promise<Dashb
 // error is reported alongside.
 // `notice` is what the sync did to the Roadmap and to the sprint, the same line the Roadmap tab shows, so a sync
 // started here says what it moved too (and what it would write to the Project).
-export async function syncDashboard(): Promise<{ model: DashboardModel; error: string | null; notice: string | null }> {
-  const result = await syncBoardAsViewer();
+// `auto` is the page syncing by itself (see src/lib/auto-sync.ts): same work, the longer brake, and no notice when the
+// brake answered with the last snapshot.
+export async function syncDashboard({ auto = false }: { auto?: boolean } = {}): Promise<{ model: DashboardModel; error: string | null; notice: string | null }> {
+  const result = await syncBoardAsViewer({ auto });
   if (result.ok) {
     const error = result.roadmap.error ? `Kanban atualizado, mas o Roadmap não: ${result.roadmap.error}` : null;
     // The sync stored the sub-issues of the sprint with the board; read them back from there.
     const stored = await getLatestBoardSnapshot();
-    return { model: await buildDashboard(result.columns, result.syncedAt, stored?.slices ?? []), error, notice: error ? null : roadmapSyncMessage(result.roadmap) };
+    return { model: await buildDashboard(result.columns, result.syncedAt, stored?.slices ?? []), error, notice: error || (auto && result.cached) ? null : roadmapSyncMessage(result.roadmap) };
   }
 
   const snapshot = await getLatestBoardSnapshot();

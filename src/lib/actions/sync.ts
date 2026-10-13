@@ -7,14 +7,15 @@
 import { syncBoard, type SyncColumn, type SyncResult } from "@/lib/board-sync";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import type { SliceGroup } from "@/lib/slices";
-import { SYNC_COOLDOWN_MS } from "@/lib/sync-cooldown";
+import { cooldownFor } from "@/lib/auto-sync";
 import { isWithin } from "@/lib/timestamp";
 
 // Client entry point for the manual "Board sincronizado" button — dev, scrum_master
 // and admin can all trigger it (it's a read-refresh, not an edit, so there's no
 // reason to restrict it the way Roadmap editing is restricted); anyone without a
 // real session gets turned away before we spend a GitHub API call on them.
-export async function syncBoardAsViewer(): Promise<SyncResult> {
+// `auto` is a sync the page starts by itself (on opening, on coming back, every 5 minutes): it gets the longer brake.
+export async function syncBoardAsViewer({ auto = false }: { auto?: boolean } = {}): Promise<SyncResult> {
   const supabase = await createServerSupabase();
   const {
     data: { user },
@@ -25,8 +26,8 @@ export async function syncBoardAsViewer(): Promise<SyncResult> {
   if (!profile?.role) return { ok: false, reason: "unauthenticated", message: "Entre para sincronizar o board." };
 
   const latest = await getLatestBoardSnapshot();
-  if (latest && isWithin(latest.syncedAt, Date.now(), SYNC_COOLDOWN_MS)) {
-    return { ok: true, columns: latest.columns, syncedAt: latest.syncedAt, roadmap: { added: 0, removed: 0, issuesCreated: 0 } };
+  if (latest && isWithin(latest.syncedAt, Date.now(), cooldownFor({ auto }))) {
+    return { ok: true, columns: latest.columns, syncedAt: latest.syncedAt, roadmap: { added: 0, removed: 0, issuesCreated: 0 }, cached: true };
   }
 
   return syncBoard();

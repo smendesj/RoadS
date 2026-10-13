@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { BrandMark } from "@/components/BrandMark";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { emailDomainHint, isAllowedEmail, isValidPassword, PASSWORD_HINT } from "@/lib/validation";
@@ -51,10 +52,8 @@ export default function CadastroPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-rs-bg p-6">
       <div className="flex w-full max-w-sm flex-col gap-6 rounded-2xl border border-rs-border bg-rs-card p-8">
-        <div className="flex items-center gap-2.5">
-          <div className="h-3.5 w-3.5 rounded-[4px] bg-rs-brand" />
-          <span className="text-xl font-extrabold tracking-tight text-rs-text">RoadS</span>
-        </div>
+        <BrandMark />
+
 
         {notice ? (
           <p className="text-sm text-rs-text">{notice}</p>
