@@ -81,6 +81,7 @@ function touchDragController({ setLifted, setOver }: Ports) {
 
   const lift = () => {
     if (!press) return;
+    if (!press.card.isConnected) return end(false); // replaced before it lifted: nothing to lift
     press.state = pressAfterTime(press.state, LONG_PRESS_MS);
     if (press.state !== "active") return;
     navigator.vibrate?.(15);
@@ -141,6 +142,11 @@ function touchDragController({ setLifted, setOver }: Ports) {
 
   const onCancel = () => end(false);
 
+  // A second finger anywhere (its events go to its own node, not to ours) means pinching or scrolling: no drag.
+  const onAnotherFinger = (e: TouchEvent) => {
+    if (e.touches.length > 1) end(false);
+  };
+
   const onContextMenu = (e: Event) => {
     if (press) e.preventDefault(); // a long press is ours, not the browser's menu
   };
@@ -163,6 +169,7 @@ function touchDragController({ setLifted, setOver }: Ports) {
     p.target.removeEventListener("touchend", onEnd as EventListener);
     p.target.removeEventListener("touchcancel", onCancel);
     document.removeEventListener("contextmenu", onContextMenu);
+    document.removeEventListener("touchstart", onAnotherFinger);
     // A card that left the page mid-gesture (a reload replaced it) never drops anywhere.
     const target = dropIt && p.card.isConnected ? laneAt(p.x, p.y) : null;
     over = null;
@@ -202,13 +209,15 @@ function touchDragController({ setLifted, setOver }: Ports) {
     target.addEventListener("touchend", onEnd as EventListener, { passive: false });
     target.addEventListener("touchcancel", onCancel);
     document.addEventListener("contextmenu", onContextMenu);
+    document.addEventListener("touchstart", onAnotherFinger);
   }
 
   return {
     start,
     cancel: () => end(false),
     /** True right after a finger held a card: a browser drag then is the browser's own long press (touchOwnsDrag). */
-    touchOwnsDrag: () => touchOwnsDrag(lastTouchAt, Date.now()),
+    // While a finger is on a card, however long it holds, the browser's drag is its long press; just after, too.
+    touchOwnsDrag: () => press !== null || touchOwnsDrag(lastTouchAt, Date.now()),
     /** What a drop does; set after every render, so it always sees the Roadmap as it is now. */
     onDrop: (fn: typeof drop) => {
       drop = fn;

@@ -231,7 +231,7 @@ export function ItemCard({
               value=""
               onChange={(e) => e.target.value && onMoveTo(e.target.value)}
               aria-label="Mover para"
-              className="ml-auto min-w-0 max-w-[65%] rounded-lg border border-rs-border bg-rs-card px-2 py-1 text-base font-bold text-rs-text-soft sm:text-xs lg:hidden pointer-coarse:sr-only"
+              className="ml-auto min-w-0 max-w-[65%] rounded-lg border border-rs-border bg-rs-card px-2 py-1 text-base font-bold text-rs-text-soft sm:text-xs lg:hidden pointer-coarse:sr-only pointer-coarse:focus:not-sr-only"
             >
               <option value="">Mover para…</option>
               {moveTargets

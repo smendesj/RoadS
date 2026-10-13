@@ -170,7 +170,7 @@ const { BASE, expect, sleep, svc } = L;
       const holdTestCard = async (at) => {
         await touch("touchStart", at.x, at.y);
         await sleep(400);
-        const held = await phone.page.locator("[data-touch-ghost]").innerText().catch(() => "");
+        const held = await phone.page.locator("[data-touch-ghost]").innerText({ timeout: 2000 }).catch(() => "");
         if (!held.includes("[TESTE] criado e editado pelo SM")) {
           await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
           throw new Error(`the finger lifted something else: ${held.slice(0, 60)}`);
