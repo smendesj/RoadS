@@ -65,11 +65,11 @@ test("while another run holds the claim (snapshot not yet written), the snapshot
   assert.equal(answer.ok && answer.retryInMs, 25_000);
 });
 
-test("a run still going past the brake answers with no wait to count, never a negative one", async () => {
+test("a run still going past the brake says to come back in 5 seconds, so a waiting move never polls every second", async () => {
   const { port } = deps(ago(10 * 60_000), { claimed: false, claimedAt: ago(50_000) });
   const answer = await brakedSync(port, { brakeMs: BUTTON });
   assert.ok(answer.ok && answer.cached);
-  assert.equal(answer.ok && answer.retryInMs, 0);
+  assert.equal(answer.ok && answer.retryInMs, 5_000);
 });
 
 test("the very first sync, with no snapshot row yet, runs", async () => {

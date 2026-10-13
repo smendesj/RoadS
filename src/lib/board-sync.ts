@@ -102,23 +102,25 @@ const MAX_RUN_MS = 2 * 60_000;
 // The one door to the sync, for every caller: the brake and the claim of src/lib/sync-claim.ts in front of the run.
 // `brakeMs` is the caller's brake: 30 s for a press, FrontlightS and the cron; 5 min for a page's own sync.
 export async function syncBoard({ brakeMs = SYNC_COOLDOWN_MS }: { brakeMs?: number } = {}): Promise<SyncResult> {
-  const admin = createAdminClient();
+  // Lazily, inside the catch below: a server without the service key answers { ok: false } instead of throwing.
+  let client: ReturnType<typeof createAdminClient> | null = null;
+  const admin = () => (client ??= createAdminClient());
   return brakedSync(
     {
       now: () => Date.now(),
       configured: () => Boolean(process.env.GITHUB_TOKEN),
       latestSnapshot: async () => {
-        const { data } = await admin.from("board_sync_state").select("columns, synced_at").eq("id", true).maybeSingle();
+        const { data } = await admin().from("board_sync_state").select("columns, synced_at").eq("id", true).maybeSingle();
         return data ? { columns: data.columns as SyncColumn[], syncedAt: data.synced_at as string } : null;
       },
       claim: async (ms) => {
-        const { data, error } = await admin.rpc("claim_board_sync", { p_brake_ms: ms, p_max_run_ms: MAX_RUN_MS });
+        const { data, error } = await admin().rpc("claim_board_sync", { p_brake_ms: ms, p_max_run_ms: MAX_RUN_MS });
         if (error) throw error;
         const row = (data as { claimed: boolean; claimed_at: string | null }[] | null)?.[0];
         return { claimed: row?.claimed ?? false, claimedAt: row?.claimed_at ?? null };
       },
       finish: async (claimedAt) => {
-        const { error } = await admin.rpc("finish_board_sync", { p_claimed_at: claimedAt });
+        const { error } = await admin().rpc("finish_board_sync", { p_claimed_at: claimedAt });
         if (error) throw error;
       },
       run: runBoardSync,

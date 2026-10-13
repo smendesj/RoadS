@@ -44,13 +44,14 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   const [groups, setGroups] = useState<RoadmapGroup[]>([]);
   const [boardLoaded, setBoardLoaded] = useState(false);
 
-  // A reload started before a move reads the board before it: its answer is dropped, so the card doesn't jump back.
-  const moveGeneration = useRef(0);
+  // A reload that started before a move, or lands while one is still being saved, read the board before it: its
+  // answer is dropped, so the card doesn't jump back.
+  const moves = useRef({ generation: 0, inFlight: 0 });
   function reloadBoard() {
-    const generation = moveGeneration.current;
+    const generation = moves.current.generation;
     getRoadmapBoard()
       .then(({ lanes, groups }) => {
-        if (generation !== moveGeneration.current) return;
+        if (generation !== moves.current.generation || moves.current.inFlight > 0) return;
         setLanes(lanes);
         setGroups(groups);
         setBoardLoaded(true);
@@ -75,8 +76,6 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
     });
   }
 
-  // Moves still being saved: a reload that reads the board before they land would put the card back where it was.
-  const movesInFlight = useRef(0);
   const mounted = useRef(true);
   const retryTimer = useRef<number | null>(null);
   useEffect(() => {
@@ -87,12 +86,11 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
     };
   }, []);
 
-  // Kept in step with GitHub by itself (src/lib/auto-sync.ts), quietly; the board reloads only when the sync ran,
-  // and not over a move that is still being saved.
+  // Kept in step with GitHub by itself (src/lib/auto-sync.ts), quietly; the board reloads only when the sync ran.
   useAutoSync(() => {
     syncBoardAsViewer({ auto: true })
       .then((result) => {
-        if (result.ok && !result.cached && movesInFlight.current === 0) reloadBoard();
+        if (result.ok && !result.cached) reloadBoard();
       })
       .catch((e) => console.error("auto sync failed", e));
   }, viewer !== null);
@@ -111,7 +109,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
           return;
         }
         setSyncMessage(roadmapSyncMessage(result.roadmap));
-        if (movesInFlight.current === 0) reloadBoard();
+        reloadBoard();
       })
       .catch((e) => console.error("sync after move failed", e));
   }
@@ -140,15 +138,16 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
     setLanes(next.lanes);
     setGroups(next.groups);
 
-    movesInFlight.current++;
-    moveGeneration.current++;
+    const counters = moves.current;
+    counters.inFlight++;
+    counters.generation++;
     moveRoadmapItemLane(itemId, targetLaneId)
       .then(() => {
-        movesInFlight.current--;
+        counters.inFlight--;
         if (from && touchesCurrentSprint(from, targetLaneId)) syncAfterMove();
       })
       .catch((e) => {
-        movesInFlight.current--;
+        counters.inFlight--;
         console.error("moveRoadmapItemLane failed, reloading board", e);
         reloadBoard();
       });

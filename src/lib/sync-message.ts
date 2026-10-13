@@ -49,7 +49,8 @@ export function roadmapChanged(roadmap: Parameters<typeof roadmapSyncMessage>[0]
       (s && (s.error || s.pulled || s.released || s.written || s.wouldWrite || s.failed || s.stuck))
   );
 }
-// What the button says when the brake answered (a sync started less than 30 s ago, or is still running): nothing\n// was read now, and that sync may have failed, so it never says it worked.
+// What the button says when the brake answered (a sync started less than 30 s ago, or is still running): nothing
+// was read now, and that sync may have failed, so it never says it worked.
 export function brakeMessage(retryInMs: number | undefined): string {
   if (retryInMs === undefined) return "Uma sincronização começou há menos de 30 s ou ainda está em andamento; tente de novo em instantes.";
   return `Uma sincronização começou há menos de 30 s ou ainda está em andamento; a próxima pode sair em ${Math.max(1, Math.ceil(retryInMs / 1000))} s.`;

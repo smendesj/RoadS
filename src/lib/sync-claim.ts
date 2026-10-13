@@ -24,16 +24,19 @@ export type BrakeDeps = {
   run(): Promise<SyncResult>;
 };
 
+const RUNNING_RETRY_MS = 5_000;
+
 export async function brakedSync(deps: BrakeDeps, { brakeMs }: { brakeMs: number }): Promise<SyncResult> {
   const now = deps.now();
   const latest = await deps.latestSnapshot();
-  const cached = (since: string): SyncResult => ({
+  // `floorMs`: a run still going past its brake can't say when it ends, so whoever waits is told 5 s, not "now".
+  const cached = (since: string, floorMs = 0): SyncResult => ({
     ok: true,
     columns: (latest?.columns ?? []) as SyncColumn[],
     syncedAt: latest?.syncedAt ?? since,
     roadmap: { added: 0, removed: 0, issuesCreated: 0 },
     cached: true,
-    retryInMs: Math.max(0, Date.parse(since) + brakeMs - now),
+    retryInMs: Math.max(floorMs, Date.parse(since) + brakeMs - now),
   });
 
   if (latest) {
@@ -42,7 +45,7 @@ export async function brakedSync(deps: BrakeDeps, { brakeMs }: { brakeMs: number
   }
   if (!deps.configured()) return { ok: false, reason: "not_configured" };
   const { claimed, claimedAt } = await deps.claim(brakeMs);
-  if (!claimed && claimedAt) return cached(claimedAt);
+  if (!claimed && claimedAt) return cached(claimedAt, RUNNING_RETRY_MS);
   try {
     return await deps.run();
   } finally {
