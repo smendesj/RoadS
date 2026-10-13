@@ -243,6 +243,7 @@ const { BASE, expect, sleep, svc } = L;
       if (strays.length) {
         // Never let the cleanup delete a real item with its test lane: stop here, before it, so a person moves it back.
         console.error("STOP: real items in test lanes, cleanup skipped:", strays.map((r) => r.id).join(","));
+        L.summary("SCRUM MASTER");
         process.exit(1);
       }
       await phone.context.close();
