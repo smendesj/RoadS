@@ -11,6 +11,7 @@ import { useAutoSync } from "@/lib/use-auto-sync";
 import { useTouchDrag } from "@/lib/use-touch-drag";
 import { orderGroups } from "@/lib/group-order";
 import { isStack } from "@/lib/issue-fields";
+import { newestIssueFirst } from "@/lib/issue-order";
 import { moveItem } from "@/lib/roadmap-move";
 import { brakeMessage, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
 import { MAX_ITEMS_PER_SPRINT, type Lane, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
@@ -278,7 +279,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                     </span>
                   </div>
 
-                  {lane.items.map((item) => (
+                  {newestIssueFirst(lane.items, (i) => i.number).map((item) => (
                     <ItemCard
                       key={item.id}
                       item={item}
@@ -357,7 +358,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                         </div>
                         {/* A long group scrolls inside its box instead of stretching the whole column. */}
                         <div data-drag-scroll="y" className="-mr-1.5 flex max-h-[560px] flex-col gap-2.5 overflow-y-auto pr-1.5">
-                          {[...g.items].sort((a, b) => (b.number ?? 0) - (a.number ?? 0)).map((item) => (
+                          {newestIssueFirst(g.items, (i) => i.number).map((item) => (
                             <ItemCard
                               key={item.id}
                               item={item}

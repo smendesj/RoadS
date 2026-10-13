@@ -4,6 +4,7 @@
 // Status comes from the same snapshot as the Kanban, so a slice reads the same in both places.
 
 import type { StatusKey } from "./board.ts";
+import { newestIssueFirst } from "./issue-order.ts";
 import type { Tone } from "./tones.ts";
 
 export const SLICES_REPO = { owner: "Essencis-Labs", name: "GeoCloudAI" } as const;
@@ -65,10 +66,13 @@ const STATUS: Record<StatusKey, { status: string; tone: Tone }> = {
   done: { status: "CONCLUÍDO", tone: "green" },
 };
 
-/** A slice stands where the board puts it; one that is closed is done whatever the board says, and one the board doesn't have is still to do. */
+/**
+ * A slice stands where the board puts it; one that is closed is done whatever the board says, and one the board
+ * doesn't have is still to do. Blocks and their rows go from the highest issue number to the lowest.
+ */
 export function sliceBlocks(groups: SliceGroup[], statusOf: Map<string, StatusKey>): SliceBlock[] {
-  return groups.map((g) => {
-    const rows = g.items.map((s) => {
+  return newestIssueFirst(groups, (g) => g.parent.number).map((g) => {
+    const rows = newestIssueFirst(g.items, (s) => s.number).map((s) => {
       const label = STATUS[s.state === "closed" ? "done" : (statusOf.get(s.url) ?? "open")];
       return { title: s.title, ref: `#${s.number}`, url: s.url, status: label.status, tone: label.tone };
     });

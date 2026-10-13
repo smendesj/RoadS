@@ -68,12 +68,18 @@ test("each slice shows where it stands on the board, and a closed one is done wh
     [URL(14), "open" as const],
   ]);
   const [block] = sliceBlocks(GROUPS, statusOf);
+  // Highest issue number first, like every block of RoadS.
   assert.deepEqual(block.rows.map((r) => [r.ref, r.status, r.tone]), [
-    ["#11", "A FAZER", "neutral"],
-    ["#12", "EM ANDAMENTO", "brand"],
-    ["#13", "BLOQUEADO", "red"],
     ["#14", "CONCLUÍDO", "green"],
+    ["#13", "BLOQUEADO", "red"],
+    ["#12", "EM ANDAMENTO", "brand"],
+    ["#11", "A FAZER", "neutral"],
   ]);
+});
+
+test("the blocks go from the highest parent issue to the lowest, whatever order the sprint had", () => {
+  const group = (n: number): SliceGroup => ({ parent: { number: n, title: `Issue ${n}`, url: URL(n) }, total: 1, items: [{ number: n * 10, title: "s", url: URL(n * 10), state: "open" }] });
+  assert.deepEqual(sliceBlocks([group(959), group(976), group(974)], new Map()).map((b) => b.ref), ["#976", "#974", "#959"]);
 });
 
 test("a block says what it belongs to and how many of its slices are done", () => {

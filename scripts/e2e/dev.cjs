@@ -52,6 +52,21 @@ const { BASE, expect, sleep } = L;
       const order = ["Sprint", "Slices", "Kanban"].map((t) => [...document.querySelectorAll("span")].find((el) => el.textContent === t));
       return order.every(Boolean) && order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING && order[1].compareDocumentPosition(order[2]) & Node.DOCUMENT_POSITION_FOLLOWING;
     }));
+    // Every block lists its issues from the highest number to the lowest (src/lib/issue-order.ts), read on the real sprint.
+    const descending = (refs) => refs.every((r, i) => i === 0 || r <= refs[i - 1]);
+    const numbersIn = (texts) => texts.map((t) => Number(t.match(/^#(\d+)$/)?.[1])).filter((n) => n > 0);
+    const sprintBlock = page.getByText("Sprint", { exact: true }).locator("xpath=..");
+    const sprintNumbers = numbersIn(await sprintBlock.locator("span.font-mono").allInnerTexts());
+    expect("dashboard: the Sprint block lists its issues from the highest number to the lowest", sprintNumbers.length > 1 && descending(sprintNumbers), JSON.stringify(sprintNumbers));
+    const slicesBlock = page.getByText("Slices", { exact: true }).locator("xpath=..");
+    const parents = numbersIn(await slicesBlock.locator("section > div span.font-mono").allInnerTexts());
+    const rowsOk = await slicesBlock.locator("section").evaluateAll((sections) =>
+      sections.every((s) => {
+        const n = [...s.querySelectorAll(":scope > a span.font-mono")].map((el) => Number(el.textContent.replace("#", "")));
+        return n.every((x, i) => i === 0 || x <= n[i - 1]);
+      })
+    );
+    expect("dashboard: the Slices blocks, and the slices in each, go from the highest issue number to the lowest", descending(parents) && rowsOk, JSON.stringify(parents));
     const notConfigured = () => page.getByText(/ainda não configurada/).waitFor({ timeout: 20000 }).then(() => true, () => false);
     expect("dashboard: its own sync with no GitHub token fails closed with a clear message (nothing reaches GitHub)", await notConfigured());
     const sync = page.getByRole("button", { name: /Sincronizar/ });
@@ -68,6 +83,14 @@ const { BASE, expect, sleep } = L;
     await page.waitForURL("**/roadmap");
     await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
     await page.getByText("[TESTE] item semeado (sem dono)").waitFor({ timeout: 15000 });
+    const sprintOrders = await page.locator('[data-drag-scroll="x"] > [data-lane-id]').evaluateAll((lanes) =>
+      lanes.map((lane) => [...lane.querySelectorAll("div[draggable] a, div[draggable] > span")].map((a) => Number(a.textContent.match(/^#(\d+) /)?.[1])).filter((n) => n > 0))
+    );
+    expect(
+      "roadmap: each of the sprints lists its issues from the highest number to the lowest",
+      sprintOrders.some((n) => n.length > 1) && sprintOrders.every((n) => n.every((x, i) => i === 0 || x <= n[i - 1])),
+      JSON.stringify(sprintOrders)
+    );
     const count = (loc) => loc.count();
     expect("roadmap: dev can READ the board (fixture items visible)", (await count(page.getByText("[TESTE] item do scrum master"))) === 1);
     expect("roadmap: no '+ Novo item'", (await count(page.getByRole("button", { name: "+ Novo item" }))) === 0);
