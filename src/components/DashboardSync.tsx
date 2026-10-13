@@ -55,14 +55,17 @@ export function DashboardSyncProvider({
     });
   }
 
-  // The page keeps itself in step with GitHub (src/lib/auto-sync.ts), quietly: no spinner, and a notice only when
-  // the sync actually ran. A failure says so like the button does.
+  // The page keeps itself in step with GitHub (src/lib/auto-sync.ts), quietly: no spinner, a notice only when the
+  // sync changed something, and an answer from the brake leaves the last error standing (nothing was fixed). Never
+  // while the button's own sync is under way.
   useAutoSync(() => {
+    if (isPending) return;
     syncDashboard({ auto: true })
       .then((result) => {
         setModel(result.model);
+        if (result.cached) return;
         setError(result.error);
-        if (result.notice) setNotice(result.notice);
+        setNotice(result.notice);
       })
       .catch((e) => console.error("auto sync failed", e));
   }, canSync);

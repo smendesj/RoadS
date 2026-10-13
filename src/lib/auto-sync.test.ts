@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AUTO_SYNC_MS, cooldownFor, retryDelay, touchesCurrentSprint } from "./auto-sync.ts";
+import { AUTO_SYNC_MIN_GAP_MS, AUTO_SYNC_MS, cooldownFor, retryDelay, touchesCurrentSprint } from "./auto-sync.ts";
 import { SYNC_COOLDOWN_MS } from "./sync-cooldown.ts";
 
 test("a sync the page starts by itself goes to GitHub at most every 5 minutes; the button keeps its 30 seconds", () => {
@@ -17,9 +17,13 @@ test("only a move into or out of the current sprint changes the Project, so only
   assert.equal(touchesCurrentSprint("atual", "atual"), false);
 });
 
-test("a move the 30-second brake held back is synced again the moment the brake lets go", () => {
-  const now = Date.parse("2026-10-13T12:00:00.000Z");
-  assert.equal(retryDelay("2026-10-13T11:59:50.000Z", now), 20_000);
-  assert.equal(retryDelay("2026-10-13T11:59:00.000Z", now), 0, "the brake is already over");
-  assert.equal(retryDelay("not a date", now), 0);
+test("a move the 30-second brake held back is synced again when the server says the brake lets go", () => {
+  assert.equal(retryDelay(20_000), 20_500, "the server's own count, plus half a second");
+  assert.equal(retryDelay(0), 1_000, "never a tight loop, even when the brake is already over");
+  assert.equal(retryDelay(undefined), 1_000);
+  assert.equal(retryDelay(10 * 60_000), 35_000, "never longer than the button's brake and a margin");
+});
+
+test("switching tabs back and forth asks at most once a minute", () => {
+  assert.equal(AUTO_SYNC_MIN_GAP_MS, 60_000);
 });

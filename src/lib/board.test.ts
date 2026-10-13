@@ -161,3 +161,13 @@ test("otherRepoCounts counts, per Status, the cards of other repositories that t
   ]);
   assert.deepEqual(Object.fromEntries(counts), { Open: 2, Done: 1 });
 });
+
+test("kanbanSort follows the views exactly as GitHub returned them for Project #7 on 13/10/2026", () => {
+  // Recorded from `gh api graphql` (views { name sortByFields { direction field { ... on ProjectV2FieldCommon { name } } } }).
+  const recorded = [
+    { name: "Kanban", sortByFields: { nodes: [{ direction: "DESC", field: { name: "Created" } }] } },
+    { name: "Tabela", sortByFields: { nodes: [{ direction: "DESC", field: { name: "Closed" } }, { direction: "DESC", field: { name: "Created" } }] } },
+    { name: "View 9", sortByFields: { nodes: [] } },
+  ];
+  assert.deepEqual(kanbanSort(recorded), [{ field: "Created", direction: "DESC" }]);
+});

@@ -54,7 +54,6 @@ export default function CadastroPage() {
       <div className="flex w-full max-w-sm flex-col gap-6 rounded-2xl border border-rs-border bg-rs-card p-8">
         <BrandMark />
 
-
         {notice ? (
           <p className="text-sm text-rs-text">{notice}</p>
         ) : (

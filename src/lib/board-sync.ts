@@ -71,7 +71,7 @@ export type RoadmapReconcile = {
 };
 
 export type SyncResult =
-  | { ok: true; columns: SyncColumn[]; syncedAt: string; roadmap: RoadmapReconcile; /** The brake answered with the last snapshot: nothing was read from GitHub. */ cached?: true }
+  | { ok: true; columns: SyncColumn[]; syncedAt: string; roadmap: RoadmapReconcile; /** The brake answered with the last snapshot: nothing was read from GitHub, and it lets go in `retryInMs`. */ cached?: true; retryInMs?: number }
   | { ok: false; reason: "not_configured" | "no_access" | "unauthenticated" | "error"; message?: string };
 
 const QUERY = `
@@ -178,8 +178,12 @@ export async function syncBoard(): Promise<SyncResult> {
         const run = await syncSprintWithProject(token, cards, await readOpen());
         sprint = run.summary;
         // What was written to the Project shows on the Dashboard now, not only after the next sync.
-        // A card moved by a write goes to its place in the column, not to the bottom.
-        columns = withStatusWrites(columns, run.written).map((c) => ({ ...c, items: sortCards(c.items.map((i) => byUrl.get(i.url)!), sort) }));
+        // A card moved by a write takes its place by the view's sort (with no sort, it stays last: GitHub's manual order
+        // can't be known for it until the next sync).
+        columns = withStatusWrites(columns, run.written).map((c) => ({
+          ...c,
+          items: sortCards(c.items.map((i) => byUrl.get(i.url) ?? { card: i, createdAt: "", updatedAt: "" }), sort),
+        }));
       } catch (e) {
         console.error("syncBoard: sprint and project sync failed", e);
         sprint = { ...EMPTY_SPRINT_SUMMARY, error: e instanceof Error ? e.message : "Erro ao alinhar a sprint atual com o Project." };

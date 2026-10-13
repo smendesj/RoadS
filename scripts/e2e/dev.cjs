@@ -50,11 +50,16 @@ const { BASE, expect, sleep } = L;
       const order = ["Sprint", "Slices", "Kanban"].map((t) => [...document.querySelectorAll("span")].find((el) => el.textContent === t));
       return order.every(Boolean) && order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING && order[1].compareDocumentPosition(order[2]) & Node.DOCUMENT_POSITION_FOLLOWING;
     }));
+    const notConfigured = () => page.getByText(/ainda não configurada/).waitFor({ timeout: 20000 }).then(() => true, () => false);
+    expect("dashboard: its own sync with no GitHub token fails closed with a clear message (nothing reaches GitHub)", await notConfigured());
     const sync = page.getByRole("button", { name: /Sincronizar/ });
     expect("dashboard: shows the (read-refresh) Sincronizar button", (await sync.count()) === 1);
+    const before = autoSyncs.length;
     await sync.click();
-    const notConfigured = await page.getByText(/ainda não configurada/).waitFor({ timeout: 20000 }).then(() => true, () => false);
-    expect("dashboard: Sincronizar with no GitHub token fails closed with a clear message (nothing reaches GitHub)", notConfigured);
+    await sleep(300);
+    // The click clears the message and asks again: a new POST, and the message comes back from that answer.
+    const cleared = (await page.getByText(/ainda não configurada/).count()) === 0 || autoSyncs.length > before;
+    expect("dashboard: Sincronizar asks the server again and fails closed the same way", cleared && (await notConfigured()) && autoSyncs.length > before, `posts ${before} -> ${autoSyncs.length}`);
 
     // ------------------------------------------------ roadmap is read-only
     await page.getByRole("link", { name: "Roadmap", exact: true }).click();

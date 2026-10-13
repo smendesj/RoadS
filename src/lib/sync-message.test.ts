@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { roadmapSyncMessage, syncFailureMessage } from "./sync-message.ts";
+import { brakeMessage, roadmapChanged, roadmapSyncMessage, syncFailureMessage } from "./sync-message.ts";
 
 test("a missing GitHub token says so, wherever the sync was started from", () => {
   assert.match(syncFailureMessage({ reason: "not_configured" }), /ainda não configurada.*GITHUB_TOKEN/);
@@ -74,4 +74,21 @@ test("the summary says how many Roadmap titles followed a rename on GitHub, and 
     roadmapSyncMessage({ added: 0, removed: 0, issuesCreated: 0, retitled: 3 }),
     `${BASE} 3 título(s) do Roadmap acompanharam a renomeação da issue no GitHub.`
   );
+});
+
+test("a sync the page ran by itself is worth a line only when it changed something", () => {
+  const quiet = { added: 0, removed: 0, issuesCreated: 0, untyped: 3, sprint: { pulled: 0, released: 0, written: 0, wouldWrite: 0, failed: 0, stuck: 0 } };
+  assert.equal(roadmapChanged(quiet), false, "0 added, 0 removed and issues left without a type are no news");
+  assert.equal(roadmapChanged({ added: 0, removed: 0, issuesCreated: 0 }), false);
+  for (const change of [{ added: 1 }, { removed: 2 }, { issuesCreated: 1 }, { retitled: 1 }, { error: "boom" }]) {
+    assert.equal(roadmapChanged({ ...quiet, ...change }), true, JSON.stringify(change));
+  }
+  for (const sprint of [{ pulled: 1 }, { released: 1 }, { written: 1 }, { wouldWrite: 1 }, { failed: 1 }, { stuck: 1 }, { error: "x" }]) {
+    assert.equal(roadmapChanged({ ...quiet, sprint: { ...quiet.sprint, ...sprint } }), true, JSON.stringify(sprint));
+  }
+});
+test("a press the brake held back says so and when the next sync can run, never a made-up result", () => {
+  assert.equal(brakeMessage(20_000), "Sincronizado há menos de 30 s; a próxima sincronização pode sair em 20 s.");
+  assert.equal(brakeMessage(400), "Sincronizado há menos de 30 s; a próxima sincronização pode sair em 1 s.");
+  assert.equal(brakeMessage(undefined), "Sincronizado há menos de 30 s; tente de novo em instantes.");
 });

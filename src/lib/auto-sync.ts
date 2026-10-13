@@ -8,6 +8,8 @@ import { CURRENT_SPRINT } from "./sprint-status-sync.ts";
 import { SYNC_COOLDOWN_MS } from "./sync-cooldown.ts";
 
 export const AUTO_SYNC_MS = 5 * 60_000;
+/** Coming back to a tab syncs, but switching back and forth asks at most this often. */
+export const AUTO_SYNC_MIN_GAP_MS = 60_000;
 
 export function cooldownFor({ auto = false }: { auto?: boolean }): number {
   return auto ? AUTO_SYNC_MS : SYNC_COOLDOWN_MS;
@@ -17,8 +19,10 @@ export function touchesCurrentSprint(from: string, to: string): boolean {
   return from !== to && (from === CURRENT_SPRINT || to === CURRENT_SPRINT);
 }
 
-/** How long until the button's brake lets a sync through again, counted from the last sync. */
-export function retryDelay(syncedAt: string, now: number): number {
-  const then = Date.parse(syncedAt);
-  return Number.isNaN(then) ? 0 : Math.max(0, then + SYNC_COOLDOWN_MS - now);
+/**
+ * When to try again a move the button's brake held back: the server's own count (its clock, not the browser's),
+ * half a second after, never sooner than 1 s (no tight loop) nor later than the brake and a margin.
+ */
+export function retryDelay(retryInMs: number | undefined): number {
+  return Math.min(SYNC_COOLDOWN_MS + 5_000, Math.max(1_000, (retryInMs ?? 0) + 500));
 }

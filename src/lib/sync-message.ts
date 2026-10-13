@@ -40,3 +40,17 @@ export function roadmapSyncMessage(roadmap: {
     (roadmap.sprint ? sprintLine(roadmap.sprint) : "")
   );
 }
+
+// Whether a sync did anything worth telling: a page that syncs by itself every few minutes says nothing otherwise.
+export function roadmapChanged(roadmap: Parameters<typeof roadmapSyncMessage>[0]): boolean {
+  const s = roadmap.sprint;
+  return Boolean(
+    roadmap.error || roadmap.added || roadmap.removed || roadmap.issuesCreated || roadmap.retitled ||
+      (s && (s.error || s.pulled || s.released || s.written || s.wouldWrite || s.failed || s.stuck))
+  );
+}
+// What the button says when the brake answered (a sync ran, or was claimed, less than 30 s ago): nothing was read now.
+export function brakeMessage(retryInMs: number | undefined): string {
+  if (retryInMs === undefined) return "Sincronizado há menos de 30 s; tente de novo em instantes.";
+  return `Sincronizado há menos de 30 s; a próxima sincronização pode sair em ${Math.max(1, Math.ceil(retryInMs / 1000))} s.`;
+}

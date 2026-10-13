@@ -70,7 +70,6 @@ export default function RedefinirSenhaPage() {
       <div className="flex w-full max-w-sm flex-col gap-6 rounded-2xl border border-rs-border bg-rs-card p-8">
         <BrandMark />
 
-
         <p className="text-sm text-rs-text">
           Este é o seu primeiro acesso, ou a sua senha foi resetada por um admin. Crie uma senha nova para continuar.
         </p>

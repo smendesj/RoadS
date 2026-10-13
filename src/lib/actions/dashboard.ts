@@ -10,7 +10,7 @@ import { getLatestBoardSnapshot, syncBoardAsViewer } from "@/lib/actions/sync";
 import { statusByUrl } from "@/lib/board";
 import type { SyncColumn } from "@/lib/board-sync";
 import { sliceBlocks, type SliceBlock, type SliceGroup } from "@/lib/slices";
-import { roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
+import { brakeMessage, roadmapChanged, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
 import { createClient } from "@/lib/supabase/server";
 import type { Tone } from "@/lib/tones";
 
@@ -107,15 +107,22 @@ export async function getDashboard(fallbackColumns: SyncColumn[]): Promise<Dashb
 // error is reported alongside.
 // `notice` is what the sync did to the Roadmap and to the sprint, the same line the Roadmap tab shows, so a sync
 // started here says what it moved too (and what it would write to the Project).
-// `auto` is the page syncing by itself (see src/lib/auto-sync.ts): same work, the longer brake, and no notice when the
-// brake answered with the last snapshot.
-export async function syncDashboard({ auto = false }: { auto?: boolean } = {}): Promise<{ model: DashboardModel; error: string | null; notice: string | null }> {
+// `auto` is the page syncing by itself (see src/lib/auto-sync.ts): same work, the longer brake, and a notice only
+// when the sync changed something. `cached` says the brake answered with the last snapshot (no news, no new error).
+export async function syncDashboard(opts?: { auto?: boolean }): Promise<{ model: DashboardModel; error: string | null; notice: string | null; cached?: true }> {
+  const auto = opts != null && typeof opts === "object" && opts.auto === true;
   const result = await syncBoardAsViewer({ auto });
   if (result.ok) {
     const error = result.roadmap.error ? `Kanban atualizado, mas o Roadmap não: ${result.roadmap.error}` : null;
     // The sync stored the sub-issues of the sprint with the board; read them back from there.
     const stored = await getLatestBoardSnapshot();
-    return { model: await buildDashboard(result.columns, result.syncedAt, stored?.slices ?? []), error, notice: error || (auto && result.cached) ? null : roadmapSyncMessage(result.roadmap) };
+    const quiet = auto && (result.cached || !roadmapChanged(result.roadmap));
+    return {
+      model: await buildDashboard(result.columns, result.syncedAt, stored?.slices ?? []),
+      error,
+      notice: error || quiet ? null : result.cached ? brakeMessage(result.retryInMs) : roadmapSyncMessage(result.roadmap),
+      ...(result.cached ? { cached: true as const } : {}),
+    };
   }
 
   const snapshot = await getLatestBoardSnapshot();

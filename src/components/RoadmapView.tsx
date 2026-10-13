@@ -11,7 +11,7 @@ import { useAutoSync } from "@/lib/use-auto-sync";
 import { orderGroups } from "@/lib/group-order";
 import { isStack } from "@/lib/issue-fields";
 import { moveItem } from "@/lib/roadmap-move";
-import { roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
+import { brakeMessage, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
 import { MAX_ITEMS_PER_SPRINT, type Lane, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 import { roleLabel as labelFor, type Viewer } from "@/lib/viewer";
 
@@ -45,11 +45,13 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   const [boardLoaded, setBoardLoaded] = useState(false);
 
   function reloadBoard() {
-    getRoadmapBoard().then(({ lanes, groups }) => {
-      setLanes(lanes);
-      setGroups(groups);
-      setBoardLoaded(true);
-    });
+    getRoadmapBoard()
+      .then(({ lanes, groups }) => {
+        setLanes(lanes);
+        setGroups(groups);
+        setBoardLoaded(true);
+      })
+      .catch((e) => console.error("getRoadmapBoard failed", e));
   }
   useEffect(reloadBoard, []);
 
@@ -64,37 +66,48 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
         setSyncMessage(syncFailureMessage(result));
         return;
       }
-      setSyncMessage(roadmapSyncMessage(result.roadmap));
+      setSyncMessage(result.cached ? brakeMessage(result.retryInMs) : roadmapSyncMessage(result.roadmap));
       reloadBoard();
     });
   }
 
-  // Kept in step with GitHub by itself (src/lib/auto-sync.ts), quietly; the board reloads only when the sync ran.
+  // Moves still being saved: a reload that reads the board before they land would put the card back where it was.
+  const movesInFlight = useRef(0);
+  const mounted = useRef(true);
+  const retryTimer = useRef<number | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (retryTimer.current) window.clearTimeout(retryTimer.current);
+    };
+  }, []);
+
+  // Kept in step with GitHub by itself (src/lib/auto-sync.ts), quietly; the board reloads only when the sync ran,
+  // and not over a move that is still being saved.
   useAutoSync(() => {
     syncBoardAsViewer({ auto: true })
       .then((result) => {
-        if (result.ok && !result.cached) reloadBoard();
+        if (result.ok && !result.cached && movesInFlight.current === 0) reloadBoard();
       })
       .catch((e) => console.error("auto sync failed", e));
   }, viewer !== null);
 
   // A move into or out of the current sprint changes the Status on the Project, so it is synced at once. If the
-  // button's 30-second brake holds it, it goes again the moment the brake lets go.
-  const retryTimer = useRef<number | null>(null);
-  useEffect(() => () => {
-    if (retryTimer.current) window.clearTimeout(retryTimer.current);
-  }, []);
+  // button's 30-second brake holds it, it goes again when the server says the brake lets go; never after the page
+  // is gone.
   function syncAfterMove() {
     syncBoardAsViewer()
       .then((result) => {
+        if (!mounted.current) return;
         if (!result.ok) return setSyncMessage(syncFailureMessage(result));
         if (result.cached) {
           if (retryTimer.current) window.clearTimeout(retryTimer.current);
-          retryTimer.current = window.setTimeout(syncAfterMove, retryDelay(result.syncedAt, Date.now()) + 500);
+          retryTimer.current = window.setTimeout(syncAfterMove, retryDelay(result.retryInMs));
           return;
         }
         setSyncMessage(roadmapSyncMessage(result.roadmap));
-        reloadBoard();
+        if (movesInFlight.current === 0) reloadBoard();
       })
       .catch((e) => console.error("sync after move failed", e));
   }
@@ -123,11 +136,14 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
     setLanes(next.lanes);
     setGroups(next.groups);
 
+    movesInFlight.current++;
     moveRoadmapItemLane(itemId, targetLaneId)
       .then(() => {
+        movesInFlight.current--;
         if (from && touchesCurrentSprint(from, targetLaneId)) syncAfterMove();
       })
       .catch((e) => {
+        movesInFlight.current--;
         console.error("moveRoadmapItemLane failed, reloading board", e);
         reloadBoard();
       });

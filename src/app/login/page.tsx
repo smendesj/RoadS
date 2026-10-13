@@ -45,7 +45,6 @@ export default function LoginPage() {
       <div className="flex w-full max-w-sm flex-col gap-6 rounded-2xl border border-rs-border bg-rs-card p-8">
         <BrandMark />
 
-
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">
             <span className="text-[13px] font-semibold text-rs-text-soft">E-mail</span>
