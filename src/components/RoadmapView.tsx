@@ -8,6 +8,7 @@ import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemL
 import { syncBoardAsViewer } from "@/lib/actions/sync";
 import { retryDelay, touchesCurrentSprint } from "@/lib/auto-sync";
 import { useAutoSync } from "@/lib/use-auto-sync";
+import { useTouchDrag } from "@/lib/use-touch-drag";
 import { orderGroups } from "@/lib/group-order";
 import { isStack } from "@/lib/issue-fields";
 import { moveItem } from "@/lib/roadmap-move";
@@ -115,6 +116,8 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   }
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // A finger holds a card and drags it (src/lib/use-touch-drag.ts); the drop is the same move as the desktop's.
+  const touchDrag = useTouchDrag((itemId, toLane) => moveToLane(toLane, itemId));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
 
@@ -244,16 +247,20 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
         ) : (
           <>
             {/* Below lg the three sprints sit in a swipeable row, each close to one screen wide. */}
-            <div className="-mx-4 flex snap-x snap-mandatory items-start gap-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:grid lg:grid-cols-3 lg:gap-5 lg:overflow-visible lg:px-0 lg:pb-0">
+            <div data-drag-scroll="x" className="-mx-4 flex snap-x snap-mandatory items-start gap-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:grid lg:grid-cols-3 lg:gap-5 lg:overflow-visible lg:px-0 lg:pb-0">
               {lanes.map((lane) => (
                 <div
                   key={lane.id}
+                  data-lane-id={lane.id}
+                  data-drop-target={touchDrag.over === lane.id ? "" : undefined}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault();
                     moveToLane(lane.id);
                   }}
-                  className="flex min-h-[240px] w-[85%] max-w-[380px] shrink-0 snap-start flex-col gap-3 rounded-2xl border border-rs-border bg-rs-lane p-4 lg:w-auto lg:max-w-none"
+                  className={`flex min-h-[240px] w-[85%] max-w-[380px] shrink-0 snap-start flex-col gap-3 rounded-2xl border bg-rs-lane p-4 lg:w-auto lg:max-w-none ${
+                    touchDrag.over === lane.id ? "border-rs-brand" : "border-rs-border"
+                  }`}
                 >
                   <div className="flex items-center justify-between">
                     <div>
@@ -283,6 +290,8 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                       editDraft={editingId === item.id ? editDraft : null}
                       onDragStart={() => setDraggingId(item.id)}
                       onDragEnd={() => setDraggingId(null)}
+                      onTouchDragStart={(e) => touchDrag.start(e, item.id, lane.id)}
+                      lifted={touchDrag.lifted === item.id}
                       canDelete={canDeleteItem(item)}
                       canEditContent={canEditContent(item)}
                       onStartEdit={() => startEdit(item)}
@@ -314,7 +323,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
 
             {canEdit && (
               <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
-                Você pode criar novos itens e arrastar itens entre as Sprints e o Roadmap. No celular, use &quot;Mover para…&quot; no card.
+                Você pode criar novos itens e arrastar itens entre as Sprints e o Roadmap. No celular, segure o card e arraste.
               </div>
             )}
 
@@ -333,19 +342,21 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                     {column.map((g) => (
                       <div
                         key={g.id}
+                        data-lane-id={g.id}
+                        data-drop-target={touchDrag.over === g.id ? "" : undefined}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => {
                           e.preventDefault();
                           moveToLane(g.id);
                         }}
-                        className="flex flex-col gap-2.5 rounded-2xl border border-rs-border bg-rs-lane p-3.5"
+                        className={`flex flex-col gap-2.5 rounded-2xl border bg-rs-lane p-3.5 ${touchDrag.over === g.id ? "border-rs-brand" : "border-rs-border"}`}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <span className="text-xs font-extrabold leading-snug text-rs-text-soft">{g.title}</span>
                           <span className="text-[11px] font-bold text-rs-text-faint">{g.items.length}</span>
                         </div>
                         {/* A long group scrolls inside its box instead of stretching the whole column. */}
-                        <div className="-mr-1.5 flex max-h-[560px] flex-col gap-2.5 overflow-y-auto pr-1.5">
+                        <div data-drag-scroll="y" className="-mr-1.5 flex max-h-[560px] flex-col gap-2.5 overflow-y-auto pr-1.5">
                           {[...g.items].sort((a, b) => (b.number ?? 0) - (a.number ?? 0)).map((item) => (
                             <ItemCard
                               key={item.id}
@@ -359,6 +370,8 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                               editDraft={null}
                               onDragStart={() => setDraggingId(item.id)}
                               onDragEnd={() => setDraggingId(null)}
+                              onTouchDragStart={(e) => touchDrag.start(e, item.id, g.id)}
+                              lifted={touchDrag.lifted === item.id}
                               canDelete={canDeleteItem(item)}
                               onStartEdit={() => {}}
                               onDraftChange={() => {}}

@@ -62,8 +62,9 @@ async function launch() {
   return chromium.launch({ executablePath: CHROME, headless: true });
 }
 // One isolated context (own cookies/storage) per role, with problem collection on every page.
-async function newSession(browser, role, viewport = { width: 1440, height: 900 }) {
-  const context = await browser.newContext({ viewport, locale: "pt-BR" });
+// `extra` goes to the context as is: { hasTouch: true, isMobile: true } is a phone (pointer: coarse, touch events).
+async function newSession(browser, role, viewport = { width: 1440, height: 900 }, extra = {}) {
+  const context = await browser.newContext({ viewport, locale: "pt-BR", ...extra });
   const page = await context.newPage();
   const problems = [];
   const watch = (p) => {

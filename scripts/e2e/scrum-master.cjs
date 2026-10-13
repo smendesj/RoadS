@@ -139,6 +139,95 @@ const { BASE, expect, sleep, svc } = L;
     await page.setViewportSize({ width: 1440, height: 900 });
     await sleep(500);
 
+    // ------------------------------------------------ move on a phone: hold the card, then drag it with the finger
+    {
+      const phone = await L.newSession(browser, "sm", { width: 390, height: 844 }, { hasTouch: true, isMobile: true });
+      await L.login(phone);
+      await phone.page.goto(BASE + "/roadmap", { waitUntil: "load" });
+      await phone.page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+      await phone.page.getByText("[TESTE] criado e editado pelo SM").first().waitFor({ timeout: 15000 });
+      const cdp = await phone.context.newCDPSession(phone.page);
+      const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y }] });
+      const centre = async (loc) => {
+        const b = await loc.boundingBox();
+        return { x: b.x + b.width / 2, y: b.y + Math.min(b.height / 2, 20) };
+      };
+      const lane = async (id) => (await svc.from("roadmap_items").select("lane_id").eq("id", id).single()).data.lane_id;
+      const phoneCard = () => phone.page.locator("[data-lane-id] div[draggable]", { hasText: "[TESTE] criado e editado pelo SM" }).first();
+      // Glide from one point to another the way a finger does, in small steps.
+      const glide = async (from, to, steps = 12) => {
+        for (let i = 1; i <= steps; i++) {
+          await touch("touchMove", from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
+          await sleep(16);
+        }
+      };
+
+      const select = phone.page.locator('select[aria-label="Mover para"]');
+      expect("phone: no 'Mover para' select on a touch screen", (await select.count()) === 0 || !(await select.first().isVisible()));
+
+      // Source and target on screen together: the phone's width, the page's height.
+      await L.fitWholePage(phone.page);
+      await phoneCard().scrollIntoViewIfNeeded();
+
+      // A quick swipe is a scroll: the card is not moved.
+      let from = await centre(phoneCard());
+      await touch("touchStart", from.x, from.y);
+      await glide(from, { x: from.x, y: from.y + 80 }, 4);
+      await touch("touchEnd");
+      await sleep(1200);
+      expect("phone: a quick swipe over a card scrolls and moves nothing", (await lane(created.id)) === "zz-test-sprint");
+
+      // Held, then dropped on nothing (the page's title): it goes back and nothing is saved.
+      await phoneCard().scrollIntoViewIfNeeded();
+      from = await centre(phoneCard());
+      await touch("touchStart", from.x, from.y);
+      await sleep(400);
+      const ghost = await phone.page.locator("[data-touch-ghost]").count();
+      const title = await centre(phone.page.locator("h1", { hasText: "Roadmap" }));
+      await glide(from, title);
+      await touch("touchEnd");
+      await sleep(1200);
+      expect("phone: holding the card lifts it (a copy follows the finger)", ghost === 1, `ghosts=${ghost}`);
+      expect("phone: dropped outside any sprint or group, the card goes back and nothing is saved", (await lane(created.id)) === "zz-test-sprint" && (await phone.page.locator("[data-touch-ghost]").count()) === 0);
+
+      // Held, then dragged onto a group: saved there, the same as a drag on the desktop.
+      await phoneCard().scrollIntoViewIfNeeded();
+      from = await centre(phoneCard());
+      const target = await centre(phone.page.locator('[data-lane-id="zz-test-a"]'));
+      await touch("touchStart", from.x, from.y);
+      await sleep(400);
+      await glide(from, target, 20);
+      const lit = await phone.page.locator('[data-lane-id="zz-test-a"][data-drop-target]').count();
+      await touch("touchEnd");
+      await sleep(2000);
+      expect("phone: the group under the finger is lit while the card is over it", lit === 1, `lit=${lit}`);
+      expect("phone: held and dragged onto a group, the item is saved there", (await lane(created.id)) === "zz-test-a", await lane(created.id));
+
+      // Near the top of the screen the page scrolls by itself while a card is lifted; a cancelled touch saves nothing.
+      // Only the [TESTE] card is held, and the gesture ends in touchCancel, so no real item can land anywhere.
+      await phone.page.setViewportSize({ width: 390, height: 844 });
+      await sleep(300);
+      await phoneCard().scrollIntoViewIfNeeded();
+      const before = await phone.page.evaluate(() => window.scrollY);
+      from = await centre(phoneCard());
+      await touch("touchStart", from.x, from.y);
+      await sleep(400);
+      await glide(from, { x: from.x, y: 6 }, 10);
+      await sleep(800);
+      const after = await phone.page.evaluate(() => window.scrollY);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+      await sleep(1200);
+      expect("phone: holding a card near the top edge scrolls the page up", before > 100 && before - after > 100, `scrollY ${before} -> ${after}`);
+      expect("phone: a cancelled touch puts the card back and saves nothing", (await lane(created.id)) === "zz-test-a" && (await phone.page.locator("[data-touch-ghost]").count()) === 0);
+
+      expect("phone: no console errors while dragging", phone.problems.length === 0, phone.problems.slice(0, 3).join(" | "));
+      await phone.context.close();
+      // Back where the rest of this suite expects it.
+      await svc.from("roadmap_items").update({ lane_id: "zz-test-sprint" }).eq("id", created.id);
+      await page.reload({ waitUntil: "load" });
+      await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+    }
+
     // ------------------------------------------------ delete: own yes, others no
     const toDelete = card("[TESTE] criado e editado pelo SM");
     await btn(toDelete, "Excluir").click();
