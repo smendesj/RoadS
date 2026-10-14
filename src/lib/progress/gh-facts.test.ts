@@ -959,3 +959,113 @@ test("a delivery merged before the start instant and closed after it is hidden a
   });
   assert.deepEqual(byDays.entries.map((e) => [e.issue, e.hidden]), [[4100, false]]);
 });
+
+/* ---------- Deliveries cut into boxes (acceptance criteria) instead of sub-issues ---------- */
+
+const criteria = (...boxes: string[]) => ["## Problema", "Texto.", "", "## Critérios de aceitação", ...boxes, "", "## Riscos", "- [ ] não conta"].join("\n");
+// The body as written on 08/03 (nothing ticked), S1 ticked before the window, S2 inside it (10/03 14:30 São Paulo).
+const BOXES_V1 = criteria("- [ ] S1. Primeira parte.", "- [ ] S2. Segunda parte.", "- [ ] S3. Terceira parte.");
+const BOXES_V2 = criteria("- [x] S1. Primeira parte.", "- [ ] S2. Segunda parte.", "- [ ] S3. Terceira parte.");
+const BOXES_V3 = criteria("- [x] S1. Primeira parte.", "- [x] S2. Segunda parte (evidência: testes verdes).", "- [ ] S3. Terceira parte.", "  - Bloqueada: falta a chave do ambiente, com infra");
+const history = {
+  versions: [
+    { at: "2026-03-08T09:00:00-03:00", body: BOXES_V1 },
+    { at: "2026-03-08T18:00:00-03:00", body: BOXES_V2 },
+    { at: "2026-03-10T14:30:00-03:00", body: BOXES_V3 },
+  ],
+  complete: true,
+};
+
+test("a delivery with no sub-issues counts its parts in the boxes of its acceptance criteria", () => {
+  const f = facts({
+    issues: [issue(5, { createdAt: "2026-03-08T09:00:00-03:00", body: BOXES_V3, bodyHistory: history })],
+    prs: [pr(1005, { title: "Entrega (#5)" })],
+  });
+  const e = f.entries.find((x) => x.issue === 5);
+  assert.deepEqual(e?.subIssues, { total: 3, done: 2 });
+  assert.deepEqual(e?.slices?.closed, [{ title: "S2. Segunda parte (evidência: testes verdes).", closedAt: "2026-03-10T14:30:00-03:00" }], "only the box ticked inside the window");
+  assert.deepEqual(e?.slices?.blocked, [{ title: "S3. Terceira parte.", reason: "falta a chave do ambiente, com infra" }]);
+  assert.ok(e?.evidence.includes("Partes (as caixas dos critérios de aceitação): 2 de 3 marcadas"), e?.evidence.join(" | "));
+  assert.ok(e?.evidence.some((l) => /1 caixa marcada no período, a última em 10\/03 14:30/.test(l)), e?.evidence.join(" | "));
+});
+
+test("a family that still has sub-issues keeps counting its leaves, whatever boxes its body has", () => {
+  const f = facts({
+    issues: [
+      issue(6, { body: BOXES_V3, bodyHistory: history, subIssues: { total: 2, completed: 1 } }),
+      issue(7, { parent: 6, state: "closed", stateReason: "completed", closedAt: "2026-03-10T10:00:00-03:00" }),
+      issue(8, { parent: 6 }),
+    ],
+    prs: [pr(1007, { title: "Parte (#7)" })],
+  });
+  const e = f.entries.find((x) => x.issue === 6);
+  assert.deepEqual(e?.subIssues, { total: 2, done: 1 });
+  assert.deepEqual(e?.slices?.closed.map((s) => s.title), ["Funcionalidade 7"]);
+});
+
+test("a delivery with neither sub-issues nor boxes still has no parts and counts 1 when concluded", () => {
+  const f = facts({
+    issues: [issue(9, { state: "closed", stateReason: "completed", closedAt: "2026-03-10T12:00:00-03:00", body: "## Problema\n- [x] fora da seção" })],
+    prs: [pr(1009, { title: "Entrega (#9)", closing: [9] })],
+  });
+  const e = f.entries.find((x) => x.issue === 9);
+  assert.equal(e?.subIssues, null);
+  assert.equal(e?.slices, undefined);
+  assert.deepEqual(f.delivered, { issues: 1, parts: 1 });
+});
+
+test("a concluded delivery cut into boxes brings its ticked boxes to the 'Concluído' chip", () => {
+  const all = criteria("- [x] S1. a", "- [x] S2. b", "- [x] Pendência (achado da revisão): c");
+  const f = facts({
+    issues: [issue(10, { state: "closed", stateReason: "completed", closedAt: "2026-03-10T12:00:00-03:00", body: all, bodyHistory: { versions: [{ at: "2026-03-09T09:00:00-03:00", body: all }], complete: true } })],
+    prs: [pr(1010, { title: "Entrega (#10)", closing: [10] })],
+  });
+  assert.deepEqual(f.entries.find((x) => x.issue === 10)?.subIssues, { total: 3, done: 3 });
+  assert.deepEqual(f.delivered, { issues: 1, parts: 3 });
+});
+
+test("a cover of the sprint with no sub-issues counts its boxes as its parts, and is one issue", () => {
+  const f = facts({
+    issues: [issue(11, { body: BOXES_V3, bodyHistory: history })],
+    projectItems: [board(11, "Development")],
+  });
+  assert.deepEqual(
+    f.sprint.epics.map((c) => [c.issue, c.issues, c.parts, c.open]),
+    [[11, { total: 1, done: 0 }, { total: 3, done: 2, remaining: 1 }, []]]
+  );
+  assert.deepEqual(f.sprint.totals, { covers: 1, remainingParts: 1 });
+});
+
+test("with the body's history not read, the boxes still count but none is dated (no slice closed, no activity)", () => {
+  const f = facts({ issues: [issue(12, { createdAt: "2026-03-01T09:00:00-03:00", body: BOXES_V3 })], projectItems: [board(12, "Open")] });
+  assert.equal(f.entries.find((x) => x.issue === 12), undefined, "a box nobody can date is no news");
+});
+
+test("a box ticked in the window is work done: an issue with nothing else in the window becomes an entry in progress", () => {
+  const f = facts({ issues: [issue(13, { createdAt: "2026-03-01T09:00:00-03:00", body: BOXES_V3, bodyHistory: history })], projectItems: [board(13, "Open")] });
+  const e = f.entries.find((x) => x.issue === 13);
+  assert.equal(e?.status, "em_andamento");
+  assert.deepEqual(e?.subIssues, { total: 3, done: 2 });
+});
+
+test("a body history that does not reach the issue's creation dates the boxes ticked in its oldest version by that version", () => {
+  const partial = { versions: [{ at: "2026-03-09T15:00:00-03:00", body: BOXES_V2 }, { at: "2026-03-10T14:30:00-03:00", body: BOXES_V3 }], complete: false };
+  const f = facts({ issues: [issue(14, { createdAt: "2026-03-01T09:00:00-03:00", body: BOXES_V3, bodyHistory: partial })], prs: [pr(1014, { title: "Entrega (#14)" })] });
+  assert.deepEqual(
+    f.entries.find((x) => x.issue === 14)?.slices?.closed.map((s) => s.closedAt),
+    ["2026-03-09T15:00:00-03:00", "2026-03-10T14:30:00-03:00"]
+  );
+});
+
+test("a follow-up issue still reads as internal, boxes or not; a delivery whose box is a review leftover does not", () => {
+  const followUp = "Origem: achados da revisão independente da issue #4.\n\n" + criteria("- [ ] Corrigir o nome do campo");
+  const f = facts({
+    issues: [
+      issue(15, { body: followUp, bodyHistory: { versions: [], complete: true } }),
+      issue(16, { body: criteria("- [x] S1. Pronta.", "- [ ] Pendência (achado da revisão): falta o caso vazio"), bodyHistory: { versions: [], complete: true } }),
+    ],
+    prs: [pr(1015, { title: "Pendência (#15)" }), pr(1016, { title: "Entrega (#16)" })],
+  });
+  assert.deepEqual(f.internal.items.filter((i) => i.ref === "#15").map((i) => i.reason), ["pendência de revisão"]);
+  assert.deepEqual(f.entries.find((x) => x.issue === 16)?.subIssues, { total: 2, done: 1 });
+});

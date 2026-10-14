@@ -153,7 +153,7 @@ export function SprintPanels() {
   );
 }
 
-// The sub-issues of every issue in the sprint, one block per parent issue. Each row's status is the
+// The parts of every issue in the sprint (its sub-issues, or the boxes of its acceptance criteria), one block per issue. A sub-issue's status is the
 // one the Kanban shows for that issue, so a slice reads the same here and there.
 export function SlicesPanel() {
   const { model } = useSync();
@@ -176,9 +176,9 @@ export function SlicesPanel() {
             </span>
             <span className="font-mono text-[13px] text-rs-brand-text">{block.ref}</span>
           </div>
-          {block.rows.map((row) => (
+          {block.rows.map((row, i) => (
             <a
-              key={row.url}
+              key={`${row.url}|${i}`}
               href={row.url}
               target="_blank"
               rel="noreferrer"
@@ -192,7 +192,7 @@ export function SlicesPanel() {
         </section>
       ))}
       {model.slices.length === 0 && (
-        <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">Nenhuma sub-issue nas issues da sprint atual.</div>
+        <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">Nenhuma parte (sub-issue ou critério de aceitação) nas issues da sprint atual.</div>
       )}
     </div>
   );

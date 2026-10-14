@@ -269,6 +269,26 @@ ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada en
   sub-issue com filhas conta pelas filhas, nunca por ela mesma. Uma folha fechada como **não planejada** não é parte:
   fica fora de `total` e de `done`. Até aqui o campo contava só os filhos diretos; o formato é o mesmo, o que ele conta
   mudou.
+- **Entrega cortada em caixas** (desde 2026-10-13, quando o Frontlights deixou de criar sub-issues: issue #23 do
+  plugin). Uma issue **sem sub-issues** tem como partes as **caixas da seção de critérios de aceitação** do corpo:
+  `subIssues.total` = caixas, `subIssues.done` = caixas marcadas. Uma issue que ainda tem sub-issues (família antiga)
+  continua contando as folhas da árvore; as duas contagens nunca se misturam numa entrada. Sem filhas e sem caixas,
+  `subIssues` segue `null` (e a entrega conta 1 no `delivered`). As regras de leitura são as do Frontlights (`scan` em
+  `skills/frontlights/scripts/closeout.py`) e moram em `src/lib/criteria.ts`: título markdown de qualquer nível cujo
+  texto, sem acentos e em minúsculas, começa com "acceptance criteria", "criterios de aceitacao" ou "criterios de
+  aceite", até o próximo título do mesmo nível ou acima; itens `- [ ]`, `* [x]`, `+ [X]`, `1. [ ]` e `1) [ ]`, com ou sem
+  recuo; código cercado e comentários HTML ignorados; várias seções somam; sub-item sem caixa não conta; a seção legada
+  "pendências conhecidas" não conta. Caixa de pendência ("Pendência (achado da revisão): …") é parte como as outras.
+  **A data de uma caixa marcada** vem do histórico de edições do corpo (`Issue.userContentEdits`, as 100 edições mais
+  novas): é a edição em que ela passou de aberta a marcada pela última vez (ou em que entrou já marcada). A mesma caixa
+  é reconhecida entre versões pelo texto, ou por um texto que cresceu a partir do outro (marcar com a evidência no fim
+  da linha). Sem histórico lido, a caixa conta mas não tem data. O coletor só lê o histórico de issues sem sub-issues
+  com ao menos uma caixa marcada. Uma caixa marcada no período é atividade (a entrega entra no resumo) e trabalho feito
+  (nunca `proximo`), mas **não muda a situação** como as sub-issues pendentes mudam: a situação de uma entrega por caixas
+  segue o PR e o fechamento da issue.
+- **"Bloqueada:"** (convenção combinada em 2026-10-13): um sub-item sem caixa logo abaixo de uma caixa **aberta**, mais
+  recuado que ela, cujo texto começa com "Bloqueada:" (sem acento ou caixa importarem, com ou sem negrito), marca a
+  slice como parada; o resto da linha é o motivo.
 - **`entries[].epic`** `{ issue, title, parts: { total, done } }` e **`entries[].epicPath`** `[{ issue, title }]`
   (opcionais, só em entrega com epic acima; só no `facts.json`, o rascunho montado nunca os leva). `epic` é o epic
   **mais próximo**; `parts` conta as **entregas** sob ele (através de epics intermediários, não as folhas): quantas
@@ -277,8 +297,12 @@ ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada en
   não pertence a entrega nenhuma: entra em `internal` com a razão "PR que cita só um epic (agrupador)".
 - **A situação** continua só do coletor. Uma entrega com **parte fechada** (como concluída) até o fim do período
   nunca fica `proximo`, mesmo sem PR nem commit: a parte entregue é trabalho feito.
-- **`entries[].slices`** (opcional, só em entrega que tem sub-issues): evidência para quem escreve. **Só existe no
-  `facts.json`: o rascunho montado nunca o leva** (`assemble.ts` monta cada entrada campo a campo).
+- **`entries[].slices`** (opcional, em entrega que tem sub-issues ou caixas): evidência para quem escreve. **Só existe
+  no `facts.json`: o rascunho montado nunca o leva** (`assemble.ts` monta cada entrada campo a campo). Numa entrega por
+  caixas, `closed` são as caixas marcadas dentro do período (`title` = o texto da caixa até a primeira frase, no
+  máximo 120 caracteres; `closedAt` = a edição que a marcou, no horário de São Paulo) e `blocked` são as caixas
+  abertas com "Bloqueada:", cada uma com o campo **`reason`** (aditivo, só nas caixas): o texto depois de
+  "Bloqueada:".
   - `closed`: `[{ title, closedAt }]`, as sub-issues de **qualquer nível** fechadas como concluídas dentro do
     período, na ordem em que fecharam. `title` é o do GitHub (o redator o reescreve); `closedAt` vem no horário de São
     Paulo, como `deliveredAt`. Uma sub-issue com filhas aparece junto com as filhas que fecharam.
@@ -292,7 +316,9 @@ ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada en
   não é capa. `sprint: { epics: [ { issue, title, issues: { total, done }, parts: { total, done, remaining }, open:
   [ { issue, title } ] } ], totals: { covers, remainingParts } }`: `issues` são as entregas da capa (filhas que não
   são epic, através dos epics intermediários, sem as canceladas); `parts` são as folhas da árvore inteira dela (uma
-  capa sem filhas é a sua única parte; um epic vazio dentro dela não conta); `open` são as entregas ainda abertas,
+  capa sem filhas conta as **caixas** dos seus critérios de aceitação e, sem caixas, é a sua única parte; um epic vazio
+  dentro dela não conta). Uma capa sem filhas tem `issues: { total: 1, done: 0 }` (capa é item aberto no fim do
+  período, então nunca está fechada); `open` são as entregas ainda abertas,
   até 30. Só entram em `epics` as capas com `remaining` maior que zero, então `totals.covers` é o número delas (o K do
   chip) e `totals.remainingParts` a soma do que falta (o N). O coletor lê a árvore inteira de cada capa, tenha ou não
   havido novidade. Um item em Blocker continua sendo uma entrada `bloqueado`.
@@ -341,7 +367,7 @@ repositório, `roads-script/push` e `roads-script/attach`.
 | `sync-board` | `src/lib/frontlights/sync.ts`, `src/lib/sync-summary.ts` | `…/sync-board/route.ts` |
 | sprint atual e Project em acordo (`roadmap.sprint`, `origin` do `move_lane`) | `src/lib/sprint-status-sync.ts` (a regra, testada sem servidor), `src/lib/board-sync.ts` (as portas reais), `src/lib/board.ts` (a leitura dos cartões) | o mesmo `sync-board`, o botão Sincronizar e o cron diário |
 | rotas do resumo | `src/lib/progress/ingest.ts`, `draft.ts`, `shot-upload.ts`, `attach.ts` | `…/progress-report/**/route.ts` |
-| fatos do GitHub (`facts.json`: família, `subIssues`, `slices`, `ignored.cut`) | `src/lib/progress/gh-client.ts`, `gh-facts.ts`, `gh-status.ts` | `scripts/progress/github.ts` (`gh-cli.ts`) |
+| fatos do GitHub (`facts.json`: família, `subIssues`, `slices`, `ignored.cut`) | `src/lib/progress/gh-client.ts`, `gh-facts.ts`, `gh-status.ts`, `src/lib/criteria.ts` (as caixas) | `scripts/progress/github.ts` (`gh-cli.ts`) |
 | versão, segredo, registro | `src/lib/frontlights/contract.ts`, `door.ts`, `calls.ts` | `src/lib/frontlights/doors.ts` |
 
 ## 8. Histórico
@@ -384,3 +410,8 @@ repositório, `roads-script/push` e `roads-script/attach`.
   (opcional) vai no rascunho, e o e-mail e a visão semanal passam a dizer "Concluído: N sub-issues em M issues" e
   "Em andamento: N sub-issues em K issues", sem o chip "Em validação". O arquivo de textos ganha `sprint` (uma frase
   por capa). Relatórios sem o bloco seguem como eram.
+- **2026-10-13 (aditivo):** entrega cortada em caixas. Numa issue sem sub-issues, `subIssues`, `slices` (`closed`,
+  `blocked`), `sprint.epics[].parts` e `delivered.parts` contam as caixas dos critérios de aceitação, datadas pelo
+  histórico de edições do corpo; famílias com sub-issues seguem pela árvore. Campo novo opcional:
+  `slices.blocked[].reason`, só em caixa com "Bloqueada:". O bloco Slices do Dashboard mostra as caixas de uma issue da
+  sprint sem sub-issues. Nenhum nome ou tipo de campo mudou e a `schemaVersion` segue 1.

@@ -2,6 +2,7 @@
 // timelines, Project #7 items). Pure: the network lives in gh-client.ts, the clock is passed in. The
 // output is a PROPOSAL for the drafting step and the screen: status, delivery date, rolled-up sub-issues,
 // the evidence behind each choice, what looks internal, and the git work the coverage check needs.
+import { boxCheckedAt, boxTitle, criteriaBoxes } from "../criteria.ts";
 import type { EntryStatus, ReportWindow, SprintCover } from "../progress-report.ts";
 import type { GitWork } from "./gaps.ts";
 import { MAIN_BRANCH, asBoardStatus, boardStatusAt, classifyEntry, pickDelivery, prStateAt, toSaoPauloIso } from "./gh-status.ts";
@@ -29,6 +30,12 @@ export type GhIssue = {
    * under an issue none of whose sub-issues were read).
    */
   subIssues: { total: number; completed: number } | null;
+  /**
+   * The versions of the body, oldest first (`complete` when the first one is the body as the issue was written).
+   * Read only for an issue with no sub-issues and a ticked box in its acceptance criteria: GitHub keeps no date for
+   * a tick, so a box is dated by the edit that ticked it (src/lib/criteria.ts). Absent when not read.
+   */
+  bodyHistory?: { versions: { at: string; body: string }[]; complete: boolean } | null;
 };
 
 export type GhCommit = { oid: string; at: string; author: string | null };
@@ -83,10 +90,16 @@ export type FactsInput = {
 
 /** What happened to the parts of an umbrella in the window: evidence for whoever writes, never part of the draft. */
 export type PartsSlices = {
-  /** Parts, at any depth, closed as completed inside the window, in closing order (São Paulo time). */
+  /**
+   * Parts closed as completed inside the window, in closing order (São Paulo time): sub-issues at any depth, or, for
+   * a delivery cut into boxes, the boxes ticked inside the window (title = the box's text up to its first sentence).
+   */
   closed: { title: string; closedAt: string }[];
-  /** Open parts that carry a blocker label or sit on the Blocker column of Project #7. */
-  blocked: { title: string }[];
+  /**
+   * Open parts that are parked: a sub-issue with a blocker label or on the Blocker column of Project #7, or an open
+   * box with a "Bloqueada:" sub-item, whose text is the `reason`.
+   */
+  blocked: { title: string; reason?: string }[];
 };
 
 /** The epic above a delivery: only a header for it (an epic is a grouper, never an entry and never needs a print). */
@@ -104,7 +117,10 @@ export type FactEntry = {
   title: string; // as written on GitHub: the drafting step rewrites it in plain language
   status: EntryStatus;
   deliveredAt: string | null;
-  /** The parts of the issue: the leaves of its whole tree of sub-issues, at any depth (cancelled ones left out). */
+  /**
+   * The parts of the issue: the leaves of its whole tree of sub-issues, at any depth (cancelled ones left out); for
+   * an issue with no sub-issues, the boxes of its acceptance criteria (`done` = the ticked ones). Never both.
+   */
   subIssues: { total: number; done: number } | null;
   /** Only for an issue that has sub-issues. Kept in facts.json: the assembled draft does not carry it. */
   slices?: PartsSlices;
@@ -216,6 +232,7 @@ const FOLLOW_UP_BODY = [
   /\bachados?\b[^.\n]{0,60}\b(?:revis[aã]o|revis[oõ]es|confer[eê]ncia|review)\b/i,
   /^\s*origem\s*:[^\n]{0,200}\b(?:follow-?ups?|achados?|revis[aã]o|revis[oõ]es|campanha|pend[eê]ncias?)\b/i,
 ];
+const CHECKBOX_LINE = /^[ \t]*(?:[-*+]|[0-9]{1,9}[.)])[ \t]+\[[ xX]\](?=[ \t]|$)/;
 /** Five or more issues by one person, each within five minutes of the previous one, is a planning session. */
 const BATCH_MIN = 5;
 const BATCH_GAP_MS = 5 * 60_000;
@@ -366,7 +383,32 @@ export function buildFacts(input: FactsInput): ProgressFacts {
   const cancelled = (i: GhIssue): boolean => i.state === "closed" && i.stateReason === "not_planned";
   const unread = (i: GhIssue | undefined): { total: number; done: number } | null =>
     i?.subIssues && i.subIssues.total > 0 ? { total: i.subIssues.total, done: Math.min(i.subIssues.completed, i.subIssues.total) } : null;
+  // A delivery with no sub-issues is cut into the boxes of its acceptance criteria (Frontlights since 13/10/2026): they
+  // are its parts, each dated by the body edit that ticked it when the body's history was read (undated otherwise).
+  type Boxed = { total: number; done: number; ticked: { title: string; at: string }[]; blocked: { title: string; reason: string }[] };
+  const boxesOf = (i: GhIssue | undefined): Boxed | null => {
+    if (!i || (i.subIssues?.total ?? 0) > 0 || childrenOf.has(i.number)) return null;
+    const boxes = criteriaBoxes(i.body);
+    if (!boxes || boxes.length === 0) return null;
+    const h = i.bodyHistory;
+    let dates: (string | null)[] = boxes.map(() => null);
+    if (h) {
+      const last = h.versions.at(-1);
+      // The body as it is now is the last version (GitHub's newest edit already is; a body never edited has none).
+      const versions = last && last.body === i.body ? h.versions : [...h.versions, { at: last?.at ?? i.createdAt, body: i.body }];
+      // A history that does not reach the creation dates what its oldest version already had ticked by that version.
+      dates = boxCheckedAt(versions, h.complete ? i.createdAt : versions[0].at);
+    }
+    return {
+      total: boxes.length,
+      done: boxes.filter((b) => b.checked).length,
+      ticked: boxes.flatMap((b, k) => (b.checked && dates[k] ? [{ title: boxTitle(b.text), at: dates[k] as string }] : [])),
+      blocked: boxes.filter((b) => !b.checked && b.blocked).map((b) => ({ title: boxTitle(b.text), reason: b.blocked as string })),
+    };
+  };
   const partsOf = (n: number, family: GhIssue[]): { total: number; done: number } | null => {
+    const boxed = family.length === 0 ? boxesOf(issueOf.get(n)) : null;
+    if (boxed) return { total: boxed.total, done: boxed.done };
     const counts =
       family.length === 0
         ? [unread(issueOf.get(n))]
@@ -414,9 +456,10 @@ export function buildFacts(input: FactsInput): ProgressFacts {
   const coverFact = (cover: GhIssue): SprintFact => {
     const family = descendantsOf(cover.number);
     // An empty epic inside a cover is no part. A cover with no children is its own single part.
+    const boxed = family.length === 0 ? boxesOf(cover) : null;
     const counts =
       family.length === 0
-        ? [unread(cover) ?? { total: 1, done: 0 }]
+        ? [boxed ? { total: boxed.total, done: boxed.done } : unread(cover) ?? { total: 1, done: 0 }]
         : family.filter((i) => !isEpic(i) && !childrenOf.has(i.number)).map((i) => unread(i) ?? (cancelled(i) ? { total: 0, done: 0 } : { total: 1, done: i.state === "closed" ? 1 : 0 }));
     const total = counts.reduce((sum, p) => sum + p.total, 0);
     const done = counts.reduce((sum, p) => sum + p.done, 0);
@@ -440,7 +483,12 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     if (!hasParts) {
       const labels = i.labels.map((l) => l.toLowerCase());
       if (labels.some((l) => INTERNAL_LABELS.has(l)) && !labels.some((l) => FEATURE_LABELS.has(l))) return "rótulo de teste/chore/infra";
-      const head = i.body.slice(0, 400);
+      // A box "Pendência (achado da revisão): ..." is one part of a delivery, not what the issue is: box lines are skipped.
+      const head = i.body
+        .split(/\r\n|\r|\n/)
+        .filter((line) => !CHECKBOX_LINE.test(line))
+        .join("\n")
+        .slice(0, 400);
       if (FOLLOW_UP_BODY.some((re) => re.test(head))) return "pendência de revisão";
     }
     if (batch.has(i.number) && i.assignees.length === 0 && familyPrs.length === 0) {
@@ -466,6 +514,9 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     const epics = ancestorsOf(issue) ?? []; // closest first; all of them are epics
     const { family, prs, commits, history } = gathered(issue.number);
     const closedParts = family.filter(deliveredPart);
+    const boxed = family.length === 0 ? boxesOf(issue) : null;
+    // When each part was done: a sub-issue's closing, or a box's tick (only the dated ones).
+    const partDates = boxed ? boxed.ticked.map((t) => t.at) : closedParts.map((p) => p.closedAt as string);
     const item = boardItem.get(issue.number) ?? null;
     const atEnd = boardStatusAt(item, history, input.window.end);
     const now = asBoardStatus(item?.status);
@@ -477,7 +528,7 @@ export function buildFacts(input: FactsInput): ProgressFacts {
       item?.statusUpdatedAt,
       ...history.map((h) => h.at),
       ...commits.map((c) => c.at),
-      ...closedParts.map((p) => p.closedAt),
+      ...partDates,
       ...prs.flatMap((p) => [p.createdAt, p.closedAt, p.mergedAt, ...p.commits.map((c) => c.at)]),
     ];
     const active = activity.some(inWindow);
@@ -502,8 +553,9 @@ export function buildFacts(input: FactsInput): ProgressFacts {
       prs,
       closers: timelineOf.get(issue.number)?.closers,
       commits: commits.map((c) => c.at),
-      subIssues,
-      closedParts: closedParts.map((p) => p.closedAt as string),
+      // Boxes are parts to count, not pending children: the status of a delivery cut into boxes still follows its PR and its closing.
+      subIssues: boxed ? null : subIssues,
+      closedParts: partDates,
     });
     if (!decision) {
       ignored.backlog++;
@@ -542,7 +594,17 @@ export function buildFacts(input: FactsInput): ProgressFacts {
               blocked: family.filter(blockedPart).map((p) => ({ title: p.title })),
             },
           }
-        : {}),
+        : boxed
+          ? {
+              slices: {
+                closed: boxed.ticked
+                  .filter((t) => inWindow(t.at))
+                  .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+                  .map((t) => ({ title: t.title, closedAt: toSaoPauloIso(t.at) })),
+                blocked: boxed.blocked,
+              },
+            }
+          : {}),
       ...(epics.length > 0
         ? {
             epic: { issue: epics[0].number, title: epics[0].title, parts: epicParts(epics[0]) },
@@ -560,8 +622,9 @@ export function buildFacts(input: FactsInput): ProgressFacts {
         since: item?.statusUpdatedAt ?? null,
         windowEnd: input.window.end,
         subIssues,
-        closedInWindow: closedParts.filter((p) => inWindow(p.closedAt)).length,
-        lastPartClosed: closedParts.map((p) => p.closedAt as string).filter(inWindow).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1) ?? null,
+        boxes: boxed !== null,
+        closedInWindow: partDates.filter(inWindow).length,
+        lastPartClosed: partDates.filter(inWindow).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1) ?? null,
         cut: [issue, ...family].some(incomplete),
         epic: epics.length > 0 ? { path: [...epics].reverse().map((e) => e.title), parts: epicParts(epics[0]) } : null,
       }),
@@ -607,7 +670,9 @@ function evidenceLines(a: {
   since: string | null;
   windowEnd: string;
   subIssues: { total: number; done: number } | null;
-  /** Parts closed as completed inside the window, and when the last one was. */
+  /** The parts are the boxes of the acceptance criteria (not sub-issues). */
+  boxes: boolean;
+  /** Parts closed as completed (or boxes ticked) inside the window, and when the last one was. */
   closedInWindow: number;
   lastPartClosed: string | null;
   /** Some issue of the family has sub-issues that were not read. */
@@ -656,9 +721,12 @@ function evidenceLines(a: {
   if (a.issue.state === "closed" && a.issue.closedAt) {
     lines.push(`Issue fechada em ${formatSaoPaulo(a.issue.closedAt)}${Date.parse(a.issue.closedAt) >= end ? ", depois do fim da janela" : ""}`);
   }
-  if (a.subIssues) lines.push(`Partes (as folhas das sub-issues, em qualquer nível): ${a.subIssues.done} de ${a.subIssues.total} concluídas`);
+  if (a.subIssues && a.boxes) lines.push(`Partes (as caixas dos critérios de aceitação): ${a.subIssues.done} de ${a.subIssues.total} marcadas`);
+  else if (a.subIssues) lines.push(`Partes (as folhas das sub-issues, em qualquer nível): ${a.subIssues.done} de ${a.subIssues.total} concluídas`);
   if (a.closedInWindow > 0 && a.lastPartClosed) {
-    lines.push(`${a.closedInWindow} sub-issue${a.closedInWindow > 1 ? "s" : ""} fechada${a.closedInWindow > 1 ? "s" : ""} no período, a última em ${formatSaoPaulo(a.lastPartClosed)}`);
+    const s = a.closedInWindow > 1 ? "s" : "";
+    const what = a.boxes ? `caixa${s} marcada${s}` : `sub-issue${s} fechada${s}`;
+    lines.push(`${a.closedInWindow} ${what} no período, a última em ${formatSaoPaulo(a.lastPartClosed)}`);
   }
   if (a.epic) lines.push(`Dentro do epic ${a.epic.path.join(" > ")}: ${a.epic.parts.done} de ${a.epic.parts.total} entregas dele prontas`);
   if (a.cut) lines.push("Leitura das sub-issues cortada (árvore funda ou grande demais, ou sub-issues de outro repositório): a contagem de partes pode estar abaixo do real");

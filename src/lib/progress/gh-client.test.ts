@@ -273,7 +273,10 @@ function treeGithub(t: {
   events?: Record<number, unknown[]>;
   prs?: Record<number, unknown>;
   board?: unknown[];
+  /** The body's edit history GitHub keeps, newest first (as GitHub answers), and how many edits it says there are. */
+  edits?: Record<number, { nodes: { editedAt: string; diff: string | null }[]; totalCount?: number }>;
 }) {
+  const historyAsked: number[][] = [];
   const reads: number[] = [];
   const gets: number[] = [];
   const queries: string[] = [];
@@ -291,6 +294,16 @@ function treeGithub(t: {
     const query = call.body?.query ?? "";
     if (/projectV2\(number/.test(query)) {
       return json({ data: { organization: { projectV2: { items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: t.board ?? [] } } } } });
+    }
+    if (/userContentEdits/.test(query)) {
+      const wanted = [...query.matchAll(/e(\d+): issue\(number: (\d+)\)/g)].map((m) => Number(m[2]));
+      historyAsked.push(wanted);
+      queries.push(query);
+      const answer = (n: number) => {
+        const e = t.edits?.[n];
+        return e ? { userContentEdits: { totalCount: e.totalCount ?? e.nodes.length, nodes: e.nodes.map((x) => ({ ...x, deletedAt: null })) } } : { userContentEdits: { totalCount: 0, nodes: [] } };
+      };
+      return json({ data: { repository: Object.fromEntries(wanted.map((n) => [`e${n}`, answer(n)])) } });
     }
     if (/issue\(number/.test(query)) {
       const n = Number(call.body?.variables?.n);
@@ -311,7 +324,7 @@ function treeGithub(t: {
     }
     return json({ errors: [{ type: "OTHER" }] });
   });
-  return { ...gh, reads, gets, queries };
+  return { ...gh, reads, gets, queries, historyAsked };
 }
 
 async function factsOf(gh: ReturnType<typeof treeGithub>) {
@@ -496,4 +509,47 @@ test("the same tree off the sprint board is not read down: nothing happened in i
   const { facts } = await factsOf(gh);
   assert.deepEqual(gh.reads, []);
   assert.deepEqual(facts.sprint.epics, []);
+});
+
+/* ---------- Deliveries cut into boxes: the body's history dates each tick ---------- */
+
+const boxesBody = (s1: string, s2: string) => ["## Critérios de aceitação", `- [${s1}] S1. Primeira parte.`, `- [${s2}] S2. Segunda parte.`].join("\n");
+
+test("the body's history is read only for an issue with no sub-issues and a ticked box, and dates each tick", async () => {
+  const gh = treeGithub({
+    listed: [
+      oldIssue(5, { body: boxesBody("x", "x") }),
+      oldIssue(6, { body: boxesBody(" ", " ") }),
+      oldIssue(7, { body: boxesBody("x", " "), sub_issues_summary: { total: 1, completed: 0 } }),
+    ],
+    kids: { 7: [{ number: 8 }] },
+    edits: {
+      // Newest first, as GitHub answers; the oldest is the body as written.
+      5: {
+        nodes: [
+          { editedAt: "2026-03-10T17:30:00Z", diff: boxesBody("x", "x") },
+          { editedAt: "2026-03-07T12:00:00Z", diff: boxesBody("x", " ") },
+          { editedAt: "2026-02-20T12:00:00Z", diff: boxesBody(" ", " ") },
+        ],
+      },
+    },
+    prs: {},
+  });
+  const { data, facts } = await factsOf(gh);
+  assert.deepEqual(gh.historyAsked, [[5]], "no box ticked (6) or a family (7): nothing to date");
+  assert.ok(gh.queries.filter((q) => /userContentEdits/.test(q)).every((q) => /userContentEdits\(first: \d+\)/.test(q) && !/mutation/i.test(q)), "the newest edits, and a read");
+  assert.equal(data.issues.find((i) => i.number === 5)?.bodyHistory?.complete, true);
+  const e = facts.entries.find((x) => x.issue === 5);
+  assert.deepEqual(e?.subIssues, { total: 2, done: 2 });
+  assert.deepEqual(e?.slices?.closed, [{ title: "S2. Segunda parte.", closedAt: "2026-03-10T14:30:00-03:00" }]);
+});
+
+test("a body history longer than what was read says so: its oldest version dates what it already had ticked", async () => {
+  const gh = treeGithub({
+    listed: [oldIssue(5, { body: boxesBody("x", "x") })],
+    edits: { 5: { totalCount: 250, nodes: [{ editedAt: "2026-03-10T17:30:00Z", diff: boxesBody("x", "x") }, { editedAt: "2026-03-09T13:00:00Z", diff: boxesBody("x", " ") }] } },
+  });
+  const { data, facts } = await factsOf(gh);
+  assert.equal(data.issues.find((i) => i.number === 5)?.bodyHistory?.complete, false);
+  assert.deepEqual(facts.entries.find((x) => x.issue === 5)?.slices?.closed.map((s) => s.closedAt), ["2026-03-09T10:00:00-03:00", "2026-03-10T14:30:00-03:00"]);
 });

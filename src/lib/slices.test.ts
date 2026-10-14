@@ -96,3 +96,34 @@ test("a block says what it belongs to and how many of its slices are done", () =
 test("no groups, no blocks", () => {
   assert.deepEqual(sliceBlocks([], new Map()), []);
 });
+
+/* ---------- An issue of the sprint cut into boxes instead of sub-issues ---------- */
+
+const BODY = ["## Problema", "- [x] fora da seção", "## Critérios de aceitação", "- [x] S1. Primeira parte. Detalhe.", "- [ ] S2. Segunda parte.", "  - Bloqueada: falta a chave", "- [ ] S3. Terceira parte."].join("\n");
+
+test("the query also asks for each issue's body, where its boxes are", () => {
+  assert.match(slicesQuery([7]), /i7: issue\(number: 7\) \{ number title url body subIssues/);
+});
+
+test("an issue of the sprint with no sub-issues shows the boxes of its acceptance criteria; one with neither is left out", () => {
+  const data = {
+    repository: {
+      i7: { number: 7, title: "Cortada em caixas", url: URL(7), body: BODY, subIssues: { totalCount: 0, nodes: [] } },
+      i8: { number: 8, title: "Sem nada", url: URL(8), body: "texto", subIssues: { totalCount: 0, nodes: [] } },
+      i9: { number: 9, title: "Família", url: URL(9), body: BODY, subIssues: { totalCount: 1, nodes: [{ number: 90, title: "Filha", url: URL(90), state: "OPEN" }] } },
+    },
+  };
+  const groups = parseSlices(data, [7, 8, 9]);
+  assert.deepEqual(groups.map((g) => [g.parent.number, g.total, g.items.length, g.boxes?.length ?? 0]), [[7, 3, 0, 3], [9, 1, 1, 0]], "a family keeps its sub-issues, whatever boxes it has");
+});
+
+test("each box is a row: its first sentence, done when ticked, blocked when a 'Bloqueada:' sub-item says so, linking to the issue", () => {
+  const [group] = parseSlices({ repository: { i7: { number: 7, title: "Cortada em caixas", url: URL(7), body: BODY, subIssues: { totalCount: 0, nodes: [] } } } }, [7]);
+  const [block] = sliceBlocks([group], new Map());
+  assert.deepEqual(block.rows.map((r) => [r.title, r.status, r.tone, r.url, r.ref]), [
+    ["S1. Primeira parte.", "CONCLUÍDO", "green", URL(7), ""],
+    ["S2. Segunda parte.", "BLOQUEADO", "red", URL(7), ""],
+    ["S3. Terceira parte.", "A FAZER", "neutral", URL(7), ""],
+  ]);
+  assert.deepEqual([block.done, block.total], [1, 3]);
+});

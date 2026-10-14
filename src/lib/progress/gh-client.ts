@@ -2,6 +2,7 @@
 // pull requests and Project #7. READ-ONLY by construction (GET and GraphQL queries; a mutation is refused
 // before it leaves the machine). The token comes from the caller and is only ever put in the Authorization
 // header: errors are explained in Portuguese and never echo the token, the URL or what GitHub answered.
+import { criteriaBoxes } from "../criteria.ts";
 import type { ReportWindow } from "../progress-report.ts";
 import { MAIN_BRANCH } from "./gh-status.ts";
 import { isEpic } from "./gh-facts.ts";
@@ -389,6 +390,39 @@ function prFromNode(n: PrNode, repository: string): GhPr {
   };
 }
 
+/** Bodies per query (each edit carries the whole body), and how many edits of each body are read, the newest first. */
+const HISTORY_CHUNK = 5;
+const HISTORY_EDITS = 100;
+
+const historyQuery = (numbers: number[]) =>
+  `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {\n${numbers
+    .map((n) => `e${n}: issue(number: ${n}) { userContentEdits(first: ${HISTORY_EDITS}) { totalCount nodes { editedAt deletedAt diff } } }`)
+    .join("\n")}\n} }`;
+
+type EditsNode = { userContentEdits?: { totalCount?: number | null; nodes?: ({ editedAt?: string; diff?: string | null } | null)[] | null } | null } | null;
+
+/**
+ * The versions of each body, oldest first, set on the issue as `bodyHistory`. GitHub lists the edits newest first and
+ * the oldest one is the body as written; `diff` holds the whole body of that version. `complete` is false when GitHub
+ * keeps more edits than were read (or some edit's text was deleted): the oldest version read then dates only itself.
+ */
+async function fetchBodyHistories(client: GithubClient, repository: string, wanted: GhIssue[]): Promise<void> {
+  const [owner, name] = repository.split("/");
+  const chunks: GhIssue[][] = [];
+  const sorted = [...wanted].sort((a, b) => a.number - b.number);
+  for (let i = 0; i < sorted.length; i += HISTORY_CHUNK) chunks.push(sorted.slice(i, i + HISTORY_CHUNK));
+  await mapPool(chunks, PARALLEL, async (chunk) => {
+    const data = await client.graphql<{ repository?: Record<string, EditsNode> }>(historyQuery(chunk.map((i) => i.number)), { owner, name });
+    for (const issue of chunk) {
+      const edits = data.repository?.[`e${issue.number}`]?.userContentEdits;
+      if (!edits) continue;
+      const nodes = (edits.nodes ?? []).filter((n): n is { editedAt: string; diff: string } => !!n?.editedAt && typeof n.diff === "string");
+      const versions = nodes.map((n) => ({ at: n.editedAt, body: n.diff })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+      issue.bodyHistory = { versions, complete: (edits.totalCount ?? 0) <= versions.length };
+    }
+  });
+}
+
 async function scanProject(client: GithubClient, owner: string): Promise<GhProjectItem[]> {
   type Page = {
     organization?: {
@@ -564,6 +598,9 @@ export async function collectGithubData(
     }
     level = next;
   }
+
+  // A delivery cut into boxes (no sub-issues) needs the dates of its ticks, which GitHub keeps only in the body's history.
+  await fetchBodyHistories(client, repository, [...issues.values()].filter((i) => (i.subIssues?.total ?? 0) === 0 && (criteriaBoxes(i.body) ?? []).some((b) => b.checked)));
 
   const prs = await fetchPrs(client, repository, [...prNumbers].sort((a, b) => a - b));
 
