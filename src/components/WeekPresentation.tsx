@@ -178,7 +178,7 @@ export function WeekPresentation({
                 <h3 className="text-3xl font-bold text-rs-text sm:text-4xl">{c.title}</h3>
                 {c.summary && <p className="text-xl text-rs-text sm:text-2xl">{c.summary}</p>}
                 <p className="text-lg text-rs-text-soft sm:text-xl">
-                  {c.parts.done} de {c.parts.total} sub-issues
+                  {c.parts.done} de {c.parts.total} partes
                 </p>
                 {openTitles(c.open) && <p className="text-lg text-rs-text-soft sm:text-xl">Restam: {openTitles(c.open)}</p>}
               </article>

@@ -129,3 +129,53 @@ test("a box added later, already ticked, is dated by the edit that added it", ()
   ];
   assert.deepEqual(boxCheckedAt(versions, "2026-10-13T09:00:00Z"), ["2026-10-13T09:00:00Z", "2026-10-13T18:00:00Z"]);
 });
+
+/* ---------- Cases the independent review found ---------- */
+
+test("a box is matched once across versions: a longer text that starts like an earlier ticked box is a different box", () => {
+  const versions = [
+    v("2026-10-01T10:00:00Z", "- [x] Tela de login", "- [ ] Tela de login com SSO"),
+    v("2026-10-10T10:00:00Z", "- [x] Tela de login", "- [x] Tela de login com SSO"),
+  ];
+  assert.deepEqual(boxCheckedAt(versions, "2026-10-01T10:00:00Z"), ["2026-10-01T10:00:00Z", "2026-10-10T10:00:00Z"]);
+});
+
+test("two boxes with the same text are told apart by their place", () => {
+  const versions = [
+    v("2026-10-01T10:00:00Z", "- [x] Testes e2e verdes", "- [ ] Testes e2e verdes"),
+    v("2026-10-10T10:00:00Z", "- [x] Testes e2e verdes", "- [x] Testes e2e verdes"),
+  ];
+  assert.deepEqual(boxCheckedAt(versions, "2026-10-01T10:00:00Z"), ["2026-10-01T10:00:00Z", "2026-10-10T10:00:00Z"]);
+});
+
+test("a ticked box whose text was edited later keeps the date of its tick", () => {
+  const versions = [
+    v("2026-10-01T10:00:00Z", "- [ ] S1. Endpoint de admin", "- [ ] S2. Tela"),
+    v("2026-10-05T10:00:00Z", "- [x] S1. Endpoint de admin (PR #12)", "- [ ] S2. Tela"),
+    v("2026-10-10T10:00:00Z", "- [x] S1. Endpoint de admin (PR #12, mergeado)", "- [ ] S2. Tela"),
+    v("2026-10-11T10:00:00Z", "- [x] S1. Endpoint de administração reescrito", "- [ ] S2. Tela"),
+  ];
+  assert.deepEqual(boxCheckedAt(versions, "2026-10-01T10:00:00Z"), ["2026-10-05T10:00:00Z", null]);
+});
+
+test("a box ticked in the oldest version of a history that does not reach the creation has no date", () => {
+  const versions = [v("2026-10-09T10:00:00Z", "- [x] S1. a", "- [ ] S2. b"), v("2026-10-10T10:00:00Z", "- [x] S1. a", "- [x] S2. b")];
+  assert.deepEqual(boxCheckedAt(versions, null), [null, "2026-10-10T10:00:00Z"]);
+});
+
+test("'Bloqueada' is read with the bold on the word only, and a list line between unties it from the box above", () => {
+  const body = lines(
+    "## Critérios de aceitação",
+    "- [ ] S1. a",
+    "  - **Bloqueada**: esperando a chave",
+    "- [ ] S2. b",
+    "- Nota solta no nível da caixa",
+    "  - Bloqueada: isto não é da S2"
+  );
+  assert.deepEqual(criteriaBoxes(body)?.map((b) => b.blocked), ["esperando a chave", null]);
+});
+
+test("a line separator inside a box or a heading does not hide it (as in Frontlights)", () => {
+  assert.deepEqual(view("## Critérios de aceitação\n- [x] a\u2028b"), [["x", "a\u2028b"]]);
+  assert.equal(criteriaBoxes("## Critérios de aceitação\u2028x\n- [ ] a")?.length, 1);
+});

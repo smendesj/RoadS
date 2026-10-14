@@ -122,7 +122,7 @@ export type FactEntry = {
    * an issue with no sub-issues, the boxes of its acceptance criteria (`done` = the ticked ones). Never both.
    */
   subIssues: { total: number; done: number } | null;
-  /** Only for an issue that has sub-issues. Kept in facts.json: the assembled draft does not carry it. */
+  /** Only for an issue that has sub-issues or boxes. Kept in facts.json: the assembled draft does not carry it. */
   slices?: PartsSlices;
   /** Only for a delivery with an epic above it; kept in facts.json like `slices`: the assembled draft does not carry it. */
   epic?: EpicContext;
@@ -386,8 +386,14 @@ export function buildFacts(input: FactsInput): ProgressFacts {
   // A delivery with no sub-issues is cut into the boxes of its acceptance criteria (Frontlights since 13/10/2026): they
   // are its parts, each dated by the body edit that ticked it when the body's history was read (undated otherwise).
   type Boxed = { total: number; done: number; ticked: { title: string; at: string }[]; blocked: { title: string; reason: string }[] };
+  const boxedCache = new Map<number, Boxed | null>();
   const boxesOf = (i: GhIssue | undefined): Boxed | null => {
-    if (!i || (i.subIssues?.total ?? 0) > 0 || childrenOf.has(i.number)) return null;
+    if (!i) return null;
+    if (!boxedCache.has(i.number)) boxedCache.set(i.number, readBoxes(i));
+    return boxedCache.get(i.number) ?? null;
+  };
+  const readBoxes = (i: GhIssue): Boxed | null => {
+    if ((i.subIssues?.total ?? 0) > 0 || childrenOf.has(i.number)) return null;
     const boxes = criteriaBoxes(i.body);
     if (!boxes || boxes.length === 0) return null;
     const h = i.bodyHistory;
@@ -396,8 +402,8 @@ export function buildFacts(input: FactsInput): ProgressFacts {
       const last = h.versions.at(-1);
       // The body as it is now is the last version (GitHub's newest edit already is; a body never edited has none).
       const versions = last && last.body === i.body ? h.versions : [...h.versions, { at: last?.at ?? i.createdAt, body: i.body }];
-      // A history that does not reach the creation dates what its oldest version already had ticked by that version.
-      dates = boxCheckedAt(versions, h.complete ? i.createdAt : versions[0].at);
+      // A history that does not reach the creation cannot date what its oldest version already had ticked.
+      dates = boxCheckedAt(versions, h.complete ? i.createdAt : null);
     }
     return {
       total: boxes.length,
@@ -721,7 +727,14 @@ function evidenceLines(a: {
   if (a.issue.state === "closed" && a.issue.closedAt) {
     lines.push(`Issue fechada em ${formatSaoPaulo(a.issue.closedAt)}${Date.parse(a.issue.closedAt) >= end ? ", depois do fim da janela" : ""}`);
   }
-  if (a.subIssues && a.boxes) lines.push(`Partes (as caixas dos critérios de aceitação): ${a.subIssues.done} de ${a.subIssues.total} marcadas`);
+  if (a.subIssues && a.boxes) {
+    lines.push(`Partes (as caixas dos critérios de aceitação): ${a.subIssues.done} de ${a.subIssues.total} marcadas`);
+    // Closed by its PR with boxes nobody ticked: the count says what GitHub shows, and whoever reviews is told.
+    const open = a.subIssues.total - a.subIssues.done;
+    if (a.decision.status === "concluido" && open > 0) {
+      lines.push(`Concluída com ${open} caixa${open > 1 ? "s" : ""} dos critérios de aceitação ainda aberta${open > 1 ? "s" : ""}`);
+    }
+  }
   else if (a.subIssues) lines.push(`Partes (as folhas das sub-issues, em qualquer nível): ${a.subIssues.done} de ${a.subIssues.total} concluídas`);
   if (a.closedInWindow > 0 && a.lastPartClosed) {
     const s = a.closedInWindow > 1 ? "s" : "";

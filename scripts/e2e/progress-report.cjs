@@ -416,14 +416,14 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       expect("scrum master -> the print of a delivery sits under it", (await smPage.locator('[data-entry="9001"] [data-print]').count()) === 1);
       expect(
         "scrum master -> the week opens with two chips in words (what was delivered, what is left of the sprint) and no 'Em validação' one",
-        /^Concluído: \d+ sub-issues? em \d+ issues?$/.test(await smPage.locator('[data-chip="concluido"]').innerText()) &&
-          (await smPage.locator('[data-chip="em_andamento"]').innerText()) === "Em andamento: 3 sub-issues em 1 issue" &&
+        /^Concluído: \d+ partes? em \d+ issues?$/.test(await smPage.locator('[data-chip="concluido"]').innerText()) &&
+          (await smPage.locator('[data-chip="em_andamento"]').innerText()) === "Em andamento: 3 partes em 1 issue" &&
           (await smPage.locator('[data-chip="em_validacao"]').count()) === 0
       );
       const sprintText = await smPage.locator('[data-cover="9100"]').innerText();
       expect(
-        "scrum master -> the sprint block shows the cover, its sentence, how far its sub-issues have come and what is left",
-        sprintText.includes("Capa de teste") && sprintText.includes("Uma frase simples de teste da capa.") && sprintText.includes("5 de 8 sub-issues") && sprintText.includes("Restam: ") && sprintText.includes("Entrega aberta de teste")
+        "scrum master -> the sprint block shows the cover, its sentence, how far its parts have come and what is left",
+        sprintText.includes("Capa de teste") && sprintText.includes("Uma frase simples de teste da capa.") && sprintText.includes("5 de 8 partes") && sprintText.includes("Restam: ") && sprintText.includes("Entrega aberta de teste")
       );
       expect(
         "scrum master -> each delivery says how many of its parts are ready, in plain words and with no issue number",
@@ -521,11 +521,11 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     expect("admin -> the preview says how many parts of a delivery are ready (the delivered one has all, the others one of two)", (await srcdocNow()).includes("2 de 2 partes prontas") && (await srcdocNow()).includes("1 de 2 partes prontas"));
     expect(
       "admin -> the preview has the two chips in words and the sprint block, and no 'Em validação' chip",
-      (await srcdocNow()).includes("Concluído: 2 sub-issues em 1 issue") &&
-        (await srcdocNow()).includes("Em andamento: 3 sub-issues em 1 issue") &&
+      (await srcdocNow()).includes("Concluído: 2 partes em 1 issue") &&
+        (await srcdocNow()).includes("Em andamento: 3 partes em 1 issue") &&
         !(await srcdocNow()).includes("Em validação: ") &&
         (await srcdocNow()).includes("Em andamento na sprint") &&
-        (await srcdocNow()).includes("5 de 8 sub-issues")
+        (await srcdocNow()).includes("5 de 8 partes")
     );
     {
       const doc = await srcdocNow();

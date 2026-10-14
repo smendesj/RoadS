@@ -62,7 +62,8 @@ const { BASE, expect, sleep } = L;
     const parents = numbersIn(await slicesBlock.locator("section > div span.font-mono").allInnerTexts());
     const rowsOk = await slicesBlock.locator("section").evaluateAll((sections) =>
       sections.every((s) => {
-        const n = [...s.querySelectorAll(":scope > a span.font-mono")].map((el) => Number(el.textContent.replace("#", "")));
+        // Rows of boxes (acceptance criteria) carry no number and keep the issue's order: only sub-issue rows are ordered.
+        const n = [...s.querySelectorAll(":scope > a span.font-mono")].map((el) => Number(el.textContent.replace("#", ""))).filter((x) => x > 0);
         return n.every((x, i) => i === 0 || x <= n[i - 1]);
       })
     );

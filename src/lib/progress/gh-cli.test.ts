@@ -76,8 +76,8 @@ test("a run writes the facts of the window and prints a Portuguese summary witho
   assert.deepEqual(written.delivered, { issues: 0, parts: 0 });
   assert.equal("gaps" in written, false); // no usage file given: not computed, not "no gaps"
   const printed = [...h.out, ...h.err].join("\n");
-  assert.match(printed, /Concluído: 0 sub-issues em 0 issues/);
-  assert.match(printed, /Em andamento na sprint: 1 sub-issue em 1 issue/);
+  assert.match(printed, /Concluído: 0 partes em 0 issues/);
+  assert.match(printed, /Em andamento na sprint: 1 parte em 1 issue/);
   assert.match(printed, /facts\.json/);
   assert.ok(!printed.includes(TOKEN) && !h.written.get(DEFAULT_FACTS_PATH)?.includes(TOKEN));
 });

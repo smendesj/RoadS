@@ -391,12 +391,12 @@ function prFromNode(n: PrNode, repository: string): GhPr {
 }
 
 /** Bodies per query (each edit carries the whole body), and how many edits of each body are read, the newest first. */
-const HISTORY_CHUNK = 5;
+const HISTORY_CHUNK = 2;
 const HISTORY_EDITS = 100;
 
 const historyQuery = (numbers: number[]) =>
   `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) {\n${numbers
-    .map((n) => `e${n}: issue(number: ${n}) { userContentEdits(first: ${HISTORY_EDITS}) { totalCount nodes { editedAt deletedAt diff } } }`)
+    .map((n) => `e${n}: issue(number: ${n}) { userContentEdits(first: ${HISTORY_EDITS}) { totalCount nodes { editedAt diff } } }`)
     .join("\n")}\n} }`;
 
 type EditsNode = { userContentEdits?: { totalCount?: number | null; nodes?: ({ editedAt?: string; diff?: string | null } | null)[] | null } | null } | null;
@@ -404,7 +404,8 @@ type EditsNode = { userContentEdits?: { totalCount?: number | null; nodes?: ({ e
 /**
  * The versions of each body, oldest first, set on the issue as `bodyHistory`. GitHub lists the edits newest first and
  * the oldest one is the body as written; `diff` holds the whole body of that version. `complete` is false when GitHub
- * keeps more edits than were read (or some edit's text was deleted): the oldest version read then dates only itself.
+ * keeps more edits than were read (or some edit's text was deleted): what the oldest version read already had ticked
+ * then has no date. A history that cannot be read is left unset (its boxes count, undated).
  */
 async function fetchBodyHistories(client: GithubClient, repository: string, wanted: GhIssue[]): Promise<void> {
   const [owner, name] = repository.split("/");
@@ -412,7 +413,9 @@ async function fetchBodyHistories(client: GithubClient, repository: string, want
   const sorted = [...wanted].sort((a, b) => a.number - b.number);
   for (let i = 0; i < sorted.length; i += HISTORY_CHUNK) chunks.push(sorted.slice(i, i + HISTORY_CHUNK));
   await mapPool(chunks, PARALLEL, async (chunk) => {
-    const data = await client.graphql<{ repository?: Record<string, EditsNode> }>(historyQuery(chunk.map((i) => i.number)), { owner, name });
+    // A history that cannot be read leaves its boxes counted but undated: the report goes on without it.
+    const data = await client.graphql<{ repository?: Record<string, EditsNode> }>(historyQuery(chunk.map((i) => i.number)), { owner, name }).catch(() => null);
+    if (!data) return;
     for (const issue of chunk) {
       const edits = data.repository?.[`e${issue.number}`]?.userContentEdits;
       if (!edits) continue;

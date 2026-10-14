@@ -51,6 +51,14 @@ Um JSON, gravado onde o Frontlights pedir (`{draft}`):
     para o rascunho montado, e os títulos dali precisam ser reescritos como qualquer outro. Uma entrega com
     parte pronta nunca aparece como "Próximo", mesmo sem PR nem commit: se a evidência diz "Leitura das
     sub-issues cortada", a contagem pode estar abaixo do real, e o texto não deve afirmar um total.
+  - **Entrega cortada em caixas.** Desde 13/10/2026 o Frontlights não cria sub-issues: as partes de uma entrega são as
+    caixas da seção "Critérios de aceitação" da própria issue (uma por slice, mais as caixas de pendência de revisão).
+    O coletor conta essas caixas como partes (nunca junto com sub-issues), e `slices.closed` traz as caixas marcadas no
+    período, com o texto da caixa até a primeira frase como `title` (reescreva-o como qualquer título) e a hora da
+    edição que a marcou. Uma caixa aberta com um sub-item "Bloqueada: ..." vem em `slices.blocked`, com o motivo em
+    `reason`: vale uma linha em `difficulties`, com o que falta e de quem. Se a evidência diz "Concluída com N caixas
+    dos critérios de aceitação ainda abertas", a issue foi fechada sem marcar todas: o texto não afirma que tudo
+    ficou pronto, e quem confere decide antes de enviar.
 - `internal`: a linha sobre ajustes internos. Opcional; sem ela, o RoadS usa uma frase padrão com o total
   coletado. Com total zero, a linha não aparece.
 - `difficulties`: o que trava ou atrasa e, em `needs`, o que é preciso e de quem. Pode ficar vazio (o e-mail
@@ -66,17 +74,17 @@ Um JSON, gravado onde o Frontlights pedir (`{draft}`):
 O e-mail e a visão semanal abrem com dois números, que o RoadS calcula sozinho (o redator **não os repete** no
 texto):
 
-- **Concluído: N sub-issues em M issues**: tudo que foi entregue no período, esteja ou não na sprint. M é o
+- **Concluído: N partes em M issues**: tudo que foi entregue no período, esteja ou não na sprint. M é o
   número de entregas visíveis e concluídas; N soma, por entrega, as partes prontas (uma entrega sem partes conta 1).
   O que a pessoa esconde ou muda na tela entra na conta.
-- **Em andamento: N sub-issues em K issues**: o que **falta** das capas da sprint. Uma capa é um item do Project
+- **Em andamento: N partes em K issues**: o que **falta** das capas da sprint. Uma capa é um item do Project
   (do repositório) com Status Development, epic ou não: o coletor lê a árvore inteira dela e conta as folhas que
-  ainda não estão prontas; uma capa sem filhas é a sua única parte. K é o número de capas com algo por fazer. Uma
+  ainda não estão prontas; uma capa sem filhas conta as caixas dos seus critérios de aceitação e, sem caixas, é a sua única parte. K é o número de capas com algo por fazer. Uma
   capa que está na sprint e já tem parte pronta conta nos dois números.
 
 Não existe número de "Em validação" nesse topo (o chip saiu). **Capa da sprint não é entrega**: não pede texto por
 entrega nem print, e aparece no bloco "Em andamento na sprint", logo depois das entregas, com o título, a frase
-do arquivo de textos, "12 de 17 sub-issues" e o que resta ("Restam: ..."). Os fatos trazem tudo isso em `sprint`
+do arquivo de textos, "12 de 17 partes" e o que resta ("Restam: ..."). Os fatos trazem tudo isso em `sprint`
 (e `delivered`, só como evidência); a visão semanal soma as entregas dos resumos enviados na semana (cada issue uma
 vez) e mostra o bloco do **último** resumo da semana.
 

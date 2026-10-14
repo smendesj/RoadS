@@ -23,11 +23,11 @@ export type Box = {
 
 const PHRASES = ["acceptance criteria", "criterios de aceitacao", "criterios de aceite"];
 const LEGACY_PHRASES = ["pendencias conhecidas", "known pending"];
-const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/;
+const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+([\s\S]*))?$/;
 const LINE_CAP = 2000;
-const FENCE = /^[ \t]*(`{3,}|~{3,})(.*)$/;
-const ITEM = /^([ \t]*)(?:[-*+]|[0-9]{1,9}[.)])[ \t]+\[([ xX])\](?=[ \t]|$)(.*)$/;
-const LIST_LINE = /^([ \t]*)(?:[-*+]|[0-9]{1,9}[.)])[ \t]+(.*)$/;
+const FENCE = /^[ \t]*(`{3,}|~{3,})([\s\S]*)$/;
+const ITEM = /^([ \t]*)(?:[-*+]|[0-9]{1,9}[.)])[ \t]+\[([ xX])\](?=[ \t]|$)([\s\S]*)$/;
+const LIST_LINE = /^([ \t]*)(?:[-*+]|[0-9]{1,9}[.)])[ \t]+([\s\S]*)$/;
 
 /** Lower case, no accents, single spaces, and no leading decoration (emphasis marks, emoji). */
 function plain(text: string): string {
@@ -120,11 +120,15 @@ export function criteriaBoxes(body: string): Box[] | null {
       continue;
     }
     const sub = LIST_LINE.exec(line);
-    if (sub && last && indentOf(sub[1]) > last.indent && last.box.blocked === null) {
-      const said = plain(sub[2]);
-      if (said.startsWith("bloqueada:") || said.startsWith("bloqueada :")) {
+    if (sub && last && indentOf(sub[1]) <= last.indent) {
+      last = null; // a list line at the box's level or above: what follows is no longer under that box
+      continue;
+    }
+    if (sub && last && last.box.blocked === null) {
+      // "Bloqueada:", with or without bold or italics anywhere around the word.
+      if (/^bloqueada\s*:/.test(plain(sub[2].replace(/[*_~]/g, "")))) {
         const colon = sub[2].indexOf(":");
-        last.box.blocked = sub[2].slice(colon + 1).replace(/^[\s*_]+/, "").trim() || "sem motivo escrito";
+        last.box.blocked = sub[2].slice(colon + 1).replace(/^[\s*_~]+/, "").trim() || "sem motivo escrito";
       }
     }
   }
@@ -152,30 +156,62 @@ export function boxTitle(text: string): string {
   return `${(space > 40 ? cut.slice(0, space) : cut).replace(/[\s,;:]+$/, "")}…`;
 }
 
-// The same box across versions of a body: the same text, or one text that grew from the other (ticking a box often
-// appends its evidence to the line). Short texts must match exactly.
-const sameBox = (a: string, b: string): boolean => {
-  if (a === b) return true;
-  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
-  return short.length >= 8 && long.startsWith(short);
-};
+type Seen = { key: string; label: string | null; checked: boolean };
+const LABEL = /^(s\d+)[.):]/;
 
 /**
- * When each box of the LAST version of a body was ticked, from the body's versions in time order (the first one as
- * the issue was written: it stands for the issue's creation). GitHub keeps no date for a tick, so a box's date is
- * the edit that ticked it the last time it went from open to ticked (or that added it already ticked). Null for an
- * open box.
+ * Which box of the older version each box of the newer one is, one to one (no box is used twice): the same text
+ * first; then the same slice label ("S2."); then the same place; then a text that grew from the other (ticking often
+ * appends evidence to the line; short texts never match this way). Null: the box is new in the newer version.
  */
-export function boxCheckedAt(versions: { at: string; body: string }[], createdAt: string): (string | null)[] {
+function matchBoxes(newer: Seen[], older: Seen[]): (number | null)[] {
+  const pick: (number | null)[] = newer.map(() => null);
+  const used = new Set<number>();
+  const pass = (fits: (n: Seen, o: Seen, j: number, k: number) => boolean) => {
+    newer.forEach((n, j) => {
+      if (pick[j] !== null) return;
+      const k = older.findIndex((o, i) => !used.has(i) && fits(n, o, j, i));
+      if (k >= 0) {
+        pick[j] = k;
+        used.add(k);
+      }
+    });
+  };
+  pass((n, o) => n.key === o.key);
+  pass((n, o) => n.label !== null && n.label === o.label);
+  pass((_n, _o, j, k) => j === k);
+  pass((n, o) => {
+    const [short, long] = n.key.length <= o.key.length ? [n.key, o.key] : [o.key, n.key];
+    return short.length >= 8 && long.startsWith(short);
+  });
+  return pick;
+}
+
+/**
+ * When each box of the LAST version of a body was ticked, from the body's versions in time order. GitHub keeps no
+ * date for a tick, so a box's date is the edit that ticked it the last time it went from open to ticked (or that
+ * added it already ticked). A box already ticked in the FIRST version is dated `createdAt` (pass the issue's
+ * creation when that version is the body as written, or null when the history does not reach it: then that box has
+ * no date). Null for an open box.
+ */
+export function boxCheckedAt(versions: { at: string; body: string }[], createdAt: string | null): (string | null)[] {
   if (versions.length === 0) return [];
-  const read = versions.map((v) => (criteriaBoxes(v.body) ?? []).map((b) => ({ key: plain(b.text), checked: b.checked })));
-  const final = read[read.length - 1];
-  return final.map((box) => {
+  const read: Seen[][] = versions.map((v) =>
+    (criteriaBoxes(v.body) ?? []).map((b) => {
+      const key = plain(b.text);
+      return { key, label: LABEL.exec(key)?.[1] ?? null, checked: b.checked };
+    })
+  );
+  // links[k][j]: the box of version k that box j of version k + 1 is.
+  const links = read.slice(1).map((newer, k) => matchBoxes(newer, read[k]));
+  const last = read.length - 1;
+  return read[last].map((box, j) => {
     if (!box.checked) return null;
-    let since = read.length - 1;
-    for (let k = read.length - 2; k >= 0; k--) {
-      const same = read[k].find((b) => sameBox(b.key, box.key));
-      if (!same || !same.checked) break;
+    let since = last;
+    let at: number | null = j;
+    for (let k = last - 1; k >= 0 && at !== null; k--) {
+      at = links[k][at];
+      if (at === null || !read[k][at].checked) break;
       since = k;
     }
     return since === 0 ? createdAt : versions[since].at;

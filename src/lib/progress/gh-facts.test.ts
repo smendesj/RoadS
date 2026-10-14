@@ -1048,12 +1048,13 @@ test("a box ticked in the window is work done: an issue with nothing else in the
   assert.deepEqual(e?.subIssues, { total: 3, done: 2 });
 });
 
-test("a body history that does not reach the issue's creation dates the boxes ticked in its oldest version by that version", () => {
+test("a body history that does not reach the issue's creation leaves undated what its oldest version already had ticked", () => {
   const partial = { versions: [{ at: "2026-03-09T15:00:00-03:00", body: BOXES_V2 }, { at: "2026-03-10T14:30:00-03:00", body: BOXES_V3 }], complete: false };
   const f = facts({ issues: [issue(14, { createdAt: "2026-03-01T09:00:00-03:00", body: BOXES_V3, bodyHistory: partial })], prs: [pr(1014, { title: "Entrega (#14)" })] });
   assert.deepEqual(
     f.entries.find((x) => x.issue === 14)?.slices?.closed.map((s) => s.closedAt),
-    ["2026-03-09T15:00:00-03:00", "2026-03-10T14:30:00-03:00"]
+    ["2026-03-10T14:30:00-03:00"],
+    "S1 was ticked somewhere before the oldest version read: no date, never 'ticked in the period'"
   );
 });
 
@@ -1068,4 +1069,16 @@ test("a follow-up issue still reads as internal, boxes or not; a delivery whose 
   });
   assert.deepEqual(f.internal.items.filter((i) => i.ref === "#15").map((i) => i.reason), ["pendência de revisão"]);
   assert.deepEqual(f.entries.find((x) => x.issue === 16)?.subIssues, { total: 2, done: 1 });
+});
+
+test("a delivery concluded with boxes still open says so in its evidence, and counts only the ticked ones", () => {
+  const body = criteria("- [x] S1. a", "- [ ] S2. b", "- [ ] S3. c");
+  const f = facts({
+    issues: [issue(17, { state: "closed", stateReason: "completed", closedAt: "2026-03-10T12:00:00-03:00", body, bodyHistory: { versions: [], complete: true } })],
+    prs: [pr(1017, { title: "Entrega (#17)", closing: [17] })],
+  });
+  const e = f.entries.find((x) => x.issue === 17);
+  assert.equal(e?.status, "concluido");
+  assert.deepEqual(e?.subIssues, { total: 3, done: 1 });
+  assert.ok(e?.evidence.includes("Concluída com 2 caixas dos critérios de aceitação ainda abertas"), e?.evidence.join(" | "));
 });

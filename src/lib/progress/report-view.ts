@@ -64,9 +64,9 @@ export function partsLabel(parts: { total: number; done: number } | null | undef
   return `${parts.done} de ${parts.total} ${parts.total === 1 ? "parte pronta" : "partes prontas"}`;
 }
 
-/** "14 sub-issues em 6 issues": the amount a chip of the e-mail names, with the singular where it is one. */
+/** "14 partes em 6 issues": the amount a chip of the e-mail names (parts: sub-issues or boxes of the acceptance criteria), with the singular where it is one. */
 export function amountLabel(parts: number, issues: number): string {
-  return `${parts} ${parts === 1 ? "sub-issue" : "sub-issues"} em ${issues} ${issues === 1 ? "issue" : "issues"}`;
+  return `${parts} ${parts === 1 ? "parte" : "partes"} em ${issues} ${issues === 1 ? "issue" : "issues"}`;
 }
 
 /** What is still open in a cover, as plain text: the titles in order, and past eight how many more there are. */

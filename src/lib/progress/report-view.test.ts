@@ -176,11 +176,11 @@ test("the parts of a delivery read as plain words, in the singular too, and noth
   assert.equal(partsLabel(undefined), null);
 });
 
-test("the amount of a chip says sub-issues and issues, with the singular where it is one", () => {
-  assert.equal(amountLabel(14, 6), "14 sub-issues em 6 issues");
-  assert.equal(amountLabel(1, 1), "1 sub-issue em 1 issue");
-  assert.equal(amountLabel(0, 0), "0 sub-issues em 0 issues");
-  assert.equal(amountLabel(1, 3), "1 sub-issue em 3 issues");
+test("the amount of a chip says parts and issues, with the singular where it is one", () => {
+  assert.equal(amountLabel(14, 6), "14 partes em 6 issues");
+  assert.equal(amountLabel(1, 1), "1 parte em 1 issue");
+  assert.equal(amountLabel(0, 0), "0 partes em 0 issues");
+  assert.equal(amountLabel(1, 3), "1 parte em 3 issues");
 });
 
 const cover = (issue: number, remaining: number, total = 10) => ({

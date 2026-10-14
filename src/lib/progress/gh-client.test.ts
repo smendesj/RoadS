@@ -544,12 +544,23 @@ test("the body's history is read only for an issue with no sub-issues and a tick
   assert.deepEqual(e?.slices?.closed, [{ title: "S2. Segunda parte.", closedAt: "2026-03-10T14:30:00-03:00" }]);
 });
 
-test("a body history longer than what was read says so: its oldest version dates what it already had ticked", async () => {
+test("a body history longer than what was read says so: what its oldest version already had ticked has no date", async () => {
   const gh = treeGithub({
     listed: [oldIssue(5, { body: boxesBody("x", "x") })],
     edits: { 5: { totalCount: 250, nodes: [{ editedAt: "2026-03-10T17:30:00Z", diff: boxesBody("x", "x") }, { editedAt: "2026-03-09T13:00:00Z", diff: boxesBody("x", " ") }] } },
   });
   const { data, facts } = await factsOf(gh);
   assert.equal(data.issues.find((i) => i.number === 5)?.bodyHistory?.complete, false);
-  assert.deepEqual(facts.entries.find((x) => x.issue === 5)?.slices?.closed.map((s) => s.closedAt), ["2026-03-09T10:00:00-03:00", "2026-03-10T14:30:00-03:00"]);
+  assert.deepEqual(facts.entries.find((x) => x.issue === 5)?.slices?.closed.map((s) => s.closedAt), ["2026-03-10T14:30:00-03:00"]);
+});
+
+test("a failed read of a body's history never stops the report: the boxes still count, undated", async () => {
+  const base = treeGithub({ listed: [oldIssue(5, { body: boxesBody("x", " ") })] });
+  const gh = fakeGithub(async (call) => (/userContentEdits/.test(call.body?.query ?? "") ? new Response("{}", { status: 502 }) : base.fetch(call.url.toString(), { method: call.method, body: call.body ? JSON.stringify(call.body) : undefined })));
+  const client = createGithubClient({ token: TOKEN, fetch: gh.fetch });
+  const data = await collectGithubData(client, { repository: REPO, window: WINDOW, author: "dev-a" });
+  const five = data.issues.find((i) => i.number === 5);
+  assert.equal(five?.bodyHistory, undefined);
+  const facts = buildFacts({ repository: REPO, window: WINDOW, generatedAt: "2026-03-11T12:00:00-03:00", ...data });
+  assert.deepEqual(facts.entries.find((x) => x.issue === 5)?.subIssues ?? null, null, "an old issue with nothing dated in the window is no news");
 });

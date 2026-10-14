@@ -328,7 +328,7 @@ ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada en
 - **`content.sprint`** (opcional, aditivo, no `POST /progress-report`): o mesmo `sprint` dos fatos, com um `summary` a
   mais por capa (a frase do redator, vazia quando não há). O servidor refaz `parts.remaining` e `totals`, e recusa
   capa repetida ou `done` maior que `total`, dizendo o campo. Sem ele, o e-mail volta aos chips de antes. Com ele, o
-  e-mail e a visão semanal mostram **"Concluído: N sub-issues em M issues"** e **"Em andamento: N sub-issues em K
+  e-mail e a visão semanal mostram **"Concluído: N partes em M issues"** e **"Em andamento: N partes em K
   issues"** (e "Bloqueado: N" se houver), sem o chip "Em validação", e o bloco "Em andamento na sprint" depois das
   entregas. A visão semanal soma as entregas dos resumos da semana (cada issue uma vez) e traz o bloco do último.
 - **`ignored.covers`** (número): quantas capas da sprint o coletor achou (uma capa epic entra também em `epics`).
@@ -414,4 +414,6 @@ repositório, `roads-script/push` e `roads-script/attach`.
   `blocked`), `sprint.epics[].parts` e `delivered.parts` contam as caixas dos critérios de aceitação, datadas pelo
   histórico de edições do corpo; famílias com sub-issues seguem pela árvore. Campo novo opcional:
   `slices.blocked[].reason`, só em caixa com "Bloqueada:". O bloco Slices do Dashboard mostra as caixas de uma issue da
-  sprint sem sub-issues. Nenhum nome ou tipo de campo mudou e a `schemaVersion` segue 1.
+  sprint sem sub-issues. Nenhum nome ou tipo de campo mudou e a `schemaVersion` segue 1. No e-mail, na visão semanal
+  e na tela, "sub-issues" vira "partes" ("Concluído: N partes em M issues", "X de Y partes"), porque uma parte pode
+  ser sub-issue ou caixa; o e-mail já enviado não muda, mas a tela monta o texto na hora e mostra a palavra nova.

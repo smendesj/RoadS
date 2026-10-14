@@ -111,7 +111,7 @@ function chip(status: CounterStatus, label: string): string {
 }
 
 /**
- * The chips. A report with a sprint block has two of them in words ("Concluído: 14 sub-issues em 6 issues",
+ * The chips. A report with a sprint block has two of them in words ("Concluído: 14 partes em 6 issues",
  * "Em andamento: ..."), one under the other because they are long, and "Bloqueado" only if some delivery is;
  * "Em validação" is not among them. An older report keeps the chips it always had, side by side.
  */
@@ -129,7 +129,7 @@ function counters(counts: Record<CounterStatus, number>, chips: SprintChips | nu
   return padded(18, 4, table("", row(cells)));
 }
 
-/** One cover of the sprint: its title, the writer's sentence, how far its sub-issues have come, and what is left. */
+/** One cover of the sprint: its title, the writer's sentence, how far its parts have come, and what is left. */
 function coverBlock(cover: SprintCover): string {
   const summary = clean(cover.summary);
   const left = openTitles(cover.open);
@@ -139,7 +139,7 @@ function coverBlock(cover: SprintCover): string {
     full(
       row(cell(font(15, 22, COLOR.ink), `<b>${body(clean(cover.title))}</b>`)) +
         (summary ? row(cell(font(15, 22, COLOR.ink, "padding-top:2px;"), body(summary))) : "") +
-        row(cell(font(13, 19, COLOR.muted, "padding-top:3px;"), escapeHtml(`${cover.parts.done} de ${cover.parts.total} sub-issues`))) +
+        row(cell(font(13, 19, COLOR.muted, "padding-top:3px;"), escapeHtml(`${cover.parts.done} de ${cover.parts.total} partes`))) +
         (left ? row(cell(font(13, 19, COLOR.muted, "padding-top:2px;"), `Restam: ${body(left)}`)) : "")
     )
   );
@@ -375,7 +375,7 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   if (covers.length > 0) {
     out.push("", "Em andamento na sprint");
     for (const cover of covers) {
-      out.push(`- ${clean(cover.title)}${clean(cover.summary) ? `: ${clean(cover.summary)}` : ""}`, `  ${cover.parts.done} de ${cover.parts.total} sub-issues`);
+      out.push(`- ${clean(cover.title)}${clean(cover.summary) ? `: ${clean(cover.summary)}` : ""}`, `  ${cover.parts.done} de ${cover.parts.total} partes`);
       if (openTitles(cover.open)) out.push(`  Restam: ${openTitles(cover.open)}`);
     }
   }

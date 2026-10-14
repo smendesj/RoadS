@@ -533,12 +533,13 @@ const withSprint = (epics = [cover(900), cover(950, { parts: { total: 9, done: 5
 test("a report with a sprint block says its two chips in words, and 'Em validação' is not one of them", () => {
   const content = withSprint();
   const out = html(content);
-  assert.ok(out.includes("Concluído: 11 sub-issues em 3 issues")); // 6 + 4 + 1 (a delivery with no parts counts one)
-  assert.ok(out.includes("Em andamento: 9 sub-issues em 2 issues")); // what is left of the two covers: 5 + 4
+  assert.ok(out.includes("Concluído: 11 partes em 3 issues")); // 6 + 4 + 1 (a delivery with no parts counts one)
+  assert.ok(out.includes("Em andamento: 9 partes em 2 issues")); // what is left of the two covers: 5 + 4
   assert.ok(!out.includes("Bloqueado:"));
-  assert.ok(!/(Em validação|Concluído|Em andamento): \d+(?! sub-issue)/.test(out.replace(/(Concluído|Em andamento): \d+ sub-issues? em \d+ issues?/g, "")), "no chip is left in the old form");
+  assert.ok(!/(Em validação|Concluído|Em andamento): \d+(?! parte)/.test(out.replace(/(Concluído|Em andamento): \d+ partes? em \d+ issues?/g, "")), "no chip is left in the old form");
+  assert.ok(!out.includes("sub-issue"), "the parts are 'partes', whether sub-issues or boxes of the acceptance criteria");
   const plain = text(content);
-  assert.match(plain, /Concluído: 11 sub-issues em 3 issues · Em andamento: 9 sub-issues em 2 issues\n/);
+  assert.match(plain, /Concluído: 11 partes em 3 issues · Em andamento: 9 partes em 2 issues\n/);
   assert.ok(!plain.includes("Em validação:"));
 });
 
@@ -546,31 +547,31 @@ test("the chips follow what the report shows: hidden deliveries are not counted,
   const content = withSprint(undefined, {
     entries: [entry(1, "concluido", { subIssues: { total: 6, done: 6 } }), entry(2, "concluido", { hidden: true, subIssues: { total: 4, done: 4 } }), entry(3, "bloqueado")],
   });
-  assert.ok(html(content).includes("Concluído: 6 sub-issues em 1 issue"));
+  assert.ok(html(content).includes("Concluído: 6 partes em 1 issue"));
   assert.ok(html(content).includes("Bloqueado: 1"));
-  assert.match(text(content), /Concluído: 6 sub-issues em 1 issue · Em andamento: 9 sub-issues em 2 issues · Bloqueado: 1\n/);
+  assert.match(text(content), /Concluído: 6 partes em 1 issue · Em andamento: 9 partes em 2 issues · Bloqueado: 1\n/);
 });
 
 test("with nothing delivered and nothing left the chips say zero, and no sprint block is drawn", () => {
   const content = withSprint([], { entries: [] });
-  assert.ok(html(content).includes("Concluído: 0 sub-issues em 0 issues"));
-  assert.ok(html(content).includes("Em andamento: 0 sub-issues em 0 issues"));
+  assert.ok(html(content).includes("Concluído: 0 partes em 0 issues"));
+  assert.ok(html(content).includes("Em andamento: 0 partes em 0 issues"));
   assert.ok(!html(content).includes("Em andamento na sprint") && !text(content).includes("Em andamento na sprint"));
 });
 
 test("an older report, with no sprint block, keeps the chips and the look it always had", () => {
   const out = html(rich());
-  assert.ok(out.includes("Em validação: 1") && out.includes("Concluído: 2") && !out.includes("sub-issues em"));
+  assert.ok(out.includes("Em validação: 1") && out.includes("Concluído: 2") && !out.includes("partes em"));
   assert.match(text(rich()), /Concluído: 2 · Em validação: 1 · Em andamento: 1\n/);
 });
 
 test("the sprint block comes after the deliveries and before the difficulties: each cover with its sentence, its parts and what is left", () => {
   const out = html(withSprint());
-  const order = ["Entrega de teste 3", ">Em andamento na sprint<", "Capa de teste 900", "Frase de teste da capa 900.", "12 de 17 sub-issues", "Restam: Entrega aberta 901; Outra entrega aberta 902", "Capa de teste 950", "5 de 9 sub-issues", ">Dificuldades e bloqueios<"].map((needle) => at(out, needle));
+  const order = ["Entrega de teste 3", ">Em andamento na sprint<", "Capa de teste 900", "Frase de teste da capa 900.", "12 de 17 partes", "Restam: Entrega aberta 901; Outra entrega aberta 902", "Capa de teste 950", "5 de 9 partes", ">Dificuldades e bloqueios<"].map((needle) => at(out, needle));
   assert.deepEqual(order, [...order].sort((a, b) => a - b));
   assert.ok(!out.includes("Restam: </") && out.split("Restam:").length === 2); // a cover with nothing open has no 'Restam' line
   const plain = text(withSprint());
-  assert.match(plain, /\nEm andamento na sprint\n- Capa de teste 900: Frase de teste da capa 900\.\n {2}12 de 17 sub-issues\n {2}Restam: Entrega aberta 901; Outra entrega aberta 902\n- Capa de teste 950: Frase de teste da capa 950\.\n {2}5 de 9 sub-issues\n\nDificuldades e bloqueios/);
+  assert.match(plain, /\nEm andamento na sprint\n- Capa de teste 900: Frase de teste da capa 900\.\n {2}12 de 17 partes\n {2}Restam: Entrega aberta 901; Outra entrega aberta 902\n- Capa de teste 950: Frase de teste da capa 950\.\n {2}5 de 9 partes\n\nDificuldades e bloqueios/);
 });
 
 test("a cover with nothing left is not drawn; a cover with no sentence shows just its title; a long list of what is left is cut with a count", () => {
@@ -580,7 +581,7 @@ test("a cover with nothing left is not drawn; a cover with no sentence shows jus
   assert.ok(!out.includes("Capa de teste 900") && out.includes("Capa de teste 950"));
   assert.ok(out.includes("Restam: Aberta 1; Aberta 2; Aberta 3; Aberta 4; Aberta 5; Aberta 6; Aberta 7; Aberta 8; e mais 4"));
   assert.ok(!out.includes("Frase de teste da capa 950."));
-  assert.ok(out.includes("Em andamento: 5 sub-issues em 1 issue"));
+  assert.ok(out.includes("Em andamento: 5 partes em 1 issue"));
 });
 
 test("the sprint block is escaped like any other text", () => {
