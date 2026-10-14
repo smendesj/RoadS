@@ -128,7 +128,7 @@ export function criteriaBoxes(body: string): Box[] | null {
       // "Bloqueada:", with or without bold or italics anywhere around the word.
       if (/^bloqueada\s*:/.test(plain(sub[2].replace(/[*_~]/g, "")))) {
         const colon = sub[2].indexOf(":");
-        last.box.blocked = sub[2].slice(colon + 1).replace(/^[\s*_~]+/, "").trim() || "sem motivo escrito";
+        last.box.blocked = sub[2].slice(colon + 1).replace(/^[\s*_~]+|[\s*_~]+$/g, "") || "sem motivo escrito";
       }
     }
   }
@@ -161,8 +161,9 @@ const LABEL = /^(s\d+)[.):]/;
 
 /**
  * Which box of the older version each box of the newer one is, one to one (no box is used twice): the same text
- * first; then the same slice label ("S2."); then the same place; then a text that grew from the other (ticking often
- * appends evidence to the line; short texts never match this way). Null: the box is new in the newer version.
+ * first; then the same slice label ("S2."); then a text that grew from the other (ticking often appends evidence to
+ * the line; short texts never match this way); then, only when both versions have as many boxes, the same place (a
+ * reworded box). Null: the box is new in the newer version.
  */
 function matchBoxes(newer: Seen[], older: Seen[]): (number | null)[] {
   const pick: (number | null)[] = newer.map(() => null);
@@ -179,11 +180,12 @@ function matchBoxes(newer: Seen[], older: Seen[]): (number | null)[] {
   };
   pass((n, o) => n.key === o.key);
   pass((n, o) => n.label !== null && n.label === o.label);
-  pass((_n, _o, j, k) => j === k);
   pass((n, o) => {
     const [short, long] = n.key.length <= o.key.length ? [n.key, o.key] : [o.key, n.key];
     return short.length >= 8 && long.startsWith(short);
   });
+  // The same place only says "the same box" when no box was added or removed between the two versions.
+  if (newer.length === older.length) pass((_n, _o, j, k) => j === k);
   return pick;
 }
 

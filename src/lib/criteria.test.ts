@@ -179,3 +179,25 @@ test("a line separator inside a box or a heading does not hide it (as in Frontli
   assert.deepEqual(view("## Critérios de aceitação\n- [x] a\u2028b"), [["x", "a\u2028b"]]);
   assert.equal(criteriaBoxes("## Critérios de aceitação\u2028x\n- [ ] a")?.length, 1);
 });
+
+test("a box inserted above, while another gets its evidence, does not swap their dates", () => {
+  const versions = [
+    v("2026-10-01T10:00:00Z", "- [ ] Implementar endpoint de admin", "- [ ] Escrever testes"),
+    v("2026-10-02T10:00:00Z", "- [x] Implementar endpoint de admin", "- [ ] Escrever testes"),
+    v("2026-10-10T10:00:00Z", "- [x] Pendência (achado da revisão): x", "- [x] Implementar endpoint de admin (PR #3)", "- [ ] Escrever testes"),
+  ];
+  assert.deepEqual(boxCheckedAt(versions, "2026-10-01T10:00:00Z"), ["2026-10-10T10:00:00Z", "2026-10-02T10:00:00Z", null]);
+});
+
+test("a box removed above, while the next gets its evidence, does not lend its date", () => {
+  const versions = [
+    v("2026-10-01T10:00:00Z", "- [x] Primeira coisa feita", "- [ ] Segunda coisa"),
+    v("2026-10-02T10:00:00Z", "- [x] Primeira coisa feita", "- [x] Segunda coisa"),
+    v("2026-10-10T10:00:00Z", "- [x] Segunda coisa (PR #4)"),
+  ];
+  assert.deepEqual(boxCheckedAt(versions, "2026-10-01T10:00:00Z"), ["2026-10-02T10:00:00Z"]);
+});
+
+test("the reason of a 'Bloqueada' in bold drops the closing marks", () => {
+  assert.deepEqual(criteriaBoxes(lines("## Critérios de aceitação", "- [ ] S1. a", "  - **Bloqueada: falta X**"))?.map((b) => b.blocked), ["falta X"]);
+});

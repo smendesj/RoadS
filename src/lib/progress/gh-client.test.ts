@@ -555,12 +555,12 @@ test("a body history longer than what was read says so: what its oldest version 
 });
 
 test("a failed read of a body's history never stops the report: the boxes still count, undated", async () => {
-  const base = treeGithub({ listed: [oldIssue(5, { body: boxesBody("x", " ") })] });
+  const base = treeGithub({ listed: [oldIssue(5, { body: boxesBody("x", " ") })], board: [boardNode(5, "Development")] });
   const gh = fakeGithub(async (call) => (/userContentEdits/.test(call.body?.query ?? "") ? new Response("{}", { status: 502 }) : base.fetch(call.url.toString(), { method: call.method, body: call.body ? JSON.stringify(call.body) : undefined })));
   const client = createGithubClient({ token: TOKEN, fetch: gh.fetch });
   const data = await collectGithubData(client, { repository: REPO, window: WINDOW, author: "dev-a" });
   const five = data.issues.find((i) => i.number === 5);
-  assert.equal(five?.bodyHistory, undefined);
+  assert.equal(five?.bodyHistory, null, "tried and failed: the CLI warns about it");
   const facts = buildFacts({ repository: REPO, window: WINDOW, generatedAt: "2026-03-11T12:00:00-03:00", ...data });
-  assert.deepEqual(facts.entries.find((x) => x.issue === 5)?.subIssues ?? null, null, "an old issue with nothing dated in the window is no news");
+  assert.deepEqual(facts.sprint.epics.find((c) => c.issue === 5)?.parts, { total: 2, done: 1, remaining: 1 }, "the boxes still count");
 });

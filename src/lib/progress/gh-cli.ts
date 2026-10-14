@@ -122,6 +122,10 @@ export async function runGithubCli(argv: string[], deps: CliDeps): Promise<numbe
     if (facts.ignored.cut > 0) {
       deps.log(`Atenção: ${facts.ignored.cut} issue${facts.ignored.cut > 1 ? "s" : ""} com sub-issues não lidas por inteiro (árvore funda ou grande demais, ou sub-issues de outro repositório): a contagem de partes pode estar abaixo do real.`);
     }
+    const undated = data.issues.filter((i) => i.bodyHistory === null).length;
+    if (undated > 0) {
+      deps.log(`Atenção: o histórico de edições de ${undated} issue${undated > 1 ? "s" : ""} não pôde ser lido: as caixas dos critérios contam, mas sem a data em que foram marcadas (nenhuma entra como marcada no período).`);
+    }
     deps.log(facts.gaps ? `Lacunas de cobertura: ${facts.gaps.length}.` : "Sem --messages: as lacunas de cobertura não foram calculadas.");
     deps.log(`Gravado em ${out}.`);
     return 0;

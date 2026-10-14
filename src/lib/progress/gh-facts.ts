@@ -33,7 +33,8 @@ export type GhIssue = {
   /**
    * The versions of the body, oldest first (`complete` when the first one is the body as the issue was written).
    * Read only for an issue with no sub-issues and a ticked box in its acceptance criteria: GitHub keeps no date for
-   * a tick, so a box is dated by the edit that ticked it (src/lib/criteria.ts). Absent when not read.
+   * a tick, so a box is dated by the edit that ticked it (src/lib/criteria.ts). Absent when not read, null when the
+   * read failed: either way its boxes count, undated.
    */
   bodyHistory?: { versions: { at: string; body: string }[]; complete: boolean } | null;
 };
