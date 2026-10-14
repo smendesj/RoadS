@@ -100,7 +100,6 @@ async function call(ctx, id, args, pagePath) {
       ["updateUserRole (self-promotion)", A.updateUserRole, [L.ids.dev, "scrum_master"], "/config"],
       ["updateUserRole (to admin)", A.updateUserRole, [L.ids.dev, "admin"], "/config"],
       ["resetUserPassword", A.resetUserPassword, [nonexistent], "/config"],
-      ["updateMyAvatar (invalid id)", A.updateMyAvatar, ["../../etc/passwd"], "/roadmap"],
     ];
     for (const [name, id, args, p] of devDenied) {
       const r = await call(dev.context, id, args, p);
@@ -112,13 +111,27 @@ async function call(ctx, id, args, pagePath) {
     expect("dev -> no note was written", (await svc.from("item_notes").select("id").eq("item_id", L.ids.smItem)).data.length === 0);
     const devOk = [
       ["getRoadmapBoard", A.getRoadmapBoard, [], "/roadmap"],
-      ["updateMyAvatar (valid)", A.updateMyAvatar, ["avatar-03"], "/roadmap"],
       ["syncBoardAsViewer (fails closed: no token)", A.syncBoardAsViewer, [], "/roadmap"],
     ];
     for (const [name, id, args, p] of devOk) {
       const r = await call(dev.context, id, args, p);
       expect(`dev -> ${name}: allowed`, r.kind === "ok", `${r.kind} ${r.returned.slice(0, 50)}`);
     }
+    expect("updateMyAvatar is no longer a server action (the picture has its own route)", A.updateMyAvatar === undefined);
+
+    // The picture's own door, POST /api/profile/avatar: only the signed-in user's own profile, only shipped ids,
+    // only from the app's own pages.
+    const avatarOf = async (id) => (await svc.from("profiles").select("avatar").eq("id", id)).data[0].avatar;
+    const postAvatar = (ctx, avatar, origin = BASE) =>
+      ctx.request.post(BASE + "/api/profile/avatar", { headers: { "content-type": "application/json", origin }, data: JSON.stringify({ avatar }) }).then((r) => r.status());
+    await svc.from("profiles").update({ avatar: "avatar-05" }).eq("id", L.ids.dev);
+    const anonAvatar = await postAvatar(anon, "avatar-01");
+    const badAvatar = await postAvatar(dev.context, "../../etc/passwd");
+    const foreignAvatar = await postAvatar(dev.context, "avatar-01", "https://evil.example");
+    expect("avatar route: nobody signed in 401, a bad id 400, another site's page 403, and nothing changed",
+      anonAvatar === 401 && badAvatar === 400 && foreignAvatar === 403 && (await avatarOf(L.ids.dev)) === "avatar-05", `${anonAvatar}/${badAvatar}/${foreignAvatar}`);
+    const goodAvatar = await postAvatar(dev.context, "avatar-03");
+    expect("avatar route: the Dev sets their own picture (200, saved by the time it answers)", goodAvatar === 200 && (await avatarOf(L.ids.dev)) === "avatar-03", String(goodAvatar));
     expect("no action in the build behaves like the cron-only syncBoard any more", probe.syncBoard === undefined, JSON.stringify(Object.keys(probe)));
     const OLD_SYNC_BOARD_ID = "00ac3b6ef692bf08d9ac587b902b687a76024068f2"; // its id in the previous build
     const cronAsDev = await call(dev.context, OLD_SYNC_BOARD_ID, [], "/dashboard");

@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { updateMyAvatar } from "@/lib/actions/profile";
 import { AVATAR_IDS, avatarSrc } from "@/lib/avatars";
 import { useLogout } from "@/lib/use-logout";
 
@@ -43,18 +42,26 @@ export function UserMenu({ roleLabel, avatar: initialAvatar }: { roleLabel: stri
 
   // The picture changes at once; if the save fails it goes back to the last one that was saved.
   // Only the latest click decides what is shown when its save settles, so quick successive picks
-  // can't leave the screen on a picture that isn't the saved one.
+  // can't leave the screen on a picture that isn't the saved one. The save is its own request, sent at
+  // once (src/lib/profile.ts has why it is not a server action), and keepalive lets it finish even if
+  // the page is reloaded or closed right after the click.
   const saved = useRef(initialAvatar);
   const latestPick = useRef(0);
   function choose(id: string) {
     const pick = ++latestPick.current;
     setAvatar(id);
-    updateMyAvatar(id)
-      .then(() => {
+    fetch("/api/profile/avatar", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ avatar: id }),
+      keepalive: true,
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         saved.current = id;
       })
       .catch((e) => {
-        console.error("updateMyAvatar failed", e);
+        console.error("avatar save failed", e);
       })
       .finally(() => {
         if (pick === latestPick.current) setAvatar(saved.current);

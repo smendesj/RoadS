@@ -107,9 +107,31 @@ const { BASE, expect, sleep } = L;
     expect("direct visit to /config is sent back to /dashboard", page.url().endsWith("/dashboard"), page.url());
 
     // ------------------------------------------------ avatar (own profile only)
+    // The pick is saved by its own request, not a server action: the browser sends actions one at a time, so a
+    // pick queued behind the Dashboard's own sync, and a reload in that time showed the old picture (13-14/10) or lost it.
+    // Here the sync is held open on purpose and the save must still come back before it is let go.
+    let releaseSync;
+    const syncHeld = new Promise((r) => (releaseSync = r));
+    let heldSyncs = 0;
+    const holdSync = async (route) => {
+      if (route.request().method() !== "POST" || !route.request().headers()["next-action"]) return route.continue();
+      heldSyncs++;
+      await syncHeld;
+      await route.continue().catch(() => {});
+    };
+    await page.route("**/dashboard", holdSync);
+    // Start from another picture, so a page still showing the old one can't pass by luck.
+    await L.svc.from("profiles").update({ avatar: "avatar-05" }).eq("id", L.ids.dev);
+    await page.reload({ waitUntil: "load" });
+    await menu.waitFor();
+    for (let waited = 0; heldSyncs === 0 && waited < 15000; waited += 100) await sleep(100);
     await menu.click();
+    const saveAnswer = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/profile/avatar", { timeout: 15000 });
     await page.locator('button[aria-label="Foto 02"]').click();
-    await sleep(1500);
+    const saveStatus = await saveAnswer.then((r) => r.status(), () => "no answer");
+    expect("avatar: the pick is saved while the page's own sync is still under way (it does not wait behind it)", heldSyncs >= 1 && saveStatus === 200, `held syncs=${heldSyncs}, save=${saveStatus}`);
+    releaseSync();
+    await page.unroute("**/dashboard", holdSync);
     await page.reload({ waitUntil: "load" });
     await menu.waitFor();
     const shown = await menu.locator("img").getAttribute("src");
