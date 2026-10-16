@@ -1,5 +1,5 @@
 const L = require("./lib.cjs");
-const { BASE, expect, sleep } = L;
+const { BASE, expect, sleep, svc } = L;
 
 // A made-up issue of the current sprint, converted to boxes: three boxes of acceptance criteria (one ticked, one
 // with a "Bloqueada:" sub-item), one sub-issue still open and two closed in the conversion. The test server can't
@@ -18,15 +18,21 @@ const SEED = {
     { text: "S3. [TESTE] terceira parte.", checked: false, blocked: null },
   ],
 };
-// The lane the Dashboard reads as the current sprint (src/lib/actions/dashboard.ts).
-const CURRENT_SPRINT = "atual";
+// The lane the Dashboard reads as the current sprint: the week whose dates hold today in São Paulo, whatever its id
+// (src/lib/current-sprint.ts), positional before migration 0031, by date after it.
+async function currentSprintLane() {
+  const W = await L.weeks();
+  const lane = W.real.find((l) => l.start_date <= W.monday && W.monday <= l.end_date);
+  if (!lane) throw new Error("no current week lane in the database");
+  return lane.id;
+}
 
 // Puts the made-up issue in the current sprint and its parts in the snapshot; the returned function takes both out
 // again, leaving the rest of the snapshot as the last real sync wrote it.
 async function seedSprintIssue() {
   const { data: item, error } = await L.svc
     .from("roadmap_items")
-    .insert({ lane_id: CURRENT_SPRINT, title: SEED.title, description: "descrição de teste", created_by: null, github_issue_url: GEOCLOUD + SEED.number, github_issue_number: SEED.number })
+    .insert({ lane_id: await currentSprintLane(), title: SEED.title, description: "descrição de teste", created_by: null, github_issue_url: GEOCLOUD + SEED.number, github_issue_number: SEED.number })
     .select("id")
     .single();
   if (error) throw error;
@@ -118,12 +124,20 @@ async function seedSprintIssue() {
       const order = ["Sprint", "Kanban"].map((t) => [...document.querySelectorAll("span")].find((el) => el.textContent === t));
       return order.every(Boolean) && order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING;
     }));
-    // Every block lists its issues from the highest number to the lowest (src/lib/issue-order.ts), read on the real sprint.
+    // The Slices list their issues from the highest number to the lowest (src/lib/issue-order.ts); a week keeps the
+    // order the scrum master gave it on the Roadmap (roadmap_items.sort_order). Both read on the real sprint.
     const descending = (refs) => refs.every((r, i) => i === 0 || r <= refs[i - 1]);
+    const inStoredOrder = (orders) => orders.every((o, i) => o !== undefined && (i === 0 || o >= orders[i - 1]));
     const numbersIn = (texts) => texts.map((t) => Number(t.match(/^#(\d+)$/)?.[1])).filter((n) => n > 0);
     const sprintBlock = page.getByText("Sprint", { exact: true }).locator("xpath=..");
     const sprintNumbers = numbersIn(await sprintBlock.locator("[data-issue] > :first-child span.font-mono").allInnerTexts());
-    expect("dashboard: the Sprint block lists its issues from the highest number to the lowest", sprintNumbers.length > 1 && descending(sprintNumbers), JSON.stringify(sprintNumbers));
+    const W = await L.weeks();
+    const currentWeek = W.real.find((l) => l.start_date <= W.monday && W.monday <= l.end_date);
+    const weekRows = currentWeek ? (await svc.from("roadmap_items").select("github_issue_url, sort_order").eq("lane_id", currentWeek.id)).data ?? [] : [];
+    const orderOfIssue = new Map(weekRows.map((r) => [Number(r.github_issue_url?.match(/\/issues\/(\d+)/)?.[1]), r.sort_order]));
+    const sprintStored = sprintNumbers.map((n) => orderOfIssue.get(n));
+    expect("dashboard: the Sprint block lists the current week's issues in the order saved for the week (sort_order), not by number",
+      sprintNumbers.length > 1 && inStoredOrder(sprintStored), JSON.stringify({ sprintNumbers, sprintStored }));
     const partsOk = await sprintBlock.locator("[data-issue]").evaluateAll((sections) =>
       sections.every((s) => {
         // The boxes keep the issue's order and come first; the open sub-issues after them, highest number first.
@@ -182,13 +196,16 @@ async function seedSprintIssue() {
     await page.waitForURL("**/roadmap");
     await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
     await page.getByText("[TESTE] item semeado (sem dono)").waitFor({ timeout: 15000 });
-    const sprintOrders = await page.locator('[data-drag-scroll="x"] > [data-lane-id]').evaluateAll((lanes) =>
-      lanes.map((lane) => [...lane.querySelectorAll("div[draggable] a, div[draggable] > span")].map((a) => Number(a.textContent.match(/^#(\d+) /)?.[1])).filter((n) => n > 0))
+    const shownWeeks = await page.locator('[data-drag-scroll="x"] > [data-lane-id]').evaluateAll((lanes) =>
+      lanes.map((lane) => [...lane.querySelectorAll("[data-item-id]")].map((card) => card.dataset.itemId))
     );
+    const shownIds = shownWeeks.flat();
+    const storedOrder = new Map(((await svc.from("roadmap_items").select("id, sort_order").in("id", shownIds.length ? shownIds : ["00000000-0000-0000-0000-000000000000"])).data ?? []).map((r) => [r.id, r.sort_order]));
+    const weekOrders = shownWeeks.map((ids) => ids.map((id) => storedOrder.get(id)));
     expect(
-      "roadmap: each of the sprints lists its issues from the highest number to the lowest",
-      sprintOrders.some((n) => n.length > 1) && sprintOrders.every((n) => n.every((x, i) => i === 0 || x <= n[i - 1])),
-      JSON.stringify(sprintOrders)
+      "roadmap: each of the sprints lists its items in the order saved for the week (sort_order), not by issue number",
+      weekOrders.some((o) => o.length > 1) && weekOrders.every(inStoredOrder),
+      JSON.stringify(weekOrders)
     );
     const count = (loc) => loc.count();
     expect("roadmap: dev can READ the board (fixture items visible)", (await count(page.getByText("[TESTE] item do scrum master"))) === 1);

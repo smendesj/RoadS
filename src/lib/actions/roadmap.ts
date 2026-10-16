@@ -5,16 +5,14 @@ import { withIssueStatus } from "@/lib/board";
 import { createGeoCloudIssue } from "@/lib/github";
 import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
 import { moveLanePayload } from "@/lib/move-payload";
-import { CURRENT_SPRINT } from "@/lib/sprint-status-sync";
+import { currentSprintLane } from "@/lib/current-sprint";
+import { sprintLanesByDate, todayInSaoPaulo, weekDates, weekLanes, weekTitle } from "@/lib/sprint-week";
+import { weekRow } from "@/lib/week-plan";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
+import { deleteFutureWeekIfEmpty, ensureWeekLane } from "@/lib/week-lanes";
+import { nextOrderIn, planWeekDrop, writeWeekOrder } from "@/lib/week-order";
 import { NEW_ITEM_TITLE, type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
-
-function formatDateRange(start: string, end: string): string {
-  const [, sm, sd] = start.split("-");
-  const [, em, ed] = end.split("-");
-  return sm === em ? `${sd}–${ed}/${em}` : `${sd}/${sm}–${ed}/${em}`;
-}
 
 type ItemRow = {
   id: string;
@@ -68,7 +66,8 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
   const { data: items, error: itemsError } = await supabase
     .from("roadmap_items")
     .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, notes:item_notes(id, author_role, created_at, body)")
-    .order("sort_order");
+    .order("sort_order")
+    .order("id");
   if (itemsError) throw itemsError;
 
   const byLane = new Map<string, ItemRow[]>();
@@ -78,21 +77,31 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
     byLane.set(it.lane_id, list);
   }
 
-  const sprintLanes: Lane[] = [];
-  const groups: RoadmapGroup[] = [];
-  for (const lane of lanes ?? []) {
-    const laneItems = (byLane.get(lane.id) ?? []).map(toRoadmapItem);
-    if (lane.kind === "sprint") {
-      sprintLanes.push({
-        id: lane.id,
-        title: lane.title,
-        dates: lane.start_date && lane.end_date ? formatDateRange(lane.start_date, lane.end_date) : "",
-        items: laneItems,
-      });
-    } else {
-      groups.push({ id: lane.id, title: lane.title, items: laneItems });
-    }
-  }
+  // The sprints are weeks (src/lib/sprint-week.ts), titled by their dates only: the row of src/lib/week-plan.ts, every
+  // stored week and the ones from this week to the last stored one that the database lacks, plus one empty week at
+  // the end (virtual: shown, not stored), in date order, with the one whose dates hold today in São Paulo marked as
+  // the current one. The sprint lanes that are no week (the e2e fixture, a lane with no dates) come after them.
+  const sprintRows = (lanes ?? []).filter((lane) => lane.kind === "sprint");
+  const weeks = weekLanes(sprintRows);
+  const row: Lane[] = weekRow(weeks, todayInSaoPaulo(new Date())).map((week) => ({
+    id: week.id,
+    title: weekTitle(week.start, week.end),
+    dates: weekDates(week.start, week.end),
+    current: week.current,
+    ...(week.virtual ? { virtual: true } : {}),
+    items: (byLane.get(week.id) ?? []).map(toRoadmapItem),
+  }));
+  const others: Lane[] = sprintLanesByDate(sprintRows.filter((lane) => !weeks.includes(lane))).map((lane) => ({
+    id: lane.id,
+    title: lane.start_date && lane.end_date ? weekTitle(lane.start_date, lane.end_date) : lane.title,
+    dates: lane.start_date && lane.end_date ? weekDates(lane.start_date, lane.end_date) : "",
+    current: false,
+    items: (byLane.get(lane.id) ?? []).map(toRoadmapItem),
+  }));
+  const sprintLanes = [...row, ...others];
+  const groups: RoadmapGroup[] = (lanes ?? [])
+    .filter((lane) => lane.kind !== "sprint")
+    .map((lane) => ({ id: lane.id, title: lane.title, items: (byLane.get(lane.id) ?? []).map(toRoadmapItem) }));
 
   // The sprints show which items are already delivered, from the same Project #7 snapshot the Dashboard reads.
   const snapshot = await getLatestBoardSnapshot();
@@ -122,10 +131,13 @@ export async function createRoadmapItem(laneId: string): Promise<RoadmapItem> {
   const { userId } = await requireScrumMasterActor();
   const supabase = await createServerSupabase();
 
+  // A new item goes last in its week, where the screen shows it.
+  const sortOrder = await nextOrderIn(supabase, laneId);
   const { data, error } = await supabase
     .from("roadmap_items")
     .insert({
       lane_id: laneId,
+      sort_order: sortOrder,
       title: NEW_ITEM_TITLE,
       description: "Escreva aqui, em linguagem natural, o que precisa ser feito.",
       produto: "GeoCloud",
@@ -224,6 +236,8 @@ export async function saveRoadmapItemEdit(
     if (noteError) throw noteError;
   }
 
+  // Born in the current week, the issue is Development on the Project from the start (Open when that can't be read).
+  const current = await currentSprintLane(supabase).catch(() => null);
   const issue = await ensureIssue(
     itemId,
     {
@@ -235,8 +249,7 @@ export async function saveRoadmapItemEdit(
       tipo: input.content ? input.content.tipo : access.item.tipo ?? "feature",
       stack: input.content ? input.content.stack : access.item.stack ?? "Geral",
     },
-    // Born in the current sprint, the issue is Development on the Project from the start.
-    access.item.lane_id === CURRENT_SPRINT ? "Development" : "Open"
+    access.item.lane_id === current?.id ? "Development" : "Open"
   );
 
   await queueChange(itemId, "modify", {
@@ -288,23 +301,74 @@ export async function deleteRoadmapItem(itemId: string): Promise<void> {
   const { data: deleted, error } = await supabase.from("roadmap_items").delete().eq("id", itemId).select("id");
   if (error) throw error;
   if (!deleted?.length) throw new Error("forbidden");
+
+  await dropFutureWeekIfEmpty(access.item.lane_id);
 }
 
-export async function moveRoadmapItemLane(itemId: string, targetLaneId: string): Promise<void> {
+// A future week that an authorized move or delete has just left empty stops existing (src/lib/week-lanes.ts). The
+// item's change is already saved, so a failure here doesn't undo it: the week stays, empty, until it empties again.
+async function dropFutureWeekIfEmpty(laneId: string) {
+  try {
+    await deleteFutureWeekIfEmpty(createAdminClient(), laneId);
+  } catch (e) {
+    console.error("deleteFutureWeekIfEmpty failed; the empty week stays", e);
+  }
+}
+
+// Dropped on a card of a week (`beforeId`), the item goes right before it, also within the week it is already in;
+// anywhere else in a week ("Mover para" too), last. Its own number is written under the actor's session (the RLS of
+// 0007 is the backstop); the neighbours it renumbers may be anyone's, so the server writes them with the service role,
+// only now that the item is known to be the actor's to move (src/lib/week-order.ts). A group keeps its own order.
+export async function moveRoadmapItemLane(itemId: string, targetLaneId: string, beforeId: string | null = null): Promise<void> {
   const actor = await requireScrumMasterActor();
+  if (beforeId !== null && typeof beforeId !== "string") throw new Error("invalid_before");
   const supabase = await createServerSupabase();
 
   const access = await getItemAccess(itemId, actor);
   if (!access.canModify) throw new Error("forbidden");
 
+  // Dropped on a week the database doesn't have yet (the empty one at the end of the row, or a gap): the server
+  // creates its lane, only now that the item is known to be the actor's to move, with the service role (lanes are
+  // the admin's to write). The id is checked there: a real Monday, not before this week, within the horizon.
+  const { data: existing, error: laneError } = await supabase.from("lanes").select("id, kind").eq("id", targetLaneId).maybeSingle();
+  if (laneError) throw laneError;
+  // The card to go before is an item of the target week: never one of a group, nor of a week not created yet.
+  if (beforeId !== null && existing?.kind !== "sprint") throw new Error("invalid_before");
+  const from = access.item.lane_id;
+  const isWeek = !existing || existing.kind === "sprint";
+  if (!isWeek && from === existing.id) return;
+  const admin = createAdminClient();
+  const created = existing ? null : await ensureWeekLane(admin, targetLaneId);
+  const to = existing?.id ?? created!;
+  const undoCreate = async () => {
+    if (created) await deleteFutureWeekIfEmpty(admin, created).catch(() => {});
+  };
+
+  const place = isWeek ? await planWeekDrop(admin, to, itemId, beforeId) : null;
+  if (isWeek && !place) {
+    await undoCreate();
+    throw new Error("invalid_before");
+  }
+  if (from === to && place?.unchanged) return;
+
   const { data: moved, error } = await supabase
     .from("roadmap_items")
-    .update({ lane_id: targetLaneId, updated_at: new Date().toISOString() })
+    .update({ lane_id: to, ...(place ? { sort_order: place.sortOrder } : {}), updated_at: new Date().toISOString() })
     .eq("id", itemId)
     .select("id");
-  if (error) throw error;
-  if (!moved?.length) throw new Error("forbidden");
+  if (error || !moved?.length) {
+    await undoCreate();
+    if (error) throw error;
+    throw new Error("forbidden");
+  }
+  if (place?.neighbors.length) await writeWeekOrder(admin, place.neighbors);
+
+  // A new order within the same week queues nothing: roadmap-state's `position` carries it.
+  if (from === to) return;
 
   // Both lanes, like every other move_lane: Frontlights writes the departure into the sprint the item left.
-  await queueChange(itemId, "move_lane", moveLanePayload({ from: access.item.lane_id, to: targetLaneId, title: access.item.title, origin: "app" }));
+  await queueChange(itemId, "move_lane", moveLanePayload({ from, to, title: access.item.title, origin: "app" }));
+
+  // The future week it left, now empty, stops existing; the current week stays even when empty.
+  await dropFutureWeekIfEmpty(from);
 }
