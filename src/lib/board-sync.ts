@@ -33,7 +33,7 @@ import "server-only";
 import { createGeoCloudIssue, GEOCLOUD_REPO, setProjectStatus } from "@/lib/github";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
-import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
+import { laneForLabels, releaseLane, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { planRotation, rotationIsIdle } from "@/lib/sprint-rotation";
 import { todayInSaoPaulo, weekLanes } from "@/lib/sprint-week";
@@ -459,8 +459,8 @@ async function syncSprintWithProject(
     const card = cards.get(number);
     const issue = openByNumber.get(number);
     if (!number || !card || !issue) continue;
-    // Back to the block of its type label, or of the type it is stored with.
-    const releaseTo = [laneForLabels(issue.labels), item.tipo ? `tipo-${item.tipo}` : null].find((lane) => lane && groupIds.has(lane)) ?? null;
+    // Back to the block of its type label, or of the type it is stored with (the same rule a drop on the Kanban uses).
+    const releaseTo = releaseLane(issue.labels, item.tipo, groupIds);
     byId.set(item.id, { laneId: item.lane_id, sortOrder: item.sort_order, title: item.title, url: item.github_issue_url!, number });
     candidates.push({
       id: item.id,

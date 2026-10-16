@@ -23,3 +23,16 @@ export function tipoForLabels(labels: string[]): string | null {
   const type = labels.filter((l) => l.startsWith("type:")).map((l) => l.slice(5)).find((t) => t !== "epic" && BLOCK_TYPES.includes(t));
   return type ?? null;
 }
+
+/** The type lane an item with no week goes back to: the one its issue's type label names, else the one of the type it
+ *  is stored with, among `lanes` (the type lanes the database has). Null when neither names one. The sync releases an
+ *  item the Project took out of Development this way, and a drop on the Kanban unplans one (unplanLane). */
+export function releaseLane(labels: string[], tipo: string | null, lanes: ReadonlySet<string>): string | null {
+  return [laneForLabels(labels), tipo ? `tipo-${tipo}` : null].find((lane): lane is string => !!lane && lanes.has(lane)) ?? null;
+}
+
+/** Unplanning: a card dropped from a week on the Kanban always lands in a type lane, the one releaseLane names, else
+ *  where "+ Novo item" puts an item. The server decides it, never the caller. */
+export function unplanLane(labels: string[], tipo: string | null, lanes: ReadonlySet<string>): string {
+  return releaseLane(labels, tipo, lanes) ?? NEW_ITEM_LANE;
+}
