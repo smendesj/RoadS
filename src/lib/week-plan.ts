@@ -61,10 +61,12 @@ export type RowWeek = { id: string; start: string; end: string; virtual: boolean
 
 /**
  * The Roadmap's row of weeks: every week stored in the database (`weekLanes` of sprint-week.ts, so the e2e fixture
- * and lanes with no dates are not here), past ones included until the rotation deletes them, and every week from
- * the current one to the last stored one that the database lacks (a gap), plus one empty week after that: the
- * ones it lacks are `virtual`, shown but not stored until an item is dropped in them. Nothing is added past the
- * 52-week horizon. In date order; `current` is the week whose dates hold today (the next one on a weekend).
+ * and lanes with no dates are not here), past ones included until the rotation deletes them. A positional lane
+ * (`atual`) that ended and emptied is never deleted for that (`mayDeleteEmptyWeek`): it stays stored until
+ * migration 0031 renames it, and meanwhile shows here as an empty past week. Then every week from the current one
+ * to the last stored one that the database lacks (a gap), plus one empty week after that: the ones it lacks are
+ * `virtual`, shown but not stored until an item is dropped in them. Nothing is added past the 52-week horizon. In
+ * date order; `current` is the week whose dates hold today (the next one on a weekend).
  */
 export function weekRow(stored: { id: string; start_date: string; end_date: string }[], today: string): RowWeek[] {
   const monday = currentMonday(today);
