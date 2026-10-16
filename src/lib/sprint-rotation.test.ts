@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planPositionalRotation, type SprintDates, type SprintId } from "./sprint-rotation.ts";
+import { planPositionalRotation, planRotation, type SprintDates, type SprintId } from "./sprint-rotation.ts";
 
 const DATES: Record<SprintId, SprintDates> = {
   atual: { start: "2026-03-02", end: "2026-03-06" },
@@ -54,4 +54,29 @@ test("weeks nobody synced in are all rotated through", () => {
 test("items outside the three sprints are ignored", () => {
   const plan = planPositionalRotation({ today: "2026-03-09", dates: DATES, items: [item("g1", "triagem"), item("a1", "atual")], doneUrls: new Set() });
   assert.deepEqual(plan.placements.map((p) => p.id), ["a1"]);
+});
+
+// The rotation of the weeks by date: only the week that ended moves.
+const week = (id: string, start: string, end: string, kind = "sprint") => ({ id, kind, start_date: start, end_date: end });
+const W1 = week("sprint-05-10-2026", "2026-10-05", "2026-10-09");
+const W2 = week("sprint-12-10-2026", "2026-10-12", "2026-10-16");
+const W3 = week("sprint-19-10-2026", "2026-10-19", "2026-10-23");
+const it = (id: string, laneId: string, sortOrder: number, url: string | null = `https://example.test/issues/${id}`) => ({ id, laneId, sortOrder, url });
+
+test("only the week that ended moves: the done leave, the rest go on top of today's week in their order, future weeks untouched", () => {
+  const plan = planRotation({
+    today: "2026-10-13",
+    lanes: [W1, W2, W3],
+    items: [it("a2", W1.id, 1), it("a1", W1.id, 0), it("a3", W1.id, 2, null), it("b1", W2.id, 0), it("c1", W3.id, 0)],
+    doneUrls: new Set(["https://example.test/issues/a2"]),
+  });
+  assert.deepEqual(plan.finished, [{ id: "a2", laneId: "sprint-05-10-2026" }]);
+  assert.equal(plan.target, "sprint-12-10-2026");
+  assert.equal(plan.createTarget, false);
+  assert.deepEqual(plan.moves, [
+    { id: "a1", from: "sprint-05-10-2026", to: "sprint-12-10-2026", sortOrder: 0 },
+    { id: "a3", from: "sprint-05-10-2026", to: "sprint-12-10-2026", sortOrder: 1 },
+  ]);
+  assert.deepEqual(plan.reorders, [{ id: "b1", sortOrder: 2 }]);
+  assert.deepEqual(plan.deleteLanes, ["sprint-05-10-2026"]);
 });
