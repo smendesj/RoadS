@@ -550,6 +550,25 @@ async function seedBoard() {
       expect("phone: holding a card near the top edge scrolls the page up", before > 100 && before - after > 100, `scrollY ${before} -> ${after}`);
       expect("phone: a cancelled touch puts the card back and saves nothing", (await lane(created.id)) === "zz-test-sprint" && (await phone.page.locator("[data-touch-ghost]").count()) === 0);
 
+      // Held in its week, then dropped on the Kanban's Open: the item is unplanned, into the bug type lane (its type).
+      {
+        await L.fitWholePage(phone.page);
+        await phoneCard().scrollIntoViewIfNeeded();
+        const since = new Date().toISOString();
+        from = await centre(phoneCard());
+        const onto = await centre(phone.page.locator('[data-kanban-column="open"] span', { hasText: /^Open$/ }).first());
+        await holdTestCard(from);
+        await glide(from, onto, 16);
+        await sleep(200);
+        await touch("touchEnd");
+        await sleep(2500);
+        const { data: q } = await svc.from("roadmap_sync_queue").select("payload").eq("item_id", created.id).eq("action", "move_lane").gte("created_at", since);
+        expect("phone: a card held in its week and dropped on the Kanban's Open is unplanned, into the bug type lane, with one move_lane from the app",
+          (await lane(created.id)) === "tipo-bug" && (q ?? []).length === 1 && q[0].payload?.from_lane_id === "zz-test-sprint" && q[0].payload?.lane_id === "tipo-bug" && q[0].payload?.origin === "app",
+          JSON.stringify({ lane: await lane(created.id), q: (q ?? []).map((r) => r.payload) }));
+        expect("phone: the unplanned card is in no week on the phone's screen", (await phoneCard().count()) === 0);
+      }
+
       expect("phone: no console errors while dragging", phone.problems.length === 0, phone.problems.slice(0, 3).join(" | "));
       const strays = await realInTestLanes();
       expect("phone: no real item ended up in a test lane", strays.length === 0, strays.map((r) => r.id).join(","));
