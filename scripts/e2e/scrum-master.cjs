@@ -1,11 +1,69 @@
 const L = require("./lib.cjs");
 const { BASE, expect, sleep, svc } = L;
 
+// The Kanban under the weeks is built from the board snapshot the sync stores (board_sync_state.columns), which the
+// test server can't refresh (GITHUB_TOKEN is empty). Made-up cards go into it for the run, the way the sync stores
+// them, with when their Status changed: an issue Open on the Project that a Roadmap item holds, one no item holds, one
+// in Development (its item must stay out of Open), one that went to Done yesterday and one 30 days ago. The numbers
+// are far above any real issue, so nothing real is ever named; the returned function takes them out again, leaving
+// the rest of the snapshot as the last real sync wrote it.
+const GEOCLOUD = "https://github.com/Essencis-Labs/GeoCloudAI/issues/";
+const BOARD = {
+  open: { number: 990101, title: "[TESTE] issue aberta no Project" },
+  orphan: { number: 990102, title: "[TESTE] issue aberta sem item" },
+  dev: { number: 990103, title: "[TESTE] issue em Development" },
+  doneRecent: { number: 990104, title: "[TESTE] issue concluída ontem" },
+  doneOld: { number: 990105, title: "[TESTE] issue concluída há 30 dias" },
+};
+const DAY = 24 * 60 * 60 * 1000;
+async function seedBoard() {
+  const card = (c, statusAt) => ({ title: c.title, ref: `#${c.number}`, url: GEOCLOUD + c.number, ...(statusAt ? { statusAt } : {}) });
+  const ours = new Set(Object.values(BOARD).map((c) => GEOCLOUD + c.number));
+  const read = async () => {
+    const { data, error } = await svc.from("board_sync_state").select("columns").eq("id", true).single();
+    if (error) throw error;
+    return data.columns ?? [];
+  };
+  const write = async (columns) => {
+    const { error } = await svc.from("board_sync_state").update({ columns }).eq("id", true);
+    if (error) throw error;
+  };
+  const without = (columns) =>
+    columns.map((c) => {
+      const items = (c.items ?? []).filter((i) => !ours.has(i.url));
+      return { ...c, items, count: (c.count ?? 0) - ((c.items ?? []).length - items.length) };
+    });
+  const add = {
+    open: [card(BOARD.open), card(BOARD.orphan)],
+    dev: [card(BOARD.dev)],
+    done: [card(BOARD.doneRecent, new Date(Date.now() - DAY).toISOString()), card(BOARD.doneOld, new Date(Date.now() - 30 * DAY).toISOString())],
+  };
+  const columns = without(await read());
+  if (!["open", "dev", "done"].every((k) => columns.some((c) => c.key === k))) throw new Error("the board snapshot has no Open, Development or Done column");
+  await write(columns.map((c) => (add[c.key] ? { ...c, items: [...add[c.key], ...c.items], count: c.count + add[c.key].length } : c)));
+  // Their items, with no week (in a test type lane): the Open one, and the one in Development.
+  const item = async (c) => {
+    const { data, error } = await svc
+      .from("roadmap_items")
+      .insert({ lane_id: "zz-test-a", title: c.title, description: "descrição de teste", created_by: null, github_issue_url: GEOCLOUD + c.number, github_issue_number: c.number })
+      .select("id")
+      .single();
+    if (error) throw error;
+    return data.id;
+  };
+  const ids = { open: await item(BOARD.open), dev: await item(BOARD.dev) };
+  return { ids, unseed: async () => write(without(await read())) };
+}
+
 (async () => {
   const t0 = new Date().toISOString();
   await L.ensureFixtures();
   const browser = await L.launch();
+  let unseed = async () => {};
+  let unseedFailed = false;
   try {
+    const board = await seedBoard();
+    unseed = board.unseed;
     const s = await L.newSession(browser, "sm");
     const { page } = s;
     page.on("dialog", (d) => d.accept());
@@ -23,15 +81,72 @@ const { BASE, expect, sleep, svc } = L;
     // ------------------------------------------------ roadmap, editor view
     await page.goto(BASE + "/roadmap", { waitUntil: "load" });
     await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
-    await page.getByText("[TESTE] item do scrum master").waitFor();
+    // Each item of the test week shows twice: in the week, and in the Kanban's Open with the week's label.
+    await page.getByText("[TESTE] item do scrum master").first().waitFor();
     const count = (loc) => loc.count();
+    const open = page.locator('[data-kanban-column="open"]');
+    const done = page.locator('[data-kanban-column="done"]');
     expect("roadmap: subtitle offers 'defina o que entra e quando'", (await count(page.getByText(/defina o que entra e quando/))) === 1);
     expect("roadmap: 'Sincronizar' is available", (await count(page.getByRole("button", { name: /^Sincronizar$/ }))) === 1);
-    const novoButtons = await count(page.getByRole("button", { name: "+ Novo item" }));
-    const sprintLaneCount = await count(page.locator('[data-drag-scroll="x"] > [data-lane-id]:not([data-virtual])'));
-    const virtualNovo = await count(page.locator('[data-drag-scroll="x"] > [data-virtual]').getByRole("button", { name: "+ Novo item" }));
-    expect("roadmap: a '+ Novo item' in every stored sprint lane (the real weeks + 1 test), none in a week not stored", sprintLaneCount >= 2 && novoButtons === sprintLaneCount && virtualNovo === 0, `${novoButtons}/${sprintLaneCount}, virtual ${virtualNovo}`);
+    expect("roadmap: one '+ Novo item', in the Kanban's Open, none in any week",
+      (await count(page.getByRole("button", { name: "+ Novo item" }))) === 1 && (await count(open.getByRole("button", { name: "+ Novo item" }))) === 1 &&
+        (await count(page.locator("[data-lane-id]").getByRole("button", { name: "+ Novo item" }))) === 0);
     expect("roadmap: no 'Config' for a Scrum Master", (await count(page.getByRole("link", { name: "Config", exact: true }))) === 0);
+
+    // ------------------------------------------------ the Kanban under the weeks, in place of the Roadmap section
+    {
+      expect("kanban: the Roadmap shows a Kanban with two columns, Open and Done (no Blocker, no Development)",
+        (await count(page.locator("[data-kanban-column]"))) === 2 && (await count(open)) === 1 && (await count(done)) === 1 &&
+          (await open.locator("span").first().innerText()).trim() === "Open" && (await done.locator("span").first().innerText()).trim() === "Done");
+      expect("kanban: no Roadmap section of type lanes is left (no group lane, no 'Toda issue aberta…' text)",
+        (await count(page.locator('[data-lane-id="zz-test-a"], [data-lane-id="zz-test-b"], [data-lane-id^="tipo-"]'))) === 0 &&
+          (await count(page.getByText("[TESTE] lane A (apagar)"))) === 0 && (await count(page.getByText(/Toda issue aberta que ainda não entrou/))) === 0);
+      const below = await page.evaluate(() => {
+        const weeks = document.querySelector("[data-weeks]");
+        const kanban = document.querySelector("[data-kanban]");
+        return !!weeks && !!kanban && !!(weeks.compareDocumentPosition(kanban) & Node.DOCUMENT_POSITION_FOLLOWING) && getComputedStyle(weeks).position;
+      });
+      expect("kanban: it sits under the row of weeks, and on a wide screen the row stays at the top while the page scrolls (sticky)", below === "sticky", String(below));
+      // From here on the window is as tall as the page: nothing slides under the row of weeks that stays at the top.
+      await L.fitWholePage(page);
+      // A planned item stays in Open, faded, with the week it is planned in.
+      const planned = open.locator("div[draggable]", { hasText: "[TESTE] item do scrum master" });
+      const look =
+        (await count(planned)) === 1
+          ? await planned.evaluate((el) => ({ label: el.querySelector("[data-week-label]")?.textContent?.trim() ?? null, opacity: getComputedStyle(el).opacity }))
+          : null;
+      expect("kanban: an item of the test week is in Open too, at 70%, labelled '▸ Sprint 07/12'", look?.label === "▸ Sprint 07/12" && look?.opacity === "0.7", JSON.stringify(look));
+      // An issue Open on the Project is the card of its Roadmap item; one no item holds is a plain link; one in
+      // Development is not in Open.
+      const tied = open.locator(`[data-item-id="${board.ids.open}"]`);
+      const tiedText = (await count(tied)) ? await tied.innerText() : "missing";
+      expect("kanban: an issue Open on the Project shows in Open as its Roadmap item's card (#number, draggable, no week label)",
+        (await count(tied)) === 1 && tiedText.includes(`#${BOARD.open.number}`) && (await tied.getAttribute("draggable")) === "true" &&
+          (await count(tied.locator("[data-week-label]"))) === 0, tiedText.slice(0, 80));
+      const orphan = open.locator("[data-issue-card]", { hasText: BOARD.orphan.title });
+      expect("kanban: an issue Open on the Project that no item holds is a plain link to it in Open",
+        (await count(orphan)) === 1 && (await orphan.getAttribute("href")) === GEOCLOUD + BOARD.orphan.number);
+      expect("kanban: an issue in Development is not in Open (its item neither)",
+        (await count(open.getByText(BOARD.dev.title))) === 0 && (await count(open.locator(`[data-item-id="${board.ids.dev}"]`))) === 0);
+      // Done: what went to Done in the last 14 days, counted from when the Status changed; "Ver todas" shows the rest.
+      const { data: snap } = await svc.from("board_sync_state").select("columns").eq("id", true).single();
+      const doneCards = (snap.columns ?? []).find((c) => c.key === "done")?.items ?? [];
+      const recent = doneCards.filter((c) => c.statusAt && Date.now() - Date.parse(c.statusAt) <= 14 * DAY).length;
+      const shownDone = () => done.locator("[data-issue-card]").count();
+      expect("done: the cards that went to Done in the last 14 days, the one of yesterday in, the one of 30 days ago out",
+        (await shownDone()) === recent && (await count(done.getByText(BOARD.doneRecent.title))) === 1 && (await count(done.getByText(BOARD.doneOld.title))) === 0,
+        `${await shownDone()} of ${recent}`);
+      expect("done: only to look at (nothing to drag, no button but 'Ver todas')",
+        (await count(done.locator("[draggable]"))) === 0 && (await count(done.getByRole("button"))) === 1);
+      await done.getByRole("button", { name: /^Ver todas/ }).click();
+      expect("done: 'Ver todas' shows every Done card of the snapshot right there, the one of 30 days ago too",
+        (await shownDone()) === doneCards.length && (await count(done.getByText(BOARD.doneOld.title))) === 1, `${await shownDone()} of ${doneCards.length}`);
+      // The ELIMS cards are only counted, now under the Kanban.
+      const elims = (snap.columns ?? []).reduce((sum, c) => sum + (c.elims ?? 0), 0);
+      const noteBox = page.locator("[data-elims-note]");
+      const note = (await count(noteBox)) ? await noteBox.innerText() : null;
+      expect("kanban: the note counting the ELIMS issues is on the Roadmap", elims === 0 ? note === null : !!note && note.includes(String(elims)), `${elims}: ${note}`);
+    }
 
     // ------------------------------------------------ the sprints are weeks, titled by their dates, the current one tinted
     // The row: every week stored, then from the current one on every week up to the last stored one (a gap shows,
@@ -61,23 +176,29 @@ const { BASE, expect, sleep, svc } = L;
       expect("weeks (after 0031): every real sprint lane is named sprint-DD-MM-AAAA by its Monday", W.real.length > 0 && W.real.every((l) => l.id === L.weekId(l.start_date)), JSON.stringify(W.real.map((l) => l.id)));
     }
 
-    const card = (title) => page.locator("div[draggable]", { hasText: title }).first();
+    // A card in the test week, and the same item's card in the Kanban's Open.
+    const card = (title) => page.locator('[data-lane-id="zz-test-sprint"] div[draggable]', { hasText: title }).first();
+    const openCard = (title) => open.locator("div[draggable]", { hasText: title }).first();
     const btn = (c, name) => c.getByRole("button", { name, exact: true });
     const seeded = card("[TESTE] item semeado (sem dono)");
     const adminItem = card("[TESTE] item do admin");
-    const mine = card("[TESTE] item do scrum master");
 
-    expect("own item: draggable, with Editar and Excluir", (await mine.getAttribute("draggable")) === "true" && (await count(btn(mine, "Editar"))) === 1 && (await count(btn(mine, "Excluir"))) === 1);
-    expect("seeded item (no owner): draggable, '+ nota' only, no Editar, no Excluir", (await seeded.getAttribute("draggable")) === "true" && (await count(btn(seeded, "+ nota"))) === 1 && (await count(btn(seeded, "Editar"))) === 0 && (await count(btn(seeded, "Excluir"))) === 0);
-    expect("admin's item: not draggable and no controls at all", (await adminItem.getAttribute("draggable")) === "false" && (await count(adminItem.getByRole("button"))) === 0);
+    for (const [where, of] of [["in its week", card], ["in the Kanban's Open", openCard]]) {
+      const own = of("[TESTE] item do scrum master");
+      const noOwner = of("[TESTE] item semeado (sem dono)");
+      const admins = of("[TESTE] item do admin");
+      expect(`own item ${where}: draggable, with Editar and Excluir`, (await own.getAttribute("draggable")) === "true" && (await count(btn(own, "Editar"))) === 1 && (await count(btn(own, "Excluir"))) === 1);
+      expect(`seeded item (no owner) ${where}: draggable, '+ nota' only, no Editar, no Excluir`, (await noOwner.getAttribute("draggable")) === "true" && (await count(btn(noOwner, "+ nota"))) === 1 && (await count(btn(noOwner, "Editar"))) === 0 && (await count(btn(noOwner, "Excluir"))) === 0);
+      expect(`admin's item ${where}: not draggable and no controls at all`, (await admins.getAttribute("draggable")) === "false" && (await count(admins.getByRole("button"))) === 0);
+    }
 
-    // ------------------------------------------------ create through the UI, in the test sprint lane only
-    const sprint = page.locator('[data-lane-id="zz-test-sprint"]');
-    await sprint.getByRole("button", { name: "+ Novo item" }).click();
+    // ------------------------------------------------ create through the UI: "+ Novo item" in the Kanban's Open
+    await open.getByRole("button", { name: "+ Novo item" }).click();
     // The one card in edit mode (not draggable while editing, has the note field): stable while its inputs change.
     const fresh = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
     await fresh.waitFor({ timeout: 15000 });
-    expect("create: the new item opens straight into edit mode", (await count(fresh)) === 1);
+    expect("create: the new item opens straight into edit mode, in Open",
+      (await count(fresh)) === 1 && (await count(open.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])'))) === 1);
     await fresh.locator("input").first().fill("[TESTE] criado pelo Scrum Master");
     await fresh.locator("textarea").fill("descrição escrita no teste");
     // By their visible labels, not their position: the card gained and lost selects (Tipo, Stack) over time.
@@ -90,7 +211,7 @@ const { BASE, expect, sleep, svc } = L;
     await page.getByText("[TESTE] criado pelo Scrum Master").first().waitFor({ timeout: 15000 });
     await sleep(1500);
     const { data: created } = await svc.from("roadmap_items").select("id, title, prioridade, effort, created_by, github_issue_url, lane_id").eq("title", "[TESTE] criado pelo Scrum Master").maybeSingle();
-    expect("create: saved with the SM as owner, High/Low, in the test lane", created && created.created_by === L.ids.sm && created.prioridade === "High" && created.effort === "Low" && created.lane_id === "zz-test-sprint", JSON.stringify(created));
+    expect("create: saved with the SM as owner, High/Low, with no week: in the feature type lane", created && created.created_by === L.ids.sm && created.prioridade === "High" && created.effort === "Low" && created.lane_id === "tipo-feature", JSON.stringify(created));
     expect("create: no GitHub issue was opened (the token is empty in this test server)", created && created.github_issue_url === null);
     // The week's order is roadmap_items.sort_order (the Roadmap's week, the Dashboard's Sprint and roadmap-state's
     // position all read it); a new item, and an item moved with "Mover para", goes last.
@@ -100,15 +221,16 @@ const { BASE, expect, sleep, svc } = L;
       return { ok: !!mine && rows.every((r) => r.id === id || r.sort_order < mine.sort_order), rows };
     };
     {
-      const last = await isLastOfWeek(created.id);
-      expect("create: the new item is saved last in its week (a sort_order past every other item's)", last.ok, JSON.stringify(last.rows));
+      const first = await open.locator("[data-item-id]").first().evaluate((el) => ({ id: el.dataset.itemId, label: !!el.querySelector("[data-week-label]"), opacity: getComputedStyle(el).opacity }));
+      expect("create: the new item is the first card of Open, with no week label, not faded", first.id === created.id && !first.label && first.opacity === "1", JSON.stringify(first));
+      expect("create: the new item is in no week", (await count(page.locator(`[data-lane-id] [data-item-id="${created.id}"]`))) === 0);
     }
     const { data: note } = await svc.from("item_notes").select("author_role, body").eq("item_id", created.id);
     expect("create: the note is stored, pinned to scrum_master", note.length === 1 && note[0].author_role === "scrum_master" && /primeira nota/.test(note[0].body), JSON.stringify(note));
-    expect("create: the note shows on the card as 'Scrum Master'", (await count(page.locator("div[draggable]", { hasText: "[TESTE] criado pelo Scrum Master" }).getByText("[TESTE] primeira nota"))) === 1);
+    expect("create: the note shows on the card as 'Scrum Master'", (await count(open.locator("div[draggable]", { hasText: "[TESTE] criado pelo Scrum Master" }).getByText("[TESTE] primeira nota"))) === 1);
 
-    // ------------------------------------------------ edit own item
-    const own = card("[TESTE] criado pelo Scrum Master");
+    // ------------------------------------------------ edit own item, on its card in Open
+    const own = openCard("[TESTE] criado pelo Scrum Master");
     await btn(own, "Editar").click();
     const editing = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
     await editing.locator("input").first().fill("[TESTE] criado e editado pelo SM");
@@ -118,25 +240,26 @@ const { BASE, expect, sleep, svc } = L;
     const { data: edited } = await svc.from("roadmap_items").select("title").eq("id", created.id).single();
     expect("edit own item: the new title is saved", edited.title === "[TESTE] criado e editado pelo SM", edited.title);
 
-    // ------------------------------------------------ seeded item: note + priority only
-    await btn(seeded, "+ nota").click();
+    // ------------------------------------------------ seeded item: note + priority only, on its card in Open
+    await btn(openCard("[TESTE] item semeado (sem dono)"), "+ nota").click();
     const noting = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
     expect("seeded item: the edit panel has NO title/description/produto fields", (await count(noting.getByText("Título", { exact: true }))) === 0 && (await count(noting.getByText("Descrição", { exact: true }))) === 0);
     await labelled(noting, "Prioridade").selectOption("Critical");
     await noting.getByPlaceholder("Escrever nota (opcional)...").fill("[TESTE] nota no item semeado");
     await btn(noting, "Salvar").click();
-    await page.getByText("[TESTE] nota no item semeado").waitFor({ timeout: 15000 });
+    await page.getByText("[TESTE] nota no item semeado").first().waitFor({ timeout: 15000 });
     await sleep(1000);
     const { data: sRow } = await svc.from("roadmap_items").select("title, prioridade").eq("id", L.ids.seeded).single();
     const { data: sNotes } = await svc.from("item_notes").select("author_role").eq("item_id", L.ids.seeded);
     expect("seeded item: priority changed, title untouched, note stored as scrum_master", sRow.prioridade === "Critical" && sRow.title === "[TESTE] item semeado (sem dono)" && sNotes.length === 1 && sNotes[0].author_role === "scrum_master", JSON.stringify([sRow, sNotes]));
 
-    // ------------------------------------------------ move: drag and drop on desktop, the select on a narrow screen
-    const groupBox = (title) => page.getByText(title, { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-2xl')][1]");
+    // ------------------------------------------------ plan: a card dragged from Open to a week stays in Open, labelled with it
     // A window as tall as the page keeps source and drop target on screen together (a drop can't land off-screen).
     await L.fitWholePage(page);
     // Native HTML5 drag: Playwright's dragTo doesn't start one here, so move the mouse in steps, like a person.
+    // The target first: a week can be off screen to the side in its row, and a card of Open is never in that row.
     const mouseDrag = async (source, target) => {
+      await target.scrollIntoViewIfNeeded();
       await source.scrollIntoViewIfNeeded();
       const c = await source.boundingBox();
       await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2);
@@ -146,74 +269,99 @@ const { BASE, expect, sleep, svc } = L;
       await page.mouse.move(t.x + t.width / 2, t.y + 12, { steps: 25 });
       await page.mouse.up();
     };
-    await mouseDrag(card("[TESTE] criado e editado pelo SM"), groupBox("[TESTE] lane A (apagar)"));
-    await sleep(2000);
-    const { data: movedA } = await svc.from("roadmap_items").select("lane_id").eq("id", created.id).single();
-    expect("move (drag and drop): own item lands in lane A", movedA.lane_id === "zz-test-a", movedA.lane_id);
-    await mouseDrag(seeded, groupBox("[TESTE] lane B (apagar)"));
-    await sleep(2000);
-    const { data: movedS } = await svc.from("roadmap_items").select("lane_id").eq("id", L.ids.seeded).single();
-    expect("move (drag and drop): the seeded item can be moved too", movedS.lane_id === "zz-test-b", movedS.lane_id);
-    // The sync queue says where the item went AND where it came from (Frontlights writes the departure into the
-    // sprint file the item left; docs/frontlights-contract.md promises both lanes in every move_lane).
-    const { data: movedQueue } = await svc.from("roadmap_sync_queue").select("payload").eq("item_id", L.ids.seeded).eq("action", "move_lane");
-    expect(
-      "move (drag and drop): the queue row names the lane it went to and the lane it came from",
-      (movedQueue ?? []).some((r) => r.payload?.lane_id === "zz-test-b" && r.payload?.from_lane_id === "zz-test-sprint"),
-      JSON.stringify((movedQueue ?? []).map((r) => Object.keys(r.payload ?? {}).sort()))
-    );
-    await mouseDrag(adminItem, groupBox("[TESTE] lane B (apagar)"));
-    await sleep(1500);
-    const { data: movedAdmin } = await svc.from("roadmap_items").select("lane_id").eq("id", L.ids.adminItem).single();
-    expect("move: the admin's item cannot be dragged anywhere", movedAdmin.lane_id === "zz-test-sprint", movedAdmin.lane_id);
-
-    await page.setViewportSize({ width: 800, height: 1000 });
-    await sleep(800);
-    const moveSelect = page.locator("div[draggable]", { hasText: "[TESTE] criado e editado pelo SM" }).first().locator('select[aria-label="Mover para"]');
-    // By the lane's id: the option reads only the week's dates ("Sprint 07–11/12 (2/4)").
-    await moveSelect.selectOption("zz-test-sprint");
-    await sleep(2000);
-    const { data: movedBack } = await svc.from("roadmap_items").select("lane_id").eq("id", created.id).single();
-    expect("move (select, phone width): own item goes back to the test sprint", movedBack.lane_id === "zz-test-sprint", movedBack.lane_id);
+    const testWeek = page.locator('[data-lane-id="zz-test-sprint"]');
+    const laneOfItem = async (id) => (await svc.from("roadmap_items").select("lane_id").eq("id", id).single()).data.lane_id;
+    // How a card of Open looks: its week label (null when it has none), its opacity, and how many copies Open has.
+    const inOpen = async (title) => ({
+      copies: await open.locator("div[draggable]", { hasText: title }).count(),
+      label: ((await openCard(title).locator("[data-week-label]").textContent({ timeout: 2000 }).catch(() => null)) ?? "").trim() || null,
+      opacity: await openCard(title).evaluate((el) => getComputedStyle(el).opacity).catch(() => null),
+    });
+    const moveQueue = async (id) => ((await svc.from("roadmap_sync_queue").select("payload").eq("item_id", id).eq("action", "move_lane")).data ?? []).map((r) => r.payload);
+    const trailing = L.weekId(W.trailing);
+    const trailingLabel = `▸ Sprint ${W.trailing.slice(8, 10)}/${W.trailing.slice(5, 7)}`;
+    const laneRows = async (id) => (await svc.from("lanes").select("id, kind, start_date, end_date").eq("id", id)).data ?? [];
+    L.createdWeeks.add(trailing);
     {
-      const last = await isLastOfWeek(created.id);
-      expect("move (select): \"Mover para\" puts the item last in the week", last.ok, JSON.stringify(last.rows));
+      const planned = await inOpen("[TESTE] criado e editado pelo SM");
+      expect("plan: before it is planned, the new item's card in Open has no week label and is not faded", planned.copies === 1 && planned.label === null && planned.opacity === "1", JSON.stringify(planned));
     }
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await sleep(500);
-
-    // ------------------------------------------------ a week is born when an item is dropped on it, and goes when it empties
+    await mouseDrag(openCard("[TESTE] criado e editado pelo SM"), testWeek);
+    await sleep(2000);
+    expect("plan (drag from Open): own item is saved in the test week", (await laneOfItem(created.id)) === "zz-test-sprint", await laneOfItem(created.id));
     {
-      const trailing = L.weekId(W.trailing);
+      const planned = await inOpen("[TESTE] criado e editado pelo SM");
+      expect("plan: the card stays in Open, at 70%, labelled '▸ Sprint 07/12'", planned.copies === 1 && planned.label === "▸ Sprint 07/12" && planned.opacity === "0.7", JSON.stringify(planned));
+      expect("plan: the item shows in the week too", (await count(card("[TESTE] criado e editado pelo SM"))) === 1);
+      const last = await isLastOfWeek(created.id);
+      expect("plan: dropped on the week, not on a card, the item goes last in it", last.ok, JSON.stringify(last.rows));
+      // The sync queue says where the item went AND where it came from (Frontlights writes the departure into the
+      // file of the lane the item left; docs/frontlights-contract.md promises both lanes in every move_lane).
+      const q = await moveQueue(created.id);
+      expect("plan: the queue row names the week it went to and the type lane it came from",
+        q.some((r) => r?.lane_id === "zz-test-sprint" && r?.from_lane_id === "tipo-feature"), JSON.stringify(q.map((r) => [r?.from_lane_id, r?.lane_id])));
+    }
+
+    // The seeded item (no owner), taken out of its week, is planned from Open too.
+    await svc.from("roadmap_items").update({ lane_id: "zz-test-b" }).eq("id", L.ids.seeded);
+    await page.reload({ waitUntil: "load" });
+    await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+    await openCard("[TESTE] item semeado (sem dono)").waitFor({ timeout: 15000 });
+    await L.fitWholePage(page);
+    {
+      const before = await inOpen("[TESTE] item semeado (sem dono)");
+      expect("plan: an item with no week is in Open with no label, not faded, and in no week", before.label === null && before.opacity === "1" && (await count(seeded)) === 0, JSON.stringify(before));
+    }
+    await mouseDrag(openCard("[TESTE] item semeado (sem dono)"), testWeek);
+    await sleep(2000);
+    expect("plan (drag from Open): the seeded item can be planned too", (await laneOfItem(L.ids.seeded)) === "zz-test-sprint", await laneOfItem(L.ids.seeded));
+    expect("plan: its move is queued with the lane it came from", (await moveQueue(L.ids.seeded)).some((r) => r?.lane_id === "zz-test-sprint" && r?.from_lane_id === "zz-test-b"));
+
+    // The admin's item, in Open, can't be dragged anywhere: dropped on the empty week at the end, nothing moves and no week is born.
+    expect("new week: the empty week at the end is not in the database yet", (await laneRows(trailing)).length === 0, trailing);
+    await mouseDrag(openCard("[TESTE] item do admin"), page.locator(`[data-lane-id="${trailing}"]`));
+    await sleep(1500);
+    expect("plan: the admin's item cannot be dragged from Open, and no week is created for it",
+      (await laneOfItem(L.ids.adminItem)) === "zz-test-sprint" && (await laneRows(trailing)).length === 0, await laneOfItem(L.ids.adminItem));
+
+    // ------------------------------------------------ dragged again from Open, the item goes to another week: a week the
+    // database lacks is born when the item is dropped on it, and goes when it empties
+    {
       const next = L.weekId(L.addDays(W.trailing, 7));
-      const laneRows = async (id) => (await svc.from("lanes").select("id, kind, start_date, end_date").eq("id", id)).data ?? [];
-      expect("new week: the empty week at the end is not in the database yet", (await laneRows(trailing)).length === 0, trailing);
-      L.createdWeeks.add(trailing);
-      await L.fitWholePage(page);
       // Both lanes on screen together: the test week sits right after the empty one at the end of the row.
-      await page.locator('[data-lane-id="zz-test-sprint"]').scrollIntoViewIfNeeded();
-      await mouseDrag(card("[TESTE] criado e editado pelo SM"), page.locator(`[data-lane-id="${trailing}"]`));
+      await testWeek.scrollIntoViewIfNeeded();
+      await mouseDrag(openCard("[TESTE] criado e editado pelo SM"), page.locator(`[data-lane-id="${trailing}"]`));
       await sleep(2500);
       const born = await laneRows(trailing);
-      const { data: inWeek } = await svc.from("roadmap_items").select("lane_id").eq("id", created.id).single();
-      expect("new week: dropped on the empty week, the item is saved there and the week's lane exists, dated by its Monday",
-        inWeek.lane_id === trailing && born.length === 1 && born[0].kind === "sprint" && born[0].start_date === W.trailing && born[0].end_date === L.addDays(W.trailing, 4),
-        JSON.stringify({ lane: inWeek.lane_id, born }));
+      const inWeek = await laneOfItem(created.id);
+      expect("new week: dragged from Open onto the empty week, the item is saved there and the week's lane exists, dated by its Monday",
+        inWeek === trailing && born.length === 1 && born[0].kind === "sprint" && born[0].start_date === W.trailing && born[0].end_date === L.addDays(W.trailing, 4),
+        JSON.stringify({ lane: inWeek, born }));
       const { data: first } = await svc.from("roadmap_items").select("sort_order").eq("id", created.id).single();
       expect("new week: the item dropped on it is its first one (sort_order 0)", first.sort_order === 0, String(first.sort_order));
       await page.locator(`[data-lane-id="${next}"][data-virtual]`).waitFor({ timeout: 15000 }).catch(() => {});
       expect("new week: the week shows as stored, and a new empty week follows it at the end",
         (await count(page.locator(`[data-lane-id="${trailing}"]:not([data-virtual])`))) === 1 && (await count(page.locator(`[data-lane-id="${next}"][data-virtual]`))) === 1);
+      const moved = await inOpen("[TESTE] criado e editado pelo SM");
+      expect("re-plan: the card is still in Open, labelled with the new week, and left the test week",
+        moved.copies === 1 && moved.label === trailingLabel && moved.opacity === "0.7" && (await count(card("[TESTE] criado e editado pelo SM"))) === 0, JSON.stringify({ ...moved, trailingLabel }));
 
+      // Below lg a select on the card moves it too, by the lane's id (the option reads only the week's dates).
       await page.setViewportSize({ width: 800, height: 1000 });
       await sleep(800);
-      await page.locator("div[draggable]", { hasText: "[TESTE] criado e editado pelo SM" }).first().locator('select[aria-label="Mover para"]').selectOption("zz-test-sprint");
+      await openCard("[TESTE] criado e editado pelo SM").locator('select[aria-label="Mover para"]').selectOption("zz-test-sprint");
       await sleep(2500);
-      const { data: outOfWeek } = await svc.from("roadmap_items").select("lane_id").eq("id", created.id).single();
-      expect("empty week: its only item moved out, the future week's lane is deleted", outOfWeek.lane_id === "zz-test-sprint" && (await laneRows(trailing)).length === 0, outOfWeek.lane_id);
+      const outOfWeek = await laneOfItem(created.id);
+      expect("move (select on the Open card, narrow screen): the item goes back to the test week", outOfWeek === "zz-test-sprint", outOfWeek);
+      {
+        const last = await isLastOfWeek(created.id);
+        expect("move (select): \"Mover para\" puts the item last in the week", last.ok, JSON.stringify(last.rows));
+      }
+      expect("empty week: its only item moved out, the future week's lane is deleted", (await laneRows(trailing)).length === 0);
       await page.locator(`[data-lane-id="${next}"]`).waitFor({ state: "detached", timeout: 15000 }).catch(() => {});
       expect("empty week: the row ends again with that week, empty and not stored",
         (await count(page.locator(`[data-lane-id="${trailing}"][data-virtual]`))) === 1 && (await count(page.locator(`[data-lane-id="${next}"]`))) === 0);
+      expect("move (select): the Open card is labelled with the test week again", (await inOpen("[TESTE] criado e editado pelo SM")).label === "▸ Sprint 07/12");
       await page.setViewportSize({ width: 1440, height: 900 });
       await sleep(500);
     }
@@ -228,6 +376,8 @@ const { BASE, expect, sleep, svc } = L;
     const lineOn = (p, id) => p.locator(`[data-item-id="${id}"] [data-drop-line]`).count();
     {
       const queued = async (id) => ((await svc.from("roadmap_sync_queue").select("id").eq("item_id", id).eq("action", "move_lane")).data ?? []).length;
+      // The seeded item goes back to no week, so the drop from Open below is a real move into the week.
+      await svc.from("roadmap_items").update({ lane_id: "zz-test-b" }).eq("id", L.ids.seeded);
       await svc.from("roadmap_items").update({ sort_order: 7 }).in("id", [L.ids.adminItem, L.ids.smItem]);
       await svc.from("roadmap_items").update({ sort_order: 9 }).eq("id", created.id);
       await page.reload({ waitUntil: "load" });
@@ -248,15 +398,15 @@ const { BASE, expect, sleep, svc } = L;
         await sleep(300);
       };
 
-      // From a group onto the admin's card in the test week.
+      // From Open (an item with no week) onto the admin's card in the test week.
       const queuedSeeded = await queued(L.ids.seeded);
-      await holdOver(seeded, adminItem);
+      await holdOver(openCard("[TESTE] item semeado (sem dono)"), adminItem);
       const litA = await lineOn(page, L.ids.adminItem);
       await page.mouse.up();
       await sleep(2500);
       const afterA = await weekOrder();
       expect("drop on a card (mouse): held over a card of a week, an orange line shows above that card", litA === 1, `lines=${litA}`);
-      expect("drop on a card (mouse): the item from a group is saved in the week right before the card it was dropped on",
+      expect("drop on a card (mouse): the item dragged from Open is saved in the week right before the card it was dropped on",
         at(afterA, L.ids.seeded) >= 0 && at(afterA, L.ids.seeded) + 1 === at(afterA, L.ids.adminItem), JSON.stringify(afterA));
       expect("drop on a card (mouse): the week is numbered 0, 1, 2… in its new order, the admin's item renumbered too (by the server)",
         afterA.length === 4 && numbered(afterA), JSON.stringify(afterA));
@@ -377,25 +527,18 @@ const { BASE, expect, sleep, svc } = L;
         expect("phone: the week on the screen shows the order saved", JSON.stringify(shown) === JSON.stringify(order1.map((r) => r.id)), JSON.stringify(shown));
       }
 
-      // Held, then dragged onto a group: saved there, the same as a drag on the desktop.
-      await phoneCard().scrollIntoViewIfNeeded();
-      from = await centre(phoneCard());
-      const target = await centre(phone.page.locator('[data-lane-id="zz-test-a"]'));
-      await holdTestCard(from);
-      await glide(from, target, 20);
-      const lit = await phone.page.locator('[data-lane-id="zz-test-a"][data-drop-target]').count();
-      await touch("touchEnd");
-      await sleep(2000);
-      expect("phone: the group under the finger is lit while the card is over it", lit === 1, `lit=${lit}`);
-      expect("phone: held and dragged onto a group, the item is saved there", (await lane(created.id)) === "zz-test-a", await lane(created.id));
-
       // Near the top of the screen the page scrolls by itself while a card is lifted; a cancelled touch saves nothing.
       // Only the [TESTE] card is held, and the gesture ends in touchCancel, so no real item can land anywhere.
+      // The card held is the item's copy in the Kanban's Open, low on the page: the page is scrolled to put it 300 px
+      // from the top of the screen, so there is room to scroll up.
       await phone.page.setViewportSize({ width: 390, height: 844 });
       await sleep(300);
-      await phoneCard().scrollIntoViewIfNeeded();
+      const phoneOpenCard = phone.page.locator('[data-kanban-column="open"] div[draggable]', { hasText: "[TESTE] criado e editado pelo SM" }).first();
+      const openTop = await phoneOpenCard.evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+      await phone.page.evaluate((y) => window.scrollTo(0, y), Math.max(0, openTop - 300));
+      await sleep(300);
       const before = await phone.page.evaluate(() => window.scrollY);
-      from = await centre(phoneCard());
+      from = await centre(phoneOpenCard);
       await holdTestCard(from);
       await glide(from, { x: from.x, y: 6 }, 10);
       await sleep(800);
@@ -403,7 +546,7 @@ const { BASE, expect, sleep, svc } = L;
       await cdp.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
       await sleep(1200);
       expect("phone: holding a card near the top edge scrolls the page up", before > 100 && before - after > 100, `scrollY ${before} -> ${after}`);
-      expect("phone: a cancelled touch puts the card back and saves nothing", (await lane(created.id)) === "zz-test-a" && (await phone.page.locator("[data-touch-ghost]").count()) === 0);
+      expect("phone: a cancelled touch puts the card back and saves nothing", (await lane(created.id)) === "zz-test-sprint" && (await phone.page.locator("[data-touch-ghost]").count()) === 0);
 
       expect("phone: no console errors while dragging", phone.problems.length === 0, phone.problems.slice(0, 3).join(" | "));
       const strays = await realInTestLanes();
@@ -421,12 +564,13 @@ const { BASE, expect, sleep, svc } = L;
       await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
     }
 
-    // ------------------------------------------------ delete: own yes, others no
-    const toDelete = card("[TESTE] criado e editado pelo SM");
+    // ------------------------------------------------ delete: own yes, others no; from the card in Open
+    const toDelete = openCard("[TESTE] criado e editado pelo SM");
     await btn(toDelete, "Excluir").click();
     await sleep(2000);
     const { data: gone } = await svc.from("roadmap_items").select("id").eq("id", created.id);
-    expect("delete: own item is removed", gone.length === 0);
+    expect("delete (Excluir on the Open card): own item is removed, from Open and from its week", gone.length === 0 &&
+      (await count(page.locator(`[data-item-id="${created.id}"]`))) === 0);
     expect("delete: the admin's item survives, the seeded one has no Excluir", (await svc.from("roadmap_items").select("id").eq("id", L.ids.adminItem)).data.length === 1);
 
     // ------------------------------------------------ Sincronizar with no token
@@ -451,8 +595,13 @@ const { BASE, expect, sleep, svc } = L;
   } catch (e) {
     expect("run completed without an exception", false, L.scrub(e && e.message ? e.message : e).slice(0, 300));
   } finally {
+    // A seed left behind fails the run, without counting as one of its checks.
+    await unseed().catch((e) => {
+      unseedFailed = true;
+      console.error("unseed failed:", L.scrub(e && e.message ? e.message : e));
+    });
     await browser.close();
     await L.cleanup(t0);
   }
-  process.exit(L.summary("SCRUM MASTER") ? 1 : 0);
+  process.exit(L.summary("SCRUM MASTER") || unseedFailed ? 1 : 0);
 })();
