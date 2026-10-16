@@ -43,7 +43,7 @@ export type StatusInput = {
   closers?: number[];
   /** Instants of the commits that cite the issue. */
   commits: string[];
-  /** The parts of the issue (the leaves of its sub-issue tree): how many there are and how many are done. */
+  /** The steps of the issue (the leaves of its sub-issue tree): how many there are and how many are done. */
   subIssues?: { total: number; done: number } | null;
   /** Instants at which parts of the issue, at any depth, were closed as completed: a delivered part is work done. */
   closedParts?: string[];

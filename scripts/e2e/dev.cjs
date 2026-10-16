@@ -1,13 +1,79 @@
 const L = require("./lib.cjs");
 const { BASE, expect, sleep } = L;
 
+// A made-up issue of the current sprint, converted to boxes: three boxes of acceptance criteria (one ticked, one
+// with a "Bloqueada:" sub-item), one sub-issue still open and two closed in the conversion. The test server can't
+// read GitHub (GITHUB_TOKEN is empty), so its parts go straight into the board snapshot, the way the sync stores
+// them; the closed ones are kept there, as a snapshot written before 16/10/2026 has them, and must not show. The
+// numbers are far above any real issue, so nothing real is ever named.
+const GEOCLOUD = "https://github.com/Essencis-Labs/GeoCloudAI/issues/";
+const SEED = {
+  number: 990001,
+  title: "[TESTE] issue com critérios",
+  open: { number: 990004, title: "[TESTE] sub-issue aberta" },
+  closed: [990002, 990003].map((number) => ({ number, title: `[TESTE] sub-issue fechada ${number}` })),
+  boxes: [
+    { text: "S1. [TESTE] primeira parte.", checked: true, blocked: null },
+    { text: "S2. [TESTE] segunda parte.", checked: false, blocked: "falta a chave de teste" },
+    { text: "S3. [TESTE] terceira parte.", checked: false, blocked: null },
+  ],
+};
+// The lane the Dashboard reads as the current sprint (src/lib/actions/dashboard.ts).
+const CURRENT_SPRINT = "atual";
+
+// Puts the made-up issue in the current sprint and its parts in the snapshot; the returned function takes both out
+// again, leaving the rest of the snapshot as the last real sync wrote it.
+async function seedSprintIssue() {
+  const { data: item, error } = await L.svc
+    .from("roadmap_items")
+    .insert({ lane_id: CURRENT_SPRINT, title: SEED.title, description: "descrição de teste", created_by: null, github_issue_url: GEOCLOUD + SEED.number, github_issue_number: SEED.number })
+    .select("id")
+    .single();
+  if (error) throw error;
+  const group = {
+    parent: { number: SEED.number, title: SEED.title, url: GEOCLOUD + SEED.number },
+    total: 4,
+    items: [
+      { number: SEED.open.number, title: SEED.open.title, url: GEOCLOUD + SEED.open.number, state: "open" },
+      ...SEED.closed.map((c) => ({ number: c.number, title: c.title, url: GEOCLOUD + c.number, state: "closed" })),
+    ],
+    boxes: SEED.boxes,
+  };
+  // A failed read would write the snapshot back empty, and a failed write would leave the seed behind: both stop the run.
+  const others = async () => {
+    const { data, error } = await L.svc.from("board_sync_state").select("slices").eq("id", true).single();
+    if (error) throw error;
+    return (data?.slices ?? []).filter((g) => g?.parent?.number !== SEED.number);
+  };
+  const setSlices = async (slices) => {
+    const { error } = await L.svc.from("board_sync_state").update({ slices }).eq("id", true);
+    if (error) throw error;
+  };
+  await setSlices([group, ...(await others())]);
+  return async () => {
+    // The item is taken out even when the snapshot can't be restored; the first failure is the one thrown.
+    const failures = [];
+    try {
+      await setSlices(await others());
+    } catch (e) {
+      failures.push(e);
+    }
+    const { error } = await L.svc.from("roadmap_items").delete().eq("id", item.id);
+    if (error) failures.push(error);
+    if (failures.length > 0) throw failures[0];
+  };
+}
+
 (async () => {
   const t0 = new Date().toISOString();
   await L.ensureFixtures();
   const browser = await L.launch();
   // The Dashboard's own sync and its button are checked past the brake, whatever production synced lately.
   const restoreSnapshot = await L.ageSnapshot();
+  let unseed = async () => {};
+  let unseedFailed = false;
   try {
+    unseed = await seedSprintIssue();
     const s = await L.newSession(browser, "dev");
     const { page } = s;
     const menu = L.menuButton(page);
@@ -42,32 +108,64 @@ const { BASE, expect, sleep } = L;
     // ------------------------------------------------ dashboard
     await sleep(1500);
     expect("dashboard: opening it asks the server for a sync without anyone clicking", autoSyncs.length >= 1, `posts=${autoSyncs.length}`);
-    // The blocks it keeps (Sprint, and the Slices of its issues under it) and the ones it dropped.
+    // The blocks it keeps (Sprint, with the parts of each issue under it) and the ones it dropped.
     const block = (title) => page.getByText(title, { exact: true }).count();
-    expect("dashboard: has the Sprint block, the Slices block and the 'Concluídas' KPI", (await block("Sprint")) === 1 && (await block("Slices")) === 1 && (await block("Concluídas")) === 1);
+    expect("dashboard: has the Sprint block and the 'Concluídas' KPI, and no Slices block", (await block("Sprint")) === 1 && (await block("Slices")) === 0 && (await block("Concluídas")) === 1);
     const dropped = [];
     for (const title of ["Em paralelo", "Próxima semana", "Esta sprint", "Concluídas na sprint"]) if ((await block(title)) > 0) dropped.push(title);
     expect("dashboard: no 'Em paralelo', 'Próxima semana' or old titles", dropped.length === 0, dropped.join(", "));
-    expect("dashboard: Slices sits between the Sprint block and the Kanban", await page.evaluate(() => {
-      const order = ["Sprint", "Slices", "Kanban"].map((t) => [...document.querySelectorAll("span")].find((el) => el.textContent === t));
-      return order.every(Boolean) && order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING && order[1].compareDocumentPosition(order[2]) & Node.DOCUMENT_POSITION_FOLLOWING;
+    expect("dashboard: the Sprint block sits above the Kanban", await page.evaluate(() => {
+      const order = ["Sprint", "Kanban"].map((t) => [...document.querySelectorAll("span")].find((el) => el.textContent === t));
+      return order.every(Boolean) && order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING;
     }));
     // Every block lists its issues from the highest number to the lowest (src/lib/issue-order.ts), read on the real sprint.
     const descending = (refs) => refs.every((r, i) => i === 0 || r <= refs[i - 1]);
     const numbersIn = (texts) => texts.map((t) => Number(t.match(/^#(\d+)$/)?.[1])).filter((n) => n > 0);
     const sprintBlock = page.getByText("Sprint", { exact: true }).locator("xpath=..");
-    const sprintNumbers = numbersIn(await sprintBlock.locator("span.font-mono").allInnerTexts());
+    const sprintNumbers = numbersIn(await sprintBlock.locator("[data-issue] > :first-child span.font-mono").allInnerTexts());
     expect("dashboard: the Sprint block lists its issues from the highest number to the lowest", sprintNumbers.length > 1 && descending(sprintNumbers), JSON.stringify(sprintNumbers));
-    const slicesBlock = page.getByText("Slices", { exact: true }).locator("xpath=..");
-    const parents = numbersIn(await slicesBlock.locator("section > div span.font-mono").allInnerTexts());
-    const rowsOk = await slicesBlock.locator("section").evaluateAll((sections) =>
+    const partsOk = await sprintBlock.locator("[data-issue]").evaluateAll((sections) =>
       sections.every((s) => {
-        // Rows of boxes (acceptance criteria) carry no number and keep the issue's order: only sub-issue rows are ordered.
-        const n = [...s.querySelectorAll(":scope > a span.font-mono")].map((el) => Number(el.textContent.replace("#", ""))).filter((x) => x > 0);
-        return n.every((x, i) => i === 0 || x <= n[i - 1]);
+        // The boxes keep the issue's order and come first; the open sub-issues after them, highest number first.
+        const kinds = [...s.querySelectorAll(":scope > [data-part]")].map((el) => el.dataset.part);
+        const n = [...s.querySelectorAll(':scope > [data-part="sub-issue"] span.font-mono')].map((el) => Number(el.textContent.replace("#", ""))).filter((x) => x > 0);
+        return kinds.every((k, i) => i === 0 || k === kinds[i - 1] || k === "sub-issue") && n.every((x, i) => i === 0 || x <= n[i - 1]);
       })
     );
-    expect("dashboard: the Slices blocks, and the slices in each, go from the highest issue number to the lowest", descending(parents) && rowsOk, JSON.stringify(parents));
+    expect("dashboard: under each issue, its boxes come first and its open sub-issues after, highest number first", partsOk);
+
+    // The made-up issue converted to boxes: its three criteria right under it, its open sub-issue, and "1 de 4".
+    const seeded = sprintBlock.locator("[data-issue]", { has: page.getByText(SEED.title, { exact: true }) });
+    const seededShown = await seeded.waitFor({ timeout: 15000 }).then(() => true, () => false);
+    expect("dashboard: an issue of the sprint converted to boxes is in the Sprint block", seededShown && (await seeded.count()) === 1);
+    const partsCount = seededShown ? (await seeded.locator("[data-parts-count]").innerText()).trim() : "";
+    expect("dashboard: its count is 1 de 4 (three boxes, one ticked, plus the open sub-issue; the closed ones don't count)", partsCount === "1 de 4", partsCount);
+    const boxes = seededShown
+      ? await seeded.evaluate((s) => {
+          const issuePill = s.firstElementChild.querySelector("span").getBoundingClientRect().left;
+          return [...s.querySelectorAll(':scope > [data-part="box"]')].map((row) => ({
+            pill: row.querySelector("span").textContent,
+            text: row.textContent,
+            link: row.tagName === "A" || row.querySelector("a") !== null,
+            indented: row.querySelector("span").getBoundingClientRect().left > issuePill + 8,
+          }));
+        })
+      : [];
+    expect(
+      "dashboard: its three criteria are indented rows under it, with no link, CONCLUÍDO / BLOQUEADO / A FAZER in the order of the body",
+      boxes.length === 3 &&
+        boxes.every((b) => b.indented && !b.link) &&
+        JSON.stringify(boxes.map((b) => b.pill)) === JSON.stringify(["CONCLUÍDO", "BLOQUEADO", "A FAZER"]) &&
+        boxes.every((b, i) => b.text.includes(SEED.boxes[i].text)),
+      JSON.stringify(boxes)
+    );
+    const subRows = seededShown ? await seeded.locator('[data-part="sub-issue"]').evaluateAll((rows) => rows.map((a) => [a.getAttribute("href"), a.textContent])) : [];
+    expect(
+      "dashboard: its open sub-issue is an extra row that links to it",
+      subRows.length === 1 && subRows[0][0] === GEOCLOUD + SEED.open.number && subRows[0][1].includes(SEED.open.title) && subRows[0][1].includes(`#${SEED.open.number}`),
+      JSON.stringify(subRows)
+    );
+    expect("dashboard: its sub-issues closed in the conversion are not shown", (await page.getByText(/\[TESTE\] sub-issue fechada/).count()) === 0);
     const notConfigured = () => page.getByText(/ainda não configurada/).waitFor({ timeout: 20000 }).then(() => true, () => false);
     expect("dashboard: its own sync with no GitHub token fails closed with a clear message (nothing reaches GitHub)", await notConfigured());
     const sync = page.getByRole("button", { name: /Sincronizar/ });
@@ -167,9 +265,14 @@ const { BASE, expect, sleep } = L;
   } catch (e) {
     expect("run completed without an exception", false, L.scrub(e && e.message ? e.message : e).slice(0, 200));
   } finally {
+    // A seed left behind fails the run, without counting as one of its checks.
+    await unseed().catch((e) => {
+      unseedFailed = true;
+      console.error("unseed failed:", L.scrub(e && e.message ? e.message : e));
+    });
     await restoreSnapshot();
     await browser.close();
     await L.cleanup(t0);
   }
-  process.exit(L.summary("DEV") ? 1 : 0);
+  process.exit(L.summary("DEV") || unseedFailed ? 1 : 0);
 })();

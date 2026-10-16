@@ -1,5 +1,5 @@
 import { NavBar } from "@/components/NavBar";
-import { DashboardBranch, DashboardSyncProvider, ElimsNote, KanbanColumns, KpiCards, SlicesPanel, SprintPanels, SyncPill } from "@/components/DashboardSync";
+import { DashboardBranch, DashboardSyncProvider, ElimsNote, KanbanColumns, KpiCards, SprintPanels, SyncPill } from "@/components/DashboardSync";
 import { getDashboard } from "@/lib/actions/dashboard";
 import { getViewerOrReset } from "@/lib/get-viewer";
 import { dashboardData } from "@/lib/mock-data";
@@ -36,8 +36,6 @@ export default async function DashboardPage() {
           <KpiCards />
 
           <SprintPanels />
-
-          <SlicesPanel />
 
           <div className="flex flex-col gap-3.5">
             <span className="text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Kanban</span>
