@@ -3,7 +3,7 @@
 // marks Done leave the Roadmap with the sprint that ended (they stay in the history); the rest
 // carry over into the new current sprint, ahead of the items that were planned for it.
 
-import { currentWeekLane, sprintLanesByDate, weekLanes, type WeekLaneRow } from "./sprint-week.ts";
+import { currentWeekLane, newWeekLane, sprintLanesByDate, weekLanes, type WeekLaneRow } from "./sprint-week.ts";
 
 export const SPRINT_IDS = ["atual", "proxima", "terceira"] as const;
 export type SprintId = (typeof SPRINT_IDS)[number];
@@ -102,7 +102,7 @@ export function planRotation(input: { today: string; lanes: WeekLaneRow[]; items
   if (!ended.length) return plan;
 
   const current = currentWeekLane(weeks, input.today);
-  const target = current!.id;
+  const target = current?.id ?? newWeekLane(input.today).id;
   const carried: WeekItem[] = [];
   for (const w of ended) {
     for (const item of inOrder(input.items.filter((it) => it.laneId === w.id))) {
@@ -113,6 +113,7 @@ export function planRotation(input: { today: string; lanes: WeekLaneRow[]; items
   if (!carried.length) return plan;
 
   plan.target = target;
+  plan.createTarget = !current;
   plan.moves = carried.map((item, sortOrder) => ({ id: item.id, from: item.laneId, to: target, sortOrder }));
   inOrder(input.items.filter((it) => it.laneId === target)).forEach((item, i) => {
     const sortOrder = carried.length + i;

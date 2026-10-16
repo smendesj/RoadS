@@ -80,3 +80,17 @@ test("only the week that ended moves: the done leave, the rest go on top of toda
   assert.deepEqual(plan.reorders, [{ id: "b1", sortOrder: 2 }]);
   assert.deepEqual(plan.deleteLanes, ["sprint-05-10-2026"]);
 });
+
+test("today's week is created when it is missing, and on a Saturday it is the week of the next Monday", () => {
+  const midweek = planRotation({ today: "2026-10-13", lanes: [W1, W3], items: [it("a1", W1.id, 0), it("c1", W3.id, 0)], doneUrls: new Set() });
+  assert.equal(midweek.target, "sprint-12-10-2026");
+  assert.equal(midweek.createTarget, true);
+  assert.deepEqual(midweek.moves, [{ id: "a1", from: "sprint-05-10-2026", to: "sprint-12-10-2026", sortOrder: 0 }]);
+  assert.deepEqual(midweek.reorders, []);
+
+  const saturday = planRotation({ today: "2026-10-17", lanes: [W2], items: [it("b1", W2.id, 0)], doneUrls: new Set() });
+  assert.equal(saturday.target, "sprint-19-10-2026");
+  assert.equal(saturday.createTarget, true);
+  assert.deepEqual(saturday.moves, [{ id: "b1", from: "sprint-12-10-2026", to: "sprint-19-10-2026", sortOrder: 0 }]);
+  assert.deepEqual(saturday.deleteLanes, ["sprint-12-10-2026"]);
+});
