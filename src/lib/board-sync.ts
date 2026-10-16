@@ -34,7 +34,7 @@ import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCa
 import { isStack, isTipo } from "@/lib/issue-fields";
 import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
-import { planRotation } from "@/lib/sprint-rotation";
+import { planRotation, rotationIsIdle } from "@/lib/sprint-rotation";
 import { todayInSaoPaulo, weekLanes } from "@/lib/sprint-week";
 import { parseSlices, slicesQuery } from "@/lib/slices";
 import { planTitleFollow, type TitleCandidate } from "@/lib/title-follow";
@@ -264,7 +264,8 @@ async function runBoardSync(): Promise<SyncResult> {
 // when it is missing (src/lib/week-lanes.ts), with a move_lane each (origin "rotation"); the items already there go
 // down with a new order only; the lane that ended goes once empty. The weeks to come are never touched. Any dated
 // sprint lane is a week, so before migration 0031 the positional "atual" ends like any other and "proxima" takes
-// its items; after it, the lanes are named by their date.
+// its items, but "atual" stays, empty, for 0031 to rename with the changes just queued that name it; after it, the
+// lanes are named by their date.
 // Two syncs turning at once can't do it twice: every write takes an item only where this sync saw it (the update
 // and the delete are guarded by its lane, and only a row that changed is queued), and a lane goes only empty.
 async function rotateSprints(doneUrls: Set<string>, now = new Date()): Promise<void> {
@@ -285,7 +286,7 @@ async function rotateSprints(doneUrls: Set<string>, now = new Date()): Promise<v
     items: (items ?? []).map((it) => ({ id: it.id, laneId: it.lane_id, sortOrder: it.sort_order, url: it.github_issue_url })),
     doneUrls,
   });
-  if (!plan.deleteLanes.length) return;
+  if (rotationIsIdle(plan)) return;
   const byId = new Map((items ?? []).map((it) => [it.id, it]));
 
   for (const { id, laneId } of plan.finished) {

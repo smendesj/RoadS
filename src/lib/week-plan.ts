@@ -81,3 +81,15 @@ export function weekRow(stored: { id: string; start_date: string; end_date: stri
   if (current) current.current = true;
   return weeks;
 }
+
+/** The sprint lanes named by their position, which the database holds until migration 0031 renames them. */
+const POSITIONAL_LANES: ReadonlySet<string> = new Set(["atual", "proxima", "terceira"]);
+
+/**
+ * Whether a sprint lane may be deleted once it holds no item (src/lib/week-lanes.ts asks before every delete). A
+ * positional lane never is: the change that emptied it is already queued naming it, and migration 0031 renames a
+ * lane and the unacked changes that name it together, so the lane stays, empty, until 0031 renames and deletes it.
+ * Deleting it first would leave a change naming a lane 0031 no longer finds (it then refuses to run), and
+ * roadmap-state could not hand the week, since a positional id is no week's id (weekOfId).
+ */
+export const mayDeleteEmptyWeek = (laneId: string): boolean => !POSITIONAL_LANES.has(laneId);

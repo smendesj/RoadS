@@ -1,4 +1,5 @@
 import { currentWeekLane, newWeekLane, sprintLanesByDate, weekLanes, type WeekLaneRow } from "./sprint-week.ts";
+import { mayDeleteEmptyWeek } from "./week-plan.ts";
 
 // The turn of the week (see sprint-week.ts): only the week that ended moves. A week is over from the
 // day after its last day, so the week of Friday 16/10 turns on Saturday 17/10, into the week of Monday 19/10. Its
@@ -7,7 +8,8 @@ import { currentWeekLane, newWeekLane, sprintLanesByDate, weekLanes, type WeekLa
 // (a new order only: nothing is queued for them, they did not change week). The week that ended is then empty and
 // its lane goes. The weeks to come never move. Weeks nobody synced in are all turned at once, so each item gets a
 // single move, to today's week, the oldest week's items first. Any dated sprint lane is a week, so the positional
-// lanes count until migration 0031 renames them; the e2e fixture never does.
+// lanes count until migration 0031 renames them; the e2e fixture never does. A positional lane that ended turns
+// like any other but is not deleted: it stays, empty, for 0031 to rename with the changes that name it.
 
 export type WeekItem = { id: string; laneId: string; sortOrder: number; url: string | null };
 
@@ -22,7 +24,7 @@ export type WeekRotationPlan = {
   moves: { id: string; from: string; to: string; sortOrder: number }[];
   /** The items already in today's week, pushed down below the moved ones; no change to queue. */
   reorders: { id: string; sortOrder: number }[];
-  /** The lanes of the weeks that ended, by date: empty once the plan is applied, so they go. */
+  /** The lanes of the weeks that ended, by date: empty once the plan is applied, so they go; never a positional one. */
   deleteLanes: string[];
 };
 
@@ -35,7 +37,7 @@ const inOrder = (items: WeekItem[]): WeekItem[] =>
 export function planRotation(input: { today: string; lanes: WeekLaneRow[]; items: WeekItem[]; doneUrls: Set<string> }): WeekRotationPlan {
   const weeks = sprintLanesByDate(weekLanes(input.lanes));
   const ended = weeks.filter((w) => w.end_date! < input.today);
-  const plan: WeekRotationPlan = { finished: [], target: null, createTarget: false, moves: [], reorders: [], deleteLanes: ended.map((w) => w.id) };
+  const plan: WeekRotationPlan = { finished: [], target: null, createTarget: false, moves: [], reorders: [], deleteLanes: ended.map((w) => w.id).filter(mayDeleteEmptyWeek) };
   if (!ended.length) return plan;
 
   const current = currentWeekLane(weeks, input.today);
@@ -58,3 +60,6 @@ export function planRotation(input: { today: string; lanes: WeekLaneRow[]; items
   });
   return plan;
 }
+
+/** True when the plan writes nothing: no item leaves or moves and no lane goes (an ended positional lane stays). */
+export const rotationIsIdle = (plan: WeekRotationPlan): boolean => !plan.finished.length && !plan.moves.length && !plan.deleteLanes.length;

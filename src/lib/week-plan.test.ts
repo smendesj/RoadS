@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { weekFate, weekRow, weekToCreate } from "./week-plan.ts";
+import { mayDeleteEmptyWeek, weekFate, weekRow, weekToCreate } from "./week-plan.ts";
 
 test("a week dropped on is created with its id, title and dates derived from its Monday", () => {
   assert.deepEqual(weekToCreate("sprint-19-10-2026", "2026-10-16"), {
@@ -92,4 +92,9 @@ test("no week is added past the 52-week horizon, though a stored one beyond it s
     ["sprint-11-10-2027", true, false],
     ["sprint-25-10-2027", false, false],
   ]);
+});
+
+test("a positional lane is never deleted for being empty: it stays until migration 0031 renames it, a lane named by its date may go", () => {
+  for (const id of ["atual", "proxima", "terceira"]) assert.equal(mayDeleteEmptyWeek(id), false, id);
+  assert.equal(mayDeleteEmptyWeek("sprint-19-10-2026"), true);
 });

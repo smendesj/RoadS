@@ -7,7 +7,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isTestLane, todayInSaoPaulo } from "@/lib/sprint-week";
-import { weekFate, weekToCreate } from "@/lib/week-plan";
+import { mayDeleteEmptyWeek, weekFate, weekToCreate } from "@/lib/week-plan";
 
 /**
  * The lane of the week `weekId` names, created when it is missing, and its id. Idempotent: two calls at once end
@@ -37,11 +37,14 @@ export async function ensureWeekLane(admin: SupabaseClient, weekId: string, now 
 }
 
 /**
- * Deletes a sprint lane when it holds no item, whatever its week (the rotation deletes the one that ended this way),
- * positional lanes included; never a group lane nor the e2e fixture. One call (migration 0030): the lane goes only
- * if it is still empty, never with an item in it. Answers whether it was deleted.
+ * Deletes a sprint lane when it holds no item, whatever its week (the rotation deletes the one that ended this way);
+ * never a group lane nor the e2e fixture, and never a positional lane (`atual`, `proxima`, `terceira`): that one
+ * stays, empty, until migration 0031 renames it with the queued changes that name it (mayDeleteEmptyWeek in
+ * week-plan.ts). One call (migration 0030): the lane goes only if it is still empty, never with an item in it.
+ * Answers whether it was deleted.
  */
 export async function deleteWeekIfEmpty(admin: SupabaseClient, laneId: string): Promise<boolean> {
+  if (!mayDeleteEmptyWeek(laneId)) return false;
   const { data, error } = await admin.rpc("delete_week_lane_if_empty", { p_lane_id: laneId });
   if (error) throw error;
   return data === true;
@@ -49,8 +52,8 @@ export async function deleteWeekIfEmpty(admin: SupabaseClient, laneId: string): 
 
 /**
  * Deletes a FUTURE week's lane (first day after the current week's Monday) when it holds no item: what a move, a
- * delete or a pull out of a week does once it has left it empty. The current week, an ended one, a group lane and
- * a lane with no dates are left alone. Answers whether it was deleted.
+ * delete or a pull out of a week does once it has left it empty. The current week, an ended one, a group lane, a
+ * lane with no dates and a positional lane are left alone. Answers whether it was deleted.
  */
 export async function deleteFutureWeekIfEmpty(admin: SupabaseClient, laneId: string, now = new Date()): Promise<boolean> {
   const { data: lane, error } = await admin.from("lanes").select("kind, start_date").eq("id", laneId).maybeSingle();

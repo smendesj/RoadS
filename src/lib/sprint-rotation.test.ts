@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planRotation } from "./sprint-rotation.ts";
+import { planRotation, rotationIsIdle } from "./sprint-rotation.ts";
 
 const week = (id: string, start: string, end: string, kind = "sprint") => ({ id, kind, start_date: start, end_date: end });
 const W1 = week("sprint-05-10-2026", "2026-10-05", "2026-10-09");
@@ -66,7 +66,7 @@ test("weeks nobody synced in turn at once: one move per item to today's week, th
   assert.deepEqual(plan.deleteLanes, ["sprint-05-10-2026", "sprint-12-10-2026"]);
 });
 
-test("until migration 0031 the positional lanes are weeks by their dates: 'atual' ends and goes, 'proxima' gets its items on top", () => {
+test("until migration 0031 the positional lanes are weeks by their dates: 'atual' ends and stays, empty, 'proxima' gets its items on top", () => {
   const atual = week("atual", "2026-10-12", "2026-10-16");
   const proxima = week("proxima", "2026-10-19", "2026-10-23");
   const terceira = week("terceira", "2026-10-26", "2026-10-30");
@@ -82,12 +82,25 @@ test("until migration 0031 the positional lanes are weeks by their dates: 'atual
     createTarget: false,
     moves: [{ id: "a2", from: "atual", to: "proxima", sortOrder: 0 }],
     reorders: [{ id: "p1", sortOrder: 1 }],
-    deleteLanes: ["atual"],
+    deleteLanes: [],
   });
+  assert.equal(rotationIsIdle(plan), false, "the turn still happens though no lane goes");
 
   const intoADatedWeek = planRotation({ today: "2026-10-20", lanes: [atual, W3], items: [it("a2", "atual", 0)], doneUrls: new Set() });
   assert.equal(intoADatedWeek.target, "sprint-19-10-2026");
-  assert.deepEqual(intoADatedWeek.deleteLanes, ["atual"]);
+  assert.deepEqual(intoADatedWeek.deleteLanes, []);
+
+  // The changes just queued name "atual", so its lane stays, empty, until 0031 renames it with them: the next
+  // sync finds the ended week empty and has nothing to do.
+  const after = planRotation({ today: "2026-10-17", lanes: [terceira, atual, proxima], items: [it("a2", "proxima", 0), it("p1", "proxima", 1)], doneUrls: new Set() });
+  assert.deepEqual(after, NOTHING);
+  assert.equal(rotationIsIdle(after), true);
+});
+
+test("the sync has nothing to write only when nothing leaves, moves or goes", () => {
+  assert.equal(rotationIsIdle(NOTHING), true);
+  assert.equal(rotationIsIdle({ ...NOTHING, finished: [{ id: "a1", laneId: "atual" }] }), false);
+  assert.equal(rotationIsIdle({ ...NOTHING, deleteLanes: ["sprint-05-10-2026"] }), false);
 });
 
 test("the e2e fixture, the type lanes and a sprint lane with no dates never turn", () => {
