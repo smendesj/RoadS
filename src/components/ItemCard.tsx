@@ -88,7 +88,7 @@ export function ItemCard({
       data-planned={weekLabel ? "" : undefined}
       className={`flex ${canDrag ? "cursor-move pointer-coarse:select-none pointer-coarse:[-webkit-user-drag:none]" : ""} ${
         lifted ? "opacity-40" : weekLabel ? "opacity-70" : ""
-      } relative flex-col gap-2.5 rounded-xl border border-rs-border bg-rs-card p-3.5`}
+      } relative min-w-0 flex-col gap-2.5 rounded-xl border border-rs-border bg-rs-card p-3.5 [overflow-wrap:anywhere]`}
     >
       {dropLine && <div data-drop-line aria-hidden="true" className="pointer-events-none absolute -top-2 left-0 right-0 h-1 -translate-y-1/2 rounded-full bg-rs-brand" />}
       {item.url ? (

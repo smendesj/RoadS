@@ -381,8 +381,10 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
               </div>
             )}
 
-            {/* The Kanban (src/lib/kanban.ts): Open, to plan, and Done, to look at. Blocker and Development stay out. */}
-            <div data-kanban className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-5">
+            {/* The Kanban (src/lib/kanban.ts): Open, to plan, and Done, to look at. Blocker and Development stay out. Unlike
+                the weeks, it is no scrolling area: a long word or link in a title or a description (an issue's body) breaks
+                anywhere, or it would widen the whole page on a narrow phone. */}
+            <div data-kanban className="grid grid-cols-1 items-start gap-4 [overflow-wrap:anywhere] lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-5">
               <section data-kanban-column="open" className="flex min-w-0 flex-col gap-3 rounded-2xl border border-rs-border bg-rs-lane p-4">
                 <div className="flex items-center justify-between">
                   <span className={badgeClass("neutral")}>Open</span>
