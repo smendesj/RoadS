@@ -57,8 +57,8 @@ const { BASE, expect, sleep, svc } = L;
       expect("weeks: the e2e test week is never the current one", !current.some((l) => l.id.startsWith("zz-test-")));
       const style = await page.locator('[data-drag-scroll="x"]').evaluate((el) => [getComputedStyle(el).display, getComputedStyle(el).overflowX]);
       expect("weeks: on a wide screen the row is one line that scrolls sideways (no grid of three)", style[0] === "flex" && ["auto", "scroll"].includes(style[1]), JSON.stringify(style));
-      // Holds only after migration 0030 is pushed: before it the database still has atual/proxima/terceira.
-      expect("weeks (after 0030): every real sprint lane is named sprint-DD-MM-AAAA by its Monday", W.real.length > 0 && W.real.every((l) => l.id === L.weekId(l.start_date)), JSON.stringify(W.real.map((l) => l.id)));
+      // Holds only after migration 0031 is pushed: before it the database still has atual/proxima/terceira.
+      expect("weeks (after 0031): every real sprint lane is named sprint-DD-MM-AAAA by its Monday", W.real.length > 0 && W.real.every((l) => l.id === L.weekId(l.start_date)), JSON.stringify(W.real.map((l) => l.id)));
     }
 
     const card = (title) => page.locator("div[draggable]", { hasText: title }).first();

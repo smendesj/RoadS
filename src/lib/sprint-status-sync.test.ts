@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { planSprintSync, runSprintSync, type SprintCandidate, type SprintSyncDeps } from "./sprint-status-sync.ts";
 
-// The current week is whichever lane the sync names as current: a date id here, a positional one before migration 0030.
+// The current week is whichever lane the sync names as current: a date id here, a positional one before migration 0031.
 const NOW = "sprint-12-10-2026";
 const NEXT = "sprint-19-10-2026";
 const LATER = "sprint-26-10-2026";

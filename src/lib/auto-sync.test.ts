@@ -20,7 +20,7 @@ test("only a move into or out of the current sprint changes the Project, so only
 
 test("the current sprint is the week the board names current, not a lane called atual", () => {
   assert.equal(touchesCurrentSprint("atual", "tipo-feature", "sprint-12-10-2026"), false);
-  assert.equal(touchesCurrentSprint("atual", "tipo-feature", "atual"), true, "before migration 0030 the positional lane can be the current week");
+  assert.equal(touchesCurrentSprint("atual", "tipo-feature", "atual"), true, "before migration 0031 the positional lane can be the current week");
   assert.equal(touchesCurrentSprint("atual", "tipo-feature", null), false, "no current week on the board: no move touches it");
 });
 

@@ -1,4 +1,4 @@
--- A week's lane (a sprint named sprint-DD-MM-AAAA by its Monday, migration 0030) exists only while it holds an
+-- A week's lane (a sprint named sprint-DD-MM-AAAA by its Monday, migration 0031) exists only while it holds an
 -- item: the server creates it when the first item is dropped in it, and deletes it when it empties
 -- (src/lib/week-lanes.ts). roadmap_items.lane_id is "on delete cascade", so counting the items and then deleting
 -- the lane in two calls could take down an item moved in between. This function deletes the lane only when it is
@@ -6,7 +6,7 @@
 -- either already there when the emptiness is read (each statement reads after the lock) or waits and then fails
 -- on its foreign key; it is never deleted with the lane. Answers whether the lane was deleted.
 --
--- Any sprint lane will do (the positional ones too, while migration 0030 has not run), never a group lane nor the
+-- Any sprint lane will do (the positional ones too, while migration 0031 has not run), never a group lane nor the
 -- e2e fixture (zz-test-*). Which weeks may go (a future one that emptied, one the rotation emptied after it ended)
 -- is the server's rule, not this function's. Only the server calls it, with the service role; the lanes policy
 -- (admin writes, 0016) is unchanged.

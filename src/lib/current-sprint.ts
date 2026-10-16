@@ -1,7 +1,7 @@
 import "server-only";
 
 // The lane of this week, read from the database: the rule is in src/lib/sprint-week.ts (the sprint lane whose dates
-// hold today in São Paulo, whatever its id, so the positional lanes still in the database until migration 0030
+// hold today in São Paulo, whatever its id, so the positional lanes still in the database until migration 0031
 // count too). Not a "use server" file: nothing here is an endpoint.
 
 import type { SupabaseClient } from "@supabase/supabase-js";

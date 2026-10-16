@@ -17,7 +17,7 @@
 --      changed, if an item is still in a positional lane, if a positional lane is left, or if an unacked change
 --      still names one.
 -- Idempotent: with no positional lane left it does nothing. The e2e fixture lanes (`zz-test-*`) are not touched.
--- The way back is supabase/rollback/0030_down.sql, kept outside the migrations on purpose.
+-- The way back is supabase/rollback/0031_down.sql, kept outside the migrations on purpose.
 
 do $$
 declare
@@ -31,7 +31,7 @@ declare
   items_after bigint;
 begin
   if not exists (select 1 from public.lanes where id = any (positional)) then
-    raise notice '0030: no positional sprint lane left, nothing to do';
+    raise notice '0031: no positional sprint lane left, nothing to do';
     return;
   end if;
 
@@ -39,12 +39,12 @@ begin
     select 1 from public.lanes
     where id = any (positional) and (kind <> 'sprint' or start_date is null or end_date is null)
   ) then
-    raise exception '0030: a positional lane is not a dated sprint, so it cannot be named by its week; nothing was changed';
+    raise exception '0031: a positional lane is not a dated sprint, so it cannot be named by its week; nothing was changed';
   end if;
 
   if (select count(distinct start_date) from public.lanes where id = any (positional))
      <> (select count(*) from public.lanes where id = any (positional)) then
-    raise exception '0030: two positional lanes start on the same day; nothing was changed';
+    raise exception '0031: two positional lanes start on the same day; nothing was changed';
   end if;
 
   -- What must hold after: the items of every week (the sprint lanes outside the e2e fixture, by start date) and
@@ -99,21 +99,21 @@ begin
 
   -- 4. The checks.
   if exists (select 1 from public.roadmap_items where lane_id = any (positional)) then
-    raise exception '0030: an item is still in a positional lane; everything was undone';
+    raise exception '0031: an item is still in a positional lane; everything was undone';
   end if;
   if exists (select 1 from public.lanes where id = any (positional)) then
-    raise exception '0030: a positional lane is left; everything was undone';
+    raise exception '0031: a positional lane is left; everything was undone';
   end if;
   if exists (
     select 1 from public.roadmap_sync_queue
     where acked_at is null and (payload ->> 'lane_id' = any (positional) or payload ->> 'from_lane_id' = any (positional))
   ) then
-    raise exception '0030: an unacked change still names a positional lane; everything was undone';
+    raise exception '0031: an unacked change still names a positional lane; everything was undone';
   end if;
 
   select count(*) into items_after from public.roadmap_items;
   if items_after <> items_before then
-    raise exception '0030: % items before and % after; everything was undone', items_before, items_after;
+    raise exception '0031: % items before and % after; everything was undone', items_before, items_after;
   end if;
 
   select coalesce(jsonb_object_agg(w.start_date, w.items), '{}'::jsonb) into weeks_after
@@ -125,7 +125,7 @@ begin
     group by l.start_date
   ) w;
   if weeks_after <> weeks_before then
-    raise exception '0030: items per week changed (before %, after %); everything was undone', weeks_before, weeks_after;
+    raise exception '0031: items per week changed (before %, after %); everything was undone', weeks_before, weeks_after;
   end if;
 end;
 $$;
