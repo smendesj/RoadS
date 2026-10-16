@@ -39,7 +39,7 @@ import { planRotation, rotationIsIdle } from "@/lib/sprint-rotation";
 import { todayInSaoPaulo, weekLanes } from "@/lib/sprint-week";
 import { parseSlices, slicesQuery } from "@/lib/slices";
 import { planTitleFollow, type TitleCandidate } from "@/lib/title-follow";
-import { CLOSED_BEFORE_WEEK, closedBeforeTheirWeek } from "@/lib/closed-before-week";
+import { removeClosedBeforeTheirWeek as runClosedRemoval, type ClosedRemovalDeps } from "@/lib/closed-before-week";
 import { currentSprintIn, currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
 import { EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintSyncDeps, type SprintSyncSummary } from "@/lib/sprint-status-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -699,11 +699,8 @@ async function reconcileRoadmapWithIssues(
   return { added: missing.length, removed: closed.length + leftEarly, issuesCreated, untyped: notYet.length - missing.length };
 }
 
-// Takes out of the weeks to come the items whose issue was closed, in the order the rotation's remove keeps: the
-// change is queued first, with item_id null since the row is about to go and the payload carrying it all; then the
-// delete, only of the item still in the week this sync saw it in; when it fails or finds nothing (another sync took
-// it), the change just queued is withdrawn. A week to come that this left empty goes (src/lib/week-lanes.ts); a
-// failure there keeps the week, empty. Answers how many items left.
+// Plugs the database into the removal of the items whose issue was closed before their week came (the sequence and
+// its order live in removeClosedBeforeTheirWeek, src/lib/closed-before-week.ts, where they run under test).
 async function removeClosedBeforeTheirWeek(
   admin: Admin,
   lanes: { id: string; kind: string; start_date: string | null; end_date: string | null }[],
@@ -711,40 +708,36 @@ async function removeClosedBeforeTheirWeek(
   open: Set<number>,
   onProject: Set<number>
 ): Promise<number> {
-  const byId = new Map(items.map((it) => [it.id, it]));
-  const leaving = closedBeforeTheirWeek({
-    today: todayInSaoPaulo(new Date()),
-    lanes,
-    items: items.map((it) => ({ id: it.id, laneId: it.lane_id, number: Number(it.github_issue_url?.match(ISSUE_URL)?.[1]) || null })),
-    open,
-    onProject,
-  });
-
-  let left = 0;
-  const emptied = new Set<string>();
-  for (const { id, laneId } of leaving) {
-    const item = byId.get(id)!;
-    const { data: queued, error: queueError } = await admin
-      .from("roadmap_sync_queue")
-      .insert({
-        item_id: null,
-        action: "remove",
-        payload: { item_id: id, lane_id: laneId, title: item.title, github_issue_url: item.github_issue_url, reason: CLOSED_BEFORE_WEEK },
-      })
-      .select("id")
-      .single();
-    if (queueError) throw queueError;
-    const { data: removed, error } = await admin.from("roadmap_items").delete().eq("id", id).eq("lane_id", laneId).select("id");
-    if (error || !removed?.length) {
-      await admin.from("roadmap_sync_queue").delete().eq("id", queued.id);
+  const deps: ClosedRemovalDeps = {
+    queue: async (row) => {
+      const { data, error } = await admin.from("roadmap_sync_queue").insert(row).select("id").single();
       if (error) throw error;
-      continue;
-    }
-    left++;
-    emptied.add(laneId);
-  }
-  for (const laneId of emptied) {
-    await deleteFutureWeekIfEmpty(admin, laneId).catch((e) => console.error("deleteFutureWeekIfEmpty failed; the empty week stays", e));
-  }
-  return left;
+      return data.id;
+    },
+    deleteFromWeek: async (id, laneId) => {
+      const { data, error } = await admin.from("roadmap_items").delete().eq("id", id).eq("lane_id", laneId).select("id");
+      if (error) throw error;
+      return !!data?.length;
+    },
+    unqueue: async (queueId) => {
+      await admin.from("roadmap_sync_queue").delete().eq("id", queueId);
+    },
+    deleteFutureWeekIfEmpty: (laneId) => deleteFutureWeekIfEmpty(admin, laneId),
+  };
+  return runClosedRemoval(
+    {
+      today: todayInSaoPaulo(new Date()),
+      lanes,
+      items: items.map((it) => ({
+        id: it.id,
+        laneId: it.lane_id,
+        number: Number(it.github_issue_url?.match(ISSUE_URL)?.[1]) || null,
+        title: it.title,
+        githubIssueUrl: it.github_issue_url,
+      })),
+      open,
+      onProject,
+    },
+    deps
+  );
 }
