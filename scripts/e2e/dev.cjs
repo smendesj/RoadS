@@ -120,10 +120,12 @@ async function seedSprintIssue() {
     const dropped = [];
     for (const title of ["Em paralelo", "Próxima semana", "Esta sprint", "Concluídas na sprint"]) if ((await block(title)) > 0) dropped.push(title);
     expect("dashboard: no 'Em paralelo', 'Próxima semana' or old titles", dropped.length === 0, dropped.join(", "));
-    expect("dashboard: the Sprint block sits above the Kanban", await page.evaluate(() => {
-      const order = ["Sprint", "Kanban"].map((t) => [...document.querySelectorAll("span")].find((el) => el.textContent === t));
-      return order.every(Boolean) && order[0].compareDocumentPosition(order[1]) & Node.DOCUMENT_POSITION_FOLLOWING;
-    }));
+    // The Kanban went to the Roadmap, under the weeks: no Kanban title, no Open / Blocker / Done columns, no ELIMS note.
+    const kanbanLeft = [];
+    for (const title of ["Kanban", "Open", "Blocker", "Done", "Nenhum bloqueio agora."]) if ((await block(title)) > 0) kanbanLeft.push(title);
+    expect("dashboard: no Kanban (no 'Kanban' title, no Open, Blocker or Done column)", kanbanLeft.length === 0, kanbanLeft.join(", "));
+    expect("dashboard: no ELIMS note and no Kanban block (both are on the Roadmap now)",
+      (await page.locator("[data-elims-note], [data-kanban]").count()) === 0);
     // The Slices list their issues from the highest number to the lowest (src/lib/issue-order.ts); a week keeps the
     // order the scrum master gave it on the Roadmap (roadmap_items.sort_order). Both read on the real sprint.
     const descending = (refs) => refs.every((r, i) => i === 0 || r <= refs[i - 1]);
@@ -195,7 +197,7 @@ async function seedSprintIssue() {
     await page.getByRole("link", { name: "Roadmap", exact: true }).click();
     await page.waitForURL("**/roadmap");
     await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
-    await page.getByText("[TESTE] item semeado (sem dono)").waitFor({ timeout: 15000 });
+    await page.getByText("[TESTE] item semeado (sem dono)").first().waitFor({ timeout: 15000 });
     const shownWeeks = await page.locator('[data-drag-scroll="x"] > [data-lane-id]').evaluateAll((lanes) =>
       lanes.map((lane) => [...lane.querySelectorAll("[data-item-id]")].map((card) => card.dataset.itemId))
     );
@@ -208,11 +210,17 @@ async function seedSprintIssue() {
       JSON.stringify(weekOrders)
     );
     const count = (loc) => loc.count();
-    expect("roadmap: dev can READ the board (fixture items visible)", (await count(page.getByText("[TESTE] item do scrum master"))) === 1);
+    expect("roadmap: dev can READ the board: a fixture item shows in its week and in the Kanban's Open",
+      (await count(page.locator('[data-lane-id="zz-test-sprint"]').getByText("[TESTE] item do scrum master"))) === 1 &&
+        (await count(page.locator('[data-kanban-column="open"]').getByText("[TESTE] item do scrum master"))) === 1);
+    expect("roadmap: dev sees the Kanban with Open and Done, and no Roadmap section of type lanes",
+      (await count(page.locator('[data-kanban-column="open"]'))) === 1 && (await count(page.locator('[data-kanban-column="done"]'))) === 1 &&
+        (await count(page.locator('[data-lane-id="zz-test-a"], [data-lane-id^="tipo-"]'))) === 0);
     expect("roadmap: no '+ Novo item'", (await count(page.getByRole("button", { name: "+ Novo item" }))) === 0);
     expect("roadmap: the same read-refresh Sincronizar button as the Dashboard", (await count(page.getByRole("button", { name: /^Sincronizar$/ }))) === 1);
     expect("roadmap: no Editar / + nota / Excluir", (await count(page.getByRole("button", { name: /^(Editar|\+ nota|Excluir)$/ }))) === 0);
-    expect("roadmap: no card is draggable", (await count(page.locator('div[draggable="true"]'))) === 0);
+    expect("roadmap: no card is draggable, in the weeks or in Open", (await count(page.locator('div[draggable="true"]'))) === 0 &&
+      (await count(page.locator('[data-kanban-column="open"] div[draggable="false"]'))) > 0);
     expect("roadmap: no 'Mover para' select", (await count(page.locator('select[aria-label="Mover para"]'))) === 0);
     expect("roadmap: plain subtitle (no 'defina o que entra e quando')", (await count(page.getByText(/defina o que entra/))) === 0);
     expect("roadmap: the user area never shows 'Entrar'", (await count(page.locator('a[href="/login"]'))) === 0);

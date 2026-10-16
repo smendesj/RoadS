@@ -1,6 +1,6 @@
 import "server-only";
 
-// Live sync for the Dashboard's Kanban section, pulled straight from
+// Live sync for the Roadmap's Kanban (Open and Done) and the Dashboard's Sprint block, pulled straight from
 // Essencis-Labs GitHub Project #7's "Status" field (Open/Development/Blocker/Done). The same
 // sync also keeps the Roadmap in step with the repo's open issues (reconcileRoadmapWithIssues).
 // Requires GITHUB_TOKEN (server-only) — a classic PAT with `repo`+`read:org`+`project`,
@@ -8,8 +8,9 @@ import "server-only";
 // fine-grained PAT from the wrong account reads back as "no_access", not an error).
 // Without a token at all, this reports "not_configured" instead of faking success.
 //
-// Each column lists its cards in the order of the Project's "Kanban" view (kanbanSort in board.ts), and counts the
-// ELIMS cards it leaves out, so the Dashboard can say why its totals are smaller than GitHub's.
+// Each column lists its cards in the order of the Project's "Kanban" view (kanbanSort in board.ts), each card with
+// when its Status last changed (the Roadmap's Done shows the last 14 days of it), and counts the ELIMS cards it
+// leaves out, so the Roadmap can say why its totals are smaller than GitHub's.
 //
 // Runs from two places: the Dashboard and the Roadmap (via syncBoardAsViewer in actions/sync.ts, which checks
 // the caller has a real session first): their buttons, the pages keeping themselves in step on their own, and a
@@ -30,14 +31,15 @@ import "server-only";
 // session) and writes with the admin client.
 
 import { createGeoCloudIssue, GEOCLOUD_REPO, setProjectStatus } from "@/lib/github";
-import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
+import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
-import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
+import { laneForLabels, releaseLane, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { planRotation, rotationIsIdle } from "@/lib/sprint-rotation";
 import { todayInSaoPaulo, weekLanes } from "@/lib/sprint-week";
 import { parseSlices, slicesQuery } from "@/lib/slices";
 import { planTitleFollow, type TitleCandidate } from "@/lib/title-follow";
+import { removeClosedBeforeTheirWeek as runClosedRemoval, type ClosedRemovalDeps } from "@/lib/closed-before-week";
 import { currentSprintIn, currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
 import { EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintSyncDeps, type SprintSyncSummary } from "@/lib/sprint-status-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -58,7 +60,8 @@ export type SyncColumn = {
   title: string;
   tone: "neutral" | "brand" | "red" | "green";
   count: number;
-  items: { title: string; ref: string; url: string }[];
+  /** Each card with `statusAt`, when its Status last changed on the Project (absent in a snapshot older than 16/10/2026). */
+  items: BoardCard[];
   /** Cards of this Status on Project #7 from other repositories (ELIMS), which the board never shows: only counted. */
   elims?: number;
 };
@@ -167,7 +170,7 @@ async function runBoardSync(): Promise<SyncResult> {
         };
       }
 
-      // The order of the Kanban view on GitHub, so the Dashboard lists each column the same way.
+      // The order of the Kanban view on GitHub, so the Roadmap's Kanban lists each column the same way.
       if (page === 0) sort = kanbanSort(project.views?.nodes);
       for (const [status, n] of otherRepoCounts(project.items.nodes)) elims.set(status, (elims.get(status) ?? 0) + n);
 
@@ -215,7 +218,7 @@ async function runBoardSync(): Promise<SyncResult> {
       try {
         const run = await syncSprintWithProject(token, cards, await readOpen());
         sprint = run.summary;
-        // What was written to the Project shows on the Dashboard now, not only after the next sync.
+        // What was written to the Project shows on the Roadmap and the Dashboard now, not only after the next sync.
         // A card moved by a write takes its place by the view's sort (with no sort, it stays last: GitHub's manual order
         // can't be known for it until the next sync).
         columns = withStatusWrites(columns, run.written).map((c) => ({
@@ -457,8 +460,8 @@ async function syncSprintWithProject(
     const card = cards.get(number);
     const issue = openByNumber.get(number);
     if (!number || !card || !issue) continue;
-    // Back to the block of its type label, or of the type it is stored with.
-    const releaseTo = [laneForLabels(issue.labels), item.tipo ? `tipo-${item.tipo}` : null].find((lane) => lane && groupIds.has(lane)) ?? null;
+    // Back to the block of its type label, or of the type it is stored with (the same rule a drop on the Kanban uses).
+    const releaseTo = releaseLane(issue.labels, item.tipo, groupIds);
     byId.set(item.id, { laneId: item.lane_id, sortOrder: item.sort_order, title: item.title, url: item.github_issue_url!, number });
     candidates.push({
       id: item.id,
@@ -530,8 +533,9 @@ async function syncSprintWithProject(
 // Roadmap, ready to be dragged into a sprint. A GeoCloud item without an issue (its creation on save
 // failed) gets one now, Open on Project #7. An open issue
 // the Roadmap doesn't have yet lands in the group of its type label (laneForLabels). A Roadmap item whose issue is
-// no longer open, or no longer on the project, leaves the Roadmap, but only from the groups: an item already in a sprint stays
-// there as delivered. Items without an issue, or with an issue from another repo, are left alone.
+// no longer open, or no longer on the project, leaves the Roadmap from the groups; one whose issue was closed before its
+// week came leaves that week too (src/lib/closed-before-week.ts); in the current week or one that ended it stays as
+// delivered. Items without an issue, or with an issue from another repo, are left alone.
 // Each add/remove is queued in roadmap_sync_queue so FrontlightS writes it into ROADMAP.md.
 const ISSUE_URL = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
 
@@ -637,6 +641,10 @@ async function reconcileRoadmapWithIssues(
     if (error) throw error;
   }
 
+  // An issue closed before its week came leaves that week (src/lib/closed-before-week.ts); the current week keeps its
+  // closed ones until the turn of the week takes them out as done.
+  const leftEarly = await removeClosedBeforeTheirWeek(admin, lanes ?? [], items ?? [], openNumbers, onProject);
+
   // Items in a type block follow their issue's type label to the block it names (an item the scrum
   // master dragged into any other group is left where it was put).
   for (const item of items ?? []) {
@@ -688,5 +696,48 @@ async function reconcileRoadmapWithIssues(
     );
   }
 
-  return { added: missing.length, removed: closed.length, issuesCreated, untyped: notYet.length - missing.length };
+  return { added: missing.length, removed: closed.length + leftEarly, issuesCreated, untyped: notYet.length - missing.length };
+}
+
+// Plugs the database into the removal of the items whose issue was closed before their week came (the sequence and
+// its order live in removeClosedBeforeTheirWeek, src/lib/closed-before-week.ts, where they run under test).
+async function removeClosedBeforeTheirWeek(
+  admin: Admin,
+  lanes: { id: string; kind: string; start_date: string | null; end_date: string | null }[],
+  items: { id: string; lane_id: string; title: string; github_issue_url: string | null }[],
+  open: Set<number>,
+  onProject: Set<number>
+): Promise<number> {
+  const deps: ClosedRemovalDeps = {
+    queue: async (row) => {
+      const { data, error } = await admin.from("roadmap_sync_queue").insert(row).select("id").single();
+      if (error) throw error;
+      return data.id;
+    },
+    deleteFromWeek: async (id, laneId) => {
+      const { data, error } = await admin.from("roadmap_items").delete().eq("id", id).eq("lane_id", laneId).select("id");
+      if (error) throw error;
+      return !!data?.length;
+    },
+    unqueue: async (queueId) => {
+      await admin.from("roadmap_sync_queue").delete().eq("id", queueId);
+    },
+    deleteFutureWeekIfEmpty: (laneId) => deleteFutureWeekIfEmpty(admin, laneId),
+  };
+  return runClosedRemoval(
+    {
+      today: todayInSaoPaulo(new Date()),
+      lanes,
+      items: items.map((it) => ({
+        id: it.id,
+        laneId: it.lane_id,
+        number: Number(it.github_issue_url?.match(ISSUE_URL)?.[1]) || null,
+        title: it.title,
+        githubIssueUrl: it.github_issue_url,
+      })),
+      open,
+      onProject,
+    },
+    deps
+  );
 }

@@ -2,8 +2,10 @@
 
 import { getLatestBoardSnapshot } from "@/lib/actions/sync";
 import { withIssueStatus } from "@/lib/board";
-import { createGeoCloudIssue } from "@/lib/github";
+import type { SyncColumn } from "@/lib/board-sync";
+import { createGeoCloudIssue, readIssueLabels } from "@/lib/github";
 import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
+import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { currentSprintLane } from "@/lib/current-sprint";
 import { sprintLanesByDate, todayInSaoPaulo, weekDates, weekLanes, weekTitle } from "@/lib/sprint-week";
@@ -26,6 +28,7 @@ type ItemRow = {
   tipo?: RoadmapItem["tipo"];
   stack?: string | null;
   created_by: string | null;
+  created_at?: string;
   notes: { id: string; author_role: string; created_at: string; body: string }[];
 };
 
@@ -42,6 +45,7 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
     tipo: row.tipo ?? null,
     stack: row.stack ?? null,
     createdBy: row.created_by,
+    ...(row.created_at ? { createdAt: row.created_at } : {}),
     notes: row.notes
       .slice()
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -54,7 +58,10 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
   };
 }
 
-export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: RoadmapGroup[] }> {
+// The Roadmap: its weeks, the type lanes (where an item with no week sits: no screen shows them as such, they feed
+// the Kanban's Open), and the Project #7 snapshot's columns with the ELIMS cards counted, which the Kanban is built
+// from on the screen (src/lib/kanban.ts), so a card dragged to a week is labelled with it at once.
+export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: RoadmapGroup[]; columns: SyncColumn[] }> {
   const supabase = await createServerSupabase();
 
   const { data: lanes, error: lanesError } = await supabase
@@ -65,7 +72,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
 
   const { data: items, error: itemsError } = await supabase
     .from("roadmap_items")
-    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, notes:item_notes(id, author_role, created_at, body)")
+    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, created_at, notes:item_notes(id, author_role, created_at, body)")
     .order("sort_order")
     .order("id");
   if (itemsError) throw itemsError;
@@ -87,6 +94,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
     id: week.id,
     title: weekTitle(week.start, week.end),
     dates: weekDates(week.start, week.end),
+    start: week.start,
     current: week.current,
     ...(week.virtual ? { virtual: true } : {}),
     items: (byLane.get(week.id) ?? []).map(toRoadmapItem),
@@ -95,6 +103,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
     id: lane.id,
     title: lane.start_date && lane.end_date ? weekTitle(lane.start_date, lane.end_date) : lane.title,
     dates: lane.start_date && lane.end_date ? weekDates(lane.start_date, lane.end_date) : "",
+    ...(lane.start_date ? { start: lane.start_date } : {}),
     current: false,
     items: (byLane.get(lane.id) ?? []).map(toRoadmapItem),
   }));
@@ -103,9 +112,10 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
     .filter((lane) => lane.kind !== "sprint")
     .map((lane) => ({ id: lane.id, title: lane.title, items: (byLane.get(lane.id) ?? []).map(toRoadmapItem) }));
 
-  // The sprints show which items are already delivered, from the same Project #7 snapshot the Dashboard reads.
+  // The sprints show which items are already delivered, from the same Project #7 snapshot the Kanban and the Dashboard read.
   const snapshot = await getLatestBoardSnapshot();
-  return { lanes: withIssueStatus(sprintLanes, snapshot?.columns ?? []), groups };
+  const columns = snapshot?.columns ?? [];
+  return { lanes: withIssueStatus(sprintLanes, columns), groups, columns };
 }
 
 async function requireScrumMasterActor(): Promise<{ userId: string; realRole: "scrum_master" | "admin" }> {
@@ -127,11 +137,13 @@ async function queueChange(itemId: string | null, action: "add" | "modify" | "re
   await supabase.from("roadmap_sync_queue").insert({ item_id: itemId, action, payload });
 }
 
-export async function createRoadmapItem(laneId: string): Promise<RoadmapItem> {
+// "+ Novo item", in the Kanban's Open: the one place an item is born, with no week, in a type lane (NEW_ITEM_LANE). The
+// lane is the server's to choose, never the caller's; planning it is dragging it to a week afterwards.
+export async function createRoadmapItem(): Promise<RoadmapItem> {
   const { userId } = await requireScrumMasterActor();
   const supabase = await createServerSupabase();
 
-  // A new item goes last in its week, where the screen shows it.
+  const laneId = NEW_ITEM_LANE;
   const sortOrder = await nextOrderIn(supabase, laneId);
   const { data, error } = await supabase
     .from("roadmap_items")
@@ -145,7 +157,7 @@ export async function createRoadmapItem(laneId: string): Promise<RoadmapItem> {
       effort: "Medium",
       created_by: userId,
     })
-    .select("id, lane_id, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by")
+    .select("id, lane_id, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, created_at")
     .single();
   if (error) throw error;
 
@@ -319,6 +331,7 @@ async function dropFutureWeekIfEmpty(laneId: string) {
 // anywhere else in a week ("Mover para" too), last. Its own number is written under the actor's session (the RLS of
 // 0007 is the backstop); the neighbours it renumbers may be anyone's, so the server writes them with the service role,
 // only now that the item is known to be the actor's to move (src/lib/week-order.ts). A group keeps its own order.
+// Dropped on the Kanban (KANBAN), the item is unplanned into a type lane the server picks (unplanItem).
 export async function moveRoadmapItemLane(itemId: string, targetLaneId: string, beforeId: string | null = null): Promise<void> {
   const actor = await requireScrumMasterActor();
   if (beforeId !== null && typeof beforeId !== "string") throw new Error("invalid_before");
@@ -326,6 +339,12 @@ export async function moveRoadmapItemLane(itemId: string, targetLaneId: string, 
 
   const access = await getItemAccess(itemId, actor);
   if (!access.canModify) throw new Error("forbidden");
+
+  // Dropped on the Kanban: the item leaves its week for a type lane the server picks.
+  if (targetLaneId === KANBAN) {
+    if (beforeId !== null) throw new Error("invalid_before");
+    return unplanItem(itemId, access.item);
+  }
 
   // Dropped on a week the database doesn't have yet (the empty one at the end of the row, or a gap): the server
   // creates its lane, only now that the item is known to be the actor's to move, with the service role (lanes are
@@ -370,5 +389,47 @@ export async function moveRoadmapItemLane(itemId: string, targetLaneId: string, 
   await queueChange(itemId, "move_lane", moveLanePayload({ from, to, title: access.item.title, origin: "app" }));
 
   // The future week it left, now empty, stops existing; the current week stays even when empty.
+  await dropFutureWeekIfEmpty(from);
+}
+
+const GEOCLOUD_ISSUE = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
+
+// Unplanning: a card dropped from a week on the Kanban. Called only after getItemAccess said the item is the actor's to
+// move. The item goes to the type lane of its issue's type label (read from GitHub now; with no token, or when the read
+// fails, there is none), else of the type it is stored with, else where "+ Novo item" puts one (unplanLane in
+// src/lib/issue-lane.ts, the rule the sync releases an item by). The server picks it, never the caller. An item already
+// in no week stays. Queued like any move, with both lanes; the future week it left, now empty, goes. Leaving the
+// current week, the Project goes back to Open through the sprint sync (only with its write switch on); leaving a week
+// to come, nothing changes on the Project.
+async function unplanItem(itemId: string, item: { lane_id: string; title: string; github_issue_url: string | null; tipo: Tipo | null }): Promise<void> {
+  const supabase = await createServerSupabase();
+  const { data: lanes, error: lanesError } = await supabase.from("lanes").select("id, kind");
+  if (lanesError) throw lanesError;
+  const from = item.lane_id;
+  if ((lanes ?? []).find((l) => l.id === from)?.kind !== "sprint") return;
+
+  const number = Number(item.github_issue_url?.match(GEOCLOUD_ISSUE)?.[1]) || null;
+  const token = process.env.GITHUB_TOKEN;
+  const labels =
+    token && number
+      ? await readIssueLabels(token, number).catch((e) => {
+          console.error("readIssueLabels failed; unplanning by the stored type", e);
+          return [];
+        })
+      : [];
+  const to = unplanLane(labels, item.tipo, new Set((lanes ?? []).filter((l) => l.kind === "group").map((l) => l.id)));
+  // A type lane keeps its items by issue number, the way the sync files them; an item with no issue goes last.
+  const sortOrder = number ?? (await nextOrderIn(supabase, to));
+
+  const { data: moved, error } = await supabase
+    .from("roadmap_items")
+    .update({ lane_id: to, sort_order: sortOrder, updated_at: new Date().toISOString() })
+    .eq("id", itemId)
+    .eq("lane_id", from)
+    .select("id");
+  if (error) throw error;
+  if (!moved?.length) throw new Error("forbidden");
+
+  await queueChange(itemId, "move_lane", moveLanePayload({ from, to, title: item.title, origin: "app" }));
   await dropFutureWeekIfEmpty(from);
 }
