@@ -280,6 +280,15 @@ async function seedBoard() {
       await page.mouse.move(t.x + t.width / 2, t.y + 12, { steps: 25 });
       await page.mouse.up();
     };
+    // The answer to the move a drop saves: the server action's POST that carries the item and the lane it goes to. The
+    // action writes the item and its queue row before it answers, so the database is read once the answer is in (a
+    // fixed wait loses the race when the move waits behind another action of the page).
+    const moveAnswer = (itemId, laneId) =>
+      page.waitForResponse((r) => {
+        const q = r.request();
+        const body = q.postData() ?? "";
+        return q.method() === "POST" && !!q.headers()["next-action"] && body.includes(itemId) && body.includes(`"${laneId}"`);
+      }, { timeout: 20000 });
     const testWeek = page.locator('[data-lane-id="zz-test-sprint"]');
     const laneOfItem = async (id) => (await svc.from("roadmap_items").select("lane_id").eq("id", id).single()).data.lane_id;
     // How a card of Open looks: its week label (null when it has none), its opacity, and how many copies Open has.
@@ -297,8 +306,11 @@ async function seedBoard() {
       const planned = await inOpen("[TESTE] criado e editado pelo SM");
       expect("plan: before it is planned, the new item's card in Open has no week label and is not faded", planned.copies === 1 && planned.label === null && planned.opacity === "1", JSON.stringify(planned));
     }
-    await mouseDrag(openCard("[TESTE] criado e editado pelo SM"), testWeek);
-    await sleep(2000);
+    {
+      const saved = moveAnswer(created.id, "zz-test-sprint");
+      await mouseDrag(openCard("[TESTE] criado e editado pelo SM"), testWeek);
+      await saved;
+    }
     expect("plan (drag from Open): own item is saved in the test week", (await laneOfItem(created.id)) === "zz-test-sprint", await laneOfItem(created.id));
     {
       const planned = await inOpen("[TESTE] criado e editado pelo SM");
@@ -323,8 +335,11 @@ async function seedBoard() {
       const before = await inOpen("[TESTE] item semeado (sem dono)");
       expect("plan: an item with no week is in Open with no label, not faded, and in no week", before.label === null && before.opacity === "1" && (await count(seeded)) === 0, JSON.stringify(before));
     }
-    await mouseDrag(openCard("[TESTE] item semeado (sem dono)"), testWeek);
-    await sleep(2000);
+    {
+      const saved = moveAnswer(L.ids.seeded, "zz-test-sprint");
+      await mouseDrag(openCard("[TESTE] item semeado (sem dono)"), testWeek);
+      await saved;
+    }
     expect("plan (drag from Open): the seeded item can be planned too", (await laneOfItem(L.ids.seeded)) === "zz-test-sprint", await laneOfItem(L.ids.seeded));
     expect("plan: its move is queued with the lane it came from", (await moveQueue(L.ids.seeded)).some((r) => r?.lane_id === "zz-test-sprint" && r?.from_lane_id === "zz-test-b"));
 
