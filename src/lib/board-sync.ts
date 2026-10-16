@@ -40,6 +40,7 @@ import { planTitleFollow, type TitleCandidate } from "@/lib/title-follow";
 import { currentSprintIn, currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
 import { EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintSyncDeps, type SprintSyncSummary } from "@/lib/sprint-status-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { deleteFutureWeekIfEmpty } from "@/lib/week-lanes";
 import { brakedSync } from "@/lib/sync-claim";
 import { SYNC_COOLDOWN_MS } from "@/lib/sync-cooldown";
 import { NEW_ITEM_TITLE } from "@/lib/types";
@@ -497,6 +498,8 @@ async function syncSprintWithProject(
     pull: async ({ id }) => {
       const lane = await sprintLane();
       await move(id, lane, await nextSprintOrder(admin, lane), "moved to Development on the Project");
+      // Pulled out of a future week it was the last item of: that week stops existing (src/lib/week-lanes.ts).
+      await deleteFutureWeekIfEmpty(admin, byId.get(id)!.laneId).catch((e) => console.error("deleteFutureWeekIfEmpty failed; the empty week stays", e));
     },
     release: async ({ id, to }) => move(id, to, byId.get(id)!.number, "taken out of Development on the Project"),
     writeStatus: (projectItemId, status) => setProjectStatus(token, projectItemId, status),

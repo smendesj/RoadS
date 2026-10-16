@@ -9,6 +9,7 @@ import { currentSprintIn, currentSprintLane } from "@/lib/current-sprint";
 import { sprintLanesByDate, weekDates, weekTitle } from "@/lib/sprint-week";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
+import { deleteFutureWeekIfEmpty, ensureWeekLane } from "@/lib/week-lanes";
 import { NEW_ITEM_TITLE, type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 
 type ItemRow = {
@@ -282,6 +283,18 @@ export async function deleteRoadmapItem(itemId: string): Promise<void> {
   const { data: deleted, error } = await supabase.from("roadmap_items").delete().eq("id", itemId).select("id");
   if (error) throw error;
   if (!deleted?.length) throw new Error("forbidden");
+
+  await dropFutureWeekIfEmpty(access.item.lane_id);
+}
+
+// A future week that an authorized move or delete has just left empty stops existing (src/lib/week-lanes.ts). The
+// item's change is already saved, so a failure here doesn't undo it: the week stays, empty, until it empties again.
+async function dropFutureWeekIfEmpty(laneId: string) {
+  try {
+    await deleteFutureWeekIfEmpty(createAdminClient(), laneId);
+  } catch (e) {
+    console.error("deleteFutureWeekIfEmpty failed; the empty week stays", e);
+  }
 }
 
 export async function moveRoadmapItemLane(itemId: string, targetLaneId: string): Promise<void> {
@@ -291,14 +304,29 @@ export async function moveRoadmapItemLane(itemId: string, targetLaneId: string):
   const access = await getItemAccess(itemId, actor);
   if (!access.canModify) throw new Error("forbidden");
 
+  // Dropped on a week the database doesn't have yet (the empty one at the end of the row, or a gap): the server
+  // creates its lane, only now that the item is known to be the actor's to move, with the service role (lanes are
+  // the admin's to write). The id is checked there: a real Monday, not before this week, within the horizon.
+  const { data: existing, error: laneError } = await supabase.from("lanes").select("id").eq("id", targetLaneId).maybeSingle();
+  if (laneError) throw laneError;
+  const admin = createAdminClient();
+  const created = existing ? null : await ensureWeekLane(admin, targetLaneId);
+  const to = existing?.id ?? created!;
+
   const { data: moved, error } = await supabase
     .from("roadmap_items")
-    .update({ lane_id: targetLaneId, updated_at: new Date().toISOString() })
+    .update({ lane_id: to, updated_at: new Date().toISOString() })
     .eq("id", itemId)
     .select("id");
-  if (error) throw error;
-  if (!moved?.length) throw new Error("forbidden");
+  if (error || !moved?.length) {
+    if (created) await deleteFutureWeekIfEmpty(admin, created).catch(() => {});
+    if (error) throw error;
+    throw new Error("forbidden");
+  }
 
   // Both lanes, like every other move_lane: Frontlights writes the departure into the sprint the item left.
-  await queueChange(itemId, "move_lane", moveLanePayload({ from: access.item.lane_id, to: targetLaneId, title: access.item.title, origin: "app" }));
+  await queueChange(itemId, "move_lane", moveLanePayload({ from: access.item.lane_id, to, title: access.item.title, origin: "app" }));
+
+  // The future week it left, now empty, stops existing; the current week stays even when empty.
+  if (access.item.lane_id !== to) await dropFutureWeekIfEmpty(access.item.lane_id);
 }
