@@ -116,6 +116,24 @@ async function ensureFixtures() {
   return ids;
 }
 
+// The weeks as the server tells them (src/lib/sprint-week.ts), counted here on their own: today in São Paulo, the
+// current week's Monday (the next one on a weekend), a week's id by its Monday, and the week after the last real one
+// in the database (the empty one at the end of the Roadmap's row). A week lane a suite makes the app create is
+// recorded in `createdWeeks`, and the cleanup deletes it if it is still empty (never with an item in it).
+const createdWeeks = new Set();
+const addDays = (date, n) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+const weekId = (monday) => `sprint-${monday.slice(8, 10)}-${monday.slice(5, 7)}-${monday.slice(0, 4)}`;
+async function weeks() {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  const weekday = new Date(`${today}T12:00:00Z`).getUTCDay();
+  const monday = weekday === 6 ? addDays(today, 2) : weekday === 0 ? addDays(today, 1) : addDays(today, 1 - weekday);
+  const { data } = await svc.from("lanes").select("id, start_date, end_date").eq("kind", "sprint");
+  const real = (data ?? []).filter((l) => l.start_date && l.end_date && !l.id.startsWith("zz-test-"));
+  const holds = (day) => real.some((l) => l.start_date <= day && day <= l.end_date);
+  const last = real.map((l) => l.start_date).filter((d) => d >= monday).sort().pop() ?? monday;
+  return { today, monday, real, holds, trailing: addDays(last, 7) };
+}
+
 // A native HTML5 drop only lands on screen: grow the window to the whole page, so source and target are both
 // visible however long the Roadmap gets (its blocks grow with the real board).
 async function fitWholePage(page, width = 1440) {
@@ -154,6 +172,7 @@ async function cleanup(since) {
   await svc.from("lanes").delete().like("id", "zz-test-%");
   await svc.from("roadmap_items").delete().in("created_by", [ids.admin, ids.sm].filter(Boolean));
   await svc.from("roadmap_items").delete().like("title", "[TESTE]%");
+  for (const id of createdWeeks) await svc.rpc("delete_week_lane_if_empty", { p_lane_id: id });
   await svc.from("profiles").update({ role: "admin", must_reset_password: false }).eq("id", ids.admin);
   await svc.from("profiles").update({ role: "scrum_master", must_reset_password: false }).eq("id", ids.sm);
   await svc.from("profiles").update({ role: "dev", must_reset_password: false }).eq("id", ids.dev);
@@ -172,4 +191,4 @@ async function ageSnapshot() {
 }
 
 module.exports = {
-  ageSnapshot, E2E_UA, cleanupCalls, BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, scrub, fitWholePage };
+  ageSnapshot, addDays, createdWeeks, weekId, weeks, E2E_UA, cleanupCalls, BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, scrub, fitWholePage };
