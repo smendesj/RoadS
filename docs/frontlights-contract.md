@@ -95,7 +95,8 @@ O Roadmap como está agora, só leitura: não consome nada e nunca dá ack. É o
   seguinte); não há campo para ela.
 - **Quais semanas.** `sprints[]` traz só: a semana atual, sempre (mesmo vazia e mesmo sem lane); toda lane de semana
   com item, passada ou futura; e toda semana citada por uma mudança ainda sem ack, com a lane guardada vazia ou já
-  apagada. Citar é ter o id em `payload.lane_id` de um `add`, `remove` ou `move_lane`, ou em
+  apagada (uma lane posicional nunca é apagada ao esvaziar: fica guardada, vazia, até a 0031 traduzi-la). Citar é
+  ter o id em `payload.lane_id` de um `add`, `remove` ou `move_lane`, ou em
   `payload.from_lane_id` de um `move_lane`. Uma lane guardada vazia que não é a atual nem é citada fica de fora. A
   semana citada cuja lane já não existe (a futura que perdeu o último item, porque a lane é apagada quando esvazia,
   e a que a virada encerrou e apagou) vem com `items: []`, `sprintId` e `laneId` iguais ao id citado, `startDate`
