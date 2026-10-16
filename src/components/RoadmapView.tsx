@@ -148,7 +148,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
     moveRoadmapItemLane(itemId, targetLaneId)
       .then(() => {
         counters.inFlight--;
-        if (from && touchesCurrentSprint(from, targetLaneId)) syncAfterMove();
+        if (from && touchesCurrentSprint(from, targetLaneId, currentWeek)) syncAfterMove();
       })
       .catch((e) => {
         counters.inFlight--;
@@ -156,6 +156,9 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
         reloadBoard();
       });
   }
+
+  // The week whose dates hold today (the server tells which); null when the board has no lane for it.
+  const currentWeek = lanes.find((l) => l.current)?.id ?? null;
 
   const moveTargets = [
     ...lanes.map((l) => ({ id: l.id, label: `${l.title} (${l.items.length}/${MAX_ITEMS_PER_SPRINT})` })),
@@ -247,27 +250,26 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
           <p className="text-sm text-rs-text-soft">Carregando...</p>
         ) : (
           <>
-            {/* Below lg the three sprints sit in a swipeable row, each close to one screen wide. */}
+            {/* The sprints are weeks, in date order, titled by their dates; the current one is tinted. Below lg they sit
+                in a swipeable row, each close to one screen wide. */}
             <div data-drag-scroll="x" className="-mx-4 flex snap-x snap-mandatory items-start gap-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:grid lg:grid-cols-3 lg:gap-5 lg:overflow-visible lg:px-0 lg:pb-0">
               {lanes.map((lane) => (
                 <div
                   key={lane.id}
                   data-lane-id={lane.id}
+                  aria-current={lane.current ? "date" : undefined}
                   data-drop-target={touchDrag.over === lane.id ? "" : undefined}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault();
                     moveToLane(lane.id);
                   }}
-                  className={`flex min-h-[240px] w-[85%] max-w-[380px] shrink-0 snap-start flex-col gap-3 rounded-2xl border bg-rs-lane p-4 lg:w-auto lg:max-w-none ${
-                    touchDrag.over === lane.id ? "border-rs-brand" : "border-rs-border"
-                  }`}
+                  className={`flex min-h-[240px] w-[85%] max-w-[380px] shrink-0 snap-start flex-col gap-3 rounded-2xl border p-4 lg:w-auto lg:max-w-none ${
+                    lane.current ? "bg-rs-brand-soft" : "bg-rs-lane"
+                  } ${touchDrag.over === lane.id ? "border-rs-brand" : "border-rs-border"}`}
                 >
                   <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-extrabold text-rs-text">{lane.title}</div>
-                      <div className="text-[11px] text-rs-text-faint">{lane.dates}</div>
-                    </div>
+                    <div className={`text-sm font-extrabold ${lane.current ? "text-rs-brand-text" : "text-rs-text"}`}>{lane.title}</div>
                     <span
                       className={
                         lane.items.length > MAX_ITEMS_PER_SPRINT

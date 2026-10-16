@@ -47,10 +47,13 @@ export type RoadmapItem = {
   notes: Note[];
 };
 
+/** A sprint lane: a week, titled by its dates ("Sprint 12–16/10"). */
 export type Lane = {
   id: string;
   title: string;
   dates: string;
+  /** The week whose dates hold today in São Paulo (src/lib/sprint-week.ts); at most one lane has it. */
+  current?: boolean;
   items: RoadmapItem[];
 };
 

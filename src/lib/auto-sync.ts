@@ -4,7 +4,6 @@
 // a sync the page starts by itself reaches GitHub at most every AUTO_SYNC_MS, however many tabs are open, so the
 // free tiers of Vercel and Supabase are never at stake; the button and a move keep the shorter SYNC_COOLDOWN_MS.
 
-import { CURRENT_SPRINT } from "./sprint-status-sync.ts";
 import { SYNC_COOLDOWN_MS } from "./sync-cooldown.ts";
 
 export const AUTO_SYNC_MS = 5 * 60_000;
@@ -15,8 +14,9 @@ export function cooldownFor({ auto = false }: { auto?: boolean }): number {
   return auto ? AUTO_SYNC_MS : SYNC_COOLDOWN_MS;
 }
 
-export function touchesCurrentSprint(from: string, to: string): boolean {
-  return from !== to && (from === CURRENT_SPRINT || to === CURRENT_SPRINT);
+/** `current` is the id of this week's lane on the board (src/lib/sprint-week.ts), null when the board has none. */
+export function touchesCurrentSprint(from: string, to: string, current: string | null): boolean {
+  return current !== null && from !== to && (from === current || to === current);
 }
 
 /**

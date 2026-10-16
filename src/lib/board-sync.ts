@@ -37,7 +37,8 @@ import { moveLanePayload } from "@/lib/move-payload";
 import { planRotation, SPRINT_IDS, type SprintDates, type SprintId } from "@/lib/sprint-rotation";
 import { parseSlices, slicesQuery } from "@/lib/slices";
 import { planTitleFollow, type TitleCandidate } from "@/lib/title-follow";
-import { CURRENT_SPRINT, EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintSyncDeps, type SprintSyncSummary } from "@/lib/sprint-status-sync";
+import { currentSprintIn, currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
+import { EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintSyncDeps, type SprintSyncSummary } from "@/lib/sprint-status-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { brakedSync } from "@/lib/sync-claim";
 import { SYNC_COOLDOWN_MS } from "@/lib/sync-cooldown";
@@ -259,6 +260,9 @@ async function runBoardSync(): Promise<SyncResult> {
 // Moves the three sprints up a step once the current one's last day has passed (see sprint-rotation.ts).
 // The guarded update of "atual" claims the rotation, so the cron and a button sync running together
 // can't rotate twice. Every removal and move is queued so FrontlightS mirrors it.
+// It only works on the three positional lanes, which exist until migration 0030 turns them into weeks named by
+// their date; after it, it finds none of them and does nothing, and it never creates a lane. The week-by-date
+// rotation (only the week that ended moves) replaces it in the next slice.
 async function rotateSprints(doneUrls: Set<string>): Promise<void> {
   const admin = createAdminClient();
   const [{ data: lanes, error: lanesError }, { data: items, error: itemsError }] = await Promise.all([
@@ -374,7 +378,10 @@ async function followIssueTitles(open: OpenIssue[]): Promise<number> {
 // The Dashboard's Slices: every sub-issue of the issues in the current sprint, stored with the board snapshot.
 async function syncSlices(token: string): Promise<void> {
   const admin = createAdminClient();
-  const { data: items, error } = await admin.from("roadmap_items").select("github_issue_url").eq("lane_id", CURRENT_SPRINT).order("sort_order");
+  const current = await currentSprintLane(admin);
+  const { data: items, error } = current
+    ? await admin.from("roadmap_items").select("github_issue_url").eq("lane_id", current.id).order("sort_order")
+    : { data: [], error: null };
   if (error) throw error;
   const numbers = (items ?? []).map((it) => Number(it.github_issue_url?.match(ISSUE_URL)?.[1])).filter((n) => n > 0);
 
@@ -396,8 +403,8 @@ async function syncSlices(token: string): Promise<void> {
 }
 
 // Where the next item goes in the current sprint: after the last one there.
-async function nextSprintOrder(admin: Admin): Promise<number> {
-  const { data, error } = await admin.from("roadmap_items").select("sort_order").eq("lane_id", CURRENT_SPRINT).order("sort_order", { ascending: false }).limit(1);
+async function nextSprintOrder(admin: Admin, laneId: string): Promise<number> {
+  const { data, error } = await admin.from("roadmap_items").select("sort_order").eq("lane_id", laneId).order("sort_order", { ascending: false }).limit(1);
   if (error) throw error;
   return (data?.[0]?.sort_order ?? -1) + 1;
 }
@@ -412,11 +419,16 @@ async function syncSprintWithProject(
 ): Promise<{ summary: SprintSyncSummary; written: { url: string; status: "Open" | "Development" }[] }> {
   const admin = createAdminClient();
   const [{ data: lanes, error: lanesError }, { data: items, error: itemsError }] = await Promise.all([
-    admin.from("lanes").select("id, kind"),
+    admin.from("lanes").select("id, kind, start_date, end_date"),
     admin.from("roadmap_items").select("id, lane_id, sort_order, title, tipo, github_issue_url, created_at"),
   ]);
   if (lanesError) throw lanesError;
   if (itemsError) throw itemsError;
+
+  // The week told by the calendar; a pull into it creates its lane when this week has none yet.
+  const current = currentSprintIn(lanes ?? [])?.id ?? null;
+  let pullInto: Promise<string> | null = null;
+  const sprintLane = () => (pullInto ??= ensureCurrentSprintLane(admin));
 
   const groupIds = new Set((lanes ?? []).filter((l) => l.kind === "group").map((l) => l.id));
   const openByNumber = new Map(open.map((i) => [i.number, i]));
@@ -482,12 +494,15 @@ async function syncSprintWithProject(
       }
       return found;
     },
-    pull: async ({ id }) => move(id, CURRENT_SPRINT, await nextSprintOrder(admin), "moved to Development on the Project"),
+    pull: async ({ id }) => {
+      const lane = await sprintLane();
+      await move(id, lane, await nextSprintOrder(admin, lane), "moved to Development on the Project");
+    },
     release: async ({ id, to }) => move(id, to, byId.get(id)!.number, "taken out of Development on the Project"),
     writeStatus: (projectItemId, status) => setProjectStatus(token, projectItemId, status),
   };
 
-  const { summary, written } = await runSprintSync(candidates, deps);
+  const { summary, written } = await runSprintSync(candidates, deps, current);
   return { summary, written: written.map((w) => ({ url: byId.get(w.id)!.url, status: w.status })) };
 }
 
@@ -544,12 +559,13 @@ async function reconcileRoadmapWithIssues(
 
   const admin = createAdminClient();
   const [{ data: lanes, error: lanesError }, { data: items, error: itemsError }] = await Promise.all([
-    admin.from("lanes").select("id, kind"),
+    admin.from("lanes").select("id, kind, start_date, end_date"),
     admin.from("roadmap_items").select("id, lane_id, title, description, produto, prioridade, effort, tipo, stack, github_issue_url"),
   ]);
   if (lanesError) throw lanesError;
   if (itemsError) throw itemsError;
   const groupIds = new Set((lanes ?? []).filter((l) => l.kind === "group").map((l) => l.id));
+  const current = currentSprintIn(lanes ?? [])?.id ?? null;
 
   const onRoadmap = new Set<number>();
   const closed: { id: string; lane_id: string; title: string; github_issue_url: string }[] = [];
@@ -566,7 +582,7 @@ async function reconcileRoadmapWithIssues(
           tipo: isTipo(item.tipo) ? item.tipo : "feature",
           stack: isStack(item.stack) ? item.stack : "Geral",
         },
-        item.lane_id === CURRENT_SPRINT ? "Development" : "Open"
+        item.lane_id === current ? "Development" : "Open"
       );
       const { error } = await admin
         .from("roadmap_items")
@@ -622,14 +638,16 @@ async function reconcileRoadmapWithIssues(
   const notYet = open.filter((i) => !onRoadmap.has(i.number)).sort((a, b) => a.number - b.number);
   const missing = notYet.filter((i) => laneForLabels(i.labels));
   if (missing.length) {
-    // An issue already in Development on the Project comes straight into the current sprint, after what is there.
-    let nextInSprint = await nextSprintOrder(admin);
+    // An issue already in Development on the Project comes straight into the current sprint, after what is there
+    // (its lane is created when this week has none yet).
     const inSprint = (i: OpenIssue) => cards.get(i.number)?.status === "Development";
+    const sprintLane = missing.some(inSprint) ? await ensureCurrentSprintLane(admin) : null;
+    let nextInSprint = sprintLane ? await nextSprintOrder(admin, sprintLane) : 0;
     const { data: inserted, error } = await admin
       .from("roadmap_items")
       .insert(
         missing.map((i) => ({
-          lane_id: inSprint(i) ? CURRENT_SPRINT : laneForLabels(i.labels)!,
+          lane_id: inSprint(i) && sprintLane ? sprintLane : laneForLabels(i.labels)!,
           sort_order: inSprint(i) ? nextInSprint++ : i.number,
           title: i.title,
           description: summarize(i.body),

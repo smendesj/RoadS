@@ -2,8 +2,14 @@
 // (contract schemaVersion 1). Pure on purpose: the route reads the rows and this builds the answer,
 // so the contract is testable without a database. It never carries a sync marker or an ack: those
 // belong to /pending-changes and /ack, and this stays read-only.
+//
+// A sprint is a week (src/lib/sprint-week.ts): its sprintId is `sprint-DD-MM-AAAA`, from its Monday, and its title
+// is its dates. laneId is the lane's own id, the same once migration 0030 has renamed the lanes; until then a
+// positional lane (`atual`…) is a week like the others, told by its dates. The weeks come in the order of their
+// start date. The e2e fixture lanes (`zz-test-*`) and what is in them never reach Frontlights.
 
 import { statusByUrl, type StatusKey } from "./board.ts";
+import { isTestLane, sprintIdFor, sprintLanesByDate, weekTitle } from "./sprint-week.ts";
 import { MAX_ITEMS_PER_SPRINT } from "./types.ts";
 
 type SnapshotColumn = { key: string; items: { url: string }[] };
@@ -104,34 +110,41 @@ export function buildRoadmapState(input: {
     };
   };
 
+  const lanes = input.lanes.filter((l) => !isTestLane(l.id));
+  const sprintLanes = sprintLanesByDate(lanes.filter((l) => l.kind === "sprint"));
   const sprints: RoadmapState["sprints"] = [];
-  const groups: RoadmapState["groups"] = [];
-  for (const lane of [...input.lanes].sort((a, b) => a.sort_order - b.sort_order)) {
+  for (const lane of sprintLanes) {
+    // A sprint with no dates has nothing to name a folder or a file after, so it is left out.
+    if (!lane.start_date || !lane.end_date) continue;
     const items = (itemsByLane.get(lane.id) ?? []).map(toItem);
-    if (lane.kind === "sprint") {
-      // A sprint with no dates has nothing to name a folder or a file after, so it is left out.
-      if (!lane.start_date || !lane.end_date) continue;
-      sprints.push({
-        sprintId: `sprint-${lane.start_date}`,
-        laneId: lane.id,
-        title: lane.title,
-        startDate: lane.start_date,
-        endDate: lane.end_date,
-        items: items.map((it, i) => ({ ...it, overLimit: i >= MAX_ITEMS_PER_SPRINT })),
-      });
-    } else {
-      groups.push({ laneId: lane.id, title: lane.title, items });
-    }
+    sprints.push({
+      sprintId: sprintIdFor(lane.start_date),
+      laneId: lane.id,
+      title: weekTitle(lane.start_date, lane.end_date),
+      startDate: lane.start_date,
+      endDate: lane.end_date,
+      items: items.map((it, i) => ({ ...it, overLimit: i >= MAX_ITEMS_PER_SPRINT })),
+    });
   }
+  const groups: RoadmapState["groups"] = [...lanes]
+    .filter((l) => l.kind !== "sprint")
+    .sort((a, b) => a.sort_order - b.sort_order)
+    .map((lane) => ({ laneId: lane.id, title: lane.title, items: (itemsByLane.get(lane.id) ?? []).map(toItem) }));
 
+  // A removal names its lane as it was then; a sprint lane is named by its week, like sprints[].sprintId.
+  const weekOf = new Map(sprintLanes.filter((l) => l.start_date).map((l) => [l.id, sprintIdFor(l.start_date!)]));
   const removedPending = input.pending
     .filter((c) => c.action === "remove")
-    .map((c) => ({
-      changeId: c.id,
-      itemId: null as null,
-      title: typeof c.payload?.title === "string" ? c.payload.title : "",
-      laneId: typeof c.payload?.lane_id === "string" ? c.payload.lane_id : null,
-    }));
+    .map((c) => {
+      const laneId = typeof c.payload?.lane_id === "string" ? c.payload.lane_id : null;
+      return {
+        changeId: c.id,
+        itemId: null as null,
+        title: typeof c.payload?.title === "string" ? c.payload.title : "",
+        laneId: laneId === null ? null : weekOf.get(laneId) ?? laneId,
+      };
+    })
+    .filter((r) => !(r.laneId && isTestLane(r.laneId)));
 
   return {
     schemaVersion: 1,

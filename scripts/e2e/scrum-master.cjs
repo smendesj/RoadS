@@ -28,8 +28,33 @@ const { BASE, expect, sleep, svc } = L;
     expect("roadmap: subtitle offers 'defina o que entra e quando'", (await count(page.getByText(/defina o que entra e quando/))) === 1);
     expect("roadmap: 'Sincronizar' is available", (await count(page.getByRole("button", { name: /^Sincronizar$/ }))) === 1);
     const novoButtons = await count(page.getByRole("button", { name: "+ Novo item" }));
-    expect("roadmap: a '+ Novo item' in every sprint lane (3 real + 1 test)", novoButtons === 4, String(novoButtons));
+    const sprintLaneCount = await count(page.locator('[data-drag-scroll="x"] > [data-lane-id]'));
+    expect("roadmap: a '+ Novo item' in every sprint lane (the real weeks + 1 test)", sprintLaneCount >= 2 && novoButtons === sprintLaneCount, `${novoButtons}/${sprintLaneCount}`);
     expect("roadmap: no 'Config' for a Scrum Master", (await count(page.getByRole("link", { name: "Config", exact: true }))) === 0);
+
+    // ------------------------------------------------ the sprints are weeks, titled by their dates, the current one tinted
+    {
+      const row = page.locator('[data-drag-scroll="x"] > [data-lane-id]');
+      const shown = await row.evaluateAll((lanes) => lanes.map((l) => ({ id: l.dataset.laneId, title: l.querySelector(":scope > div > div")?.textContent?.trim() ?? "", current: l.getAttribute("aria-current") })));
+      const { data: sprintRows } = await svc.from("lanes").select("id, start_date, end_date").eq("kind", "sprint");
+      const byDate = (sprintRows ?? []).filter((l) => l.start_date && l.end_date).sort((a, b) => a.start_date.localeCompare(b.start_date));
+      expect("weeks: the sprint row goes in the order of the weeks' start dates", JSON.stringify(shown.map((l) => l.id)) === JSON.stringify(byDate.map((l) => l.id)), JSON.stringify(shown.map((l) => l.id)));
+      expect("weeks: every sprint is titled by its dates only (\"Sprint 12–16/10\")", shown.every((l) => /^Sprint \d{2}(\/\d{2})?–\d{2}\/\d{2}$/.test(l.title)), JSON.stringify(shown.map((l) => l.title)));
+      expect("weeks: the test week of 07 to 11/12 reads 'Sprint 07–11/12'", shown.find((l) => l.id === "zz-test-sprint")?.title === "Sprint 07–11/12");
+      expect("weeks: no positional title is left on the Roadmap", (await count(page.getByText(/^(Sprint atual|Próxima sprint|Sprint seguinte)$/))) === 0);
+      const current = shown.filter((l) => l.current === "date");
+      const lane = byDate.find((l) => l.id === current[0]?.id);
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+      const daysAhead = lane ? (Date.parse(lane.start_date) - Date.parse(today)) / 86400000 : NaN;
+      // Holds today, or (on a Saturday or Sunday, when the week that ended is over) starts on the next Monday.
+      const holdsToday = !!lane && ((lane.start_date <= today && today <= lane.end_date) || (daysAhead >= 1 && daysAhead <= 2 && [0, 6].includes(new Date(`${today}T12:00:00Z`).getUTCDay())));
+      expect("weeks: exactly one week is tinted as the current one, and it is the week of today in São Paulo", current.length === 1 && holdsToday, JSON.stringify({ current, today }));
+      expect("weeks: the e2e test week is never the current one", !current.some((l) => l.id.startsWith("zz-test-")));
+      // Holds only after migration 0030 is pushed: before it the database still has atual/proxima/terceira.
+      const dateId = (l) => `sprint-${l.start_date.slice(8, 10)}-${l.start_date.slice(5, 7)}-${l.start_date.slice(0, 4)}`;
+      const realWeeks = byDate.filter((l) => !l.id.startsWith("zz-test-"));
+      expect("weeks (after 0030): every real sprint lane is named sprint-DD-MM-AAAA by its Monday", realWeeks.length > 0 && realWeeks.every((l) => l.id === dateId(l)), JSON.stringify(realWeeks.map((l) => l.id)));
+    }
 
     const card = (title) => page.locator("div[draggable]", { hasText: title }).first();
     const btn = (c, name) => c.getByRole("button", { name, exact: true });
@@ -42,7 +67,7 @@ const { BASE, expect, sleep, svc } = L;
     expect("admin's item: not draggable and no controls at all", (await adminItem.getAttribute("draggable")) === "false" && (await count(adminItem.getByRole("button"))) === 0);
 
     // ------------------------------------------------ create through the UI, in the test sprint lane only
-    const sprint = page.getByText("[TESTE] sprint (apagar)", { exact: true }).locator("xpath=ancestor::div[contains(@class,'min-h-')][1]");
+    const sprint = page.locator('[data-lane-id="zz-test-sprint"]');
     await sprint.getByRole("button", { name: "+ Novo item" }).click();
     // The one card in edit mode (not draggable while editing, has the note field): stable while its inputs change.
     const fresh = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
@@ -129,10 +154,8 @@ const { BASE, expect, sleep, svc } = L;
     await page.setViewportSize({ width: 800, height: 1000 });
     await sleep(800);
     const moveSelect = page.locator("div[draggable]", { hasText: "[TESTE] criado e editado pelo SM" }).first().locator('select[aria-label="Mover para"]');
-    await moveSelect.selectOption({ label: "[TESTE] sprint (apagar) (2/4)" }).catch(async () => {
-      const options = await moveSelect.locator("option").allInnerTexts();
-      await moveSelect.selectOption({ index: options.findIndex((o) => /\[TESTE\] sprint/.test(o)) });
-    });
+    // By the lane's id: the option reads only the week's dates ("Sprint 07–11/12 (2/4)").
+    await moveSelect.selectOption("zz-test-sprint");
     await sleep(2000);
     const { data: movedBack } = await svc.from("roadmap_items").select("lane_id").eq("id", created.id).single();
     expect("move (select, phone width): own item goes back to the test sprint", movedBack.lane_id === "zz-test-sprint", movedBack.lane_id);

@@ -75,7 +75,7 @@ O Roadmap como está agora, só leitura: não consome nada e nunca dá ack. É o
   "maxSprintItems": 4,
   "timezone": "America/Sao_Paulo",
   "sprints": [
-    { "sprintId": "sprint-2026-03-02", "laneId": "…", "title": "…", "startDate": "2026-03-02", "endDate": "2026-03-06", "items": [ /* item + overLimit */ ] }
+    { "sprintId": "sprint-02-03-2026", "laneId": "sprint-02-03-2026", "title": "Sprint 02–06/03", "startDate": "2026-03-02", "endDate": "2026-03-06", "items": [ /* item + overLimit */ ] }
   ],
   "groups": [ { "laneId": "…", "title": "…", "items": [ /* item */ ] } ],
   "removedPending": [ { "changeId": "…", "itemId": null, "title": "…", "laneId": "…" } ]
@@ -86,8 +86,14 @@ O Roadmap como está agora, só leitura: não consome nada e nunca dá ack. É o
   `githubIssueUrl` (ou `null`), `issueNumber` (ou `null`), `status` (seção 3), `done` (`status === "done"`),
   `updatedAt`, `pendingChangeIds` (as mudanças ainda sem ack que mexem nele). Um item de sprint traz também
   `overLimit`: `true` do quinto item em diante (`maxSprintItems` é 4).
-- `sprintId` é `sprint-` mais a data de início: **muda quando os sprints rodam**, no fim da semana. Um sprint sem
-  datas não aparece.
+- **Cada sprint é uma semana.** `sprintId` é `sprint-` mais a segunda-feira em `DD-MM-AAAA`
+  (`sprint-02-03-2026`) e não muda quando a semana vira. `laneId` é o id da lane, que é o mesmo `sprint-DD-MM-AAAA`
+  (enquanto o banco ainda tiver as lanes posicionais de antes da migração 0030, `laneId` é o id dela, `atual`,
+  `proxima` ou `terceira`, e o `sprintId` já vem pela data). `title` são só as datas (`"Sprint 02–06/03"`).
+  `sprints[]` traz quantas semanas houver, na ordem da data de início, nunca do texto do id. Um sprint sem datas
+  não aparece. A semana atual é a que contém hoje no fuso de `timezone` (no fim de semana, a que começa na segunda
+  seguinte); não há campo para ela.
+- `removedPending[].laneId` de um item que saiu de uma sprint também vem como `sprint-DD-MM-AAAA`.
 - `snapshotSyncedAt` é `null` enquanto o quadro nunca foi sincronizado; então todo `status` é `none`.
 - Falha de leitura de qualquer tabela é `500`, nunca um Roadmap pela metade.
 
@@ -115,8 +121,9 @@ O que mudou e ainda não foi escrito nos arquivos. Quem monta: `src/lib/frontlig
   **Um `move_lane` com `origin` `"project"` é escrito nos arquivos `.md` como qualquer outro e nunca deve ser
   aplicado de volta ao Project:** é de lá que ele veio. O plugin não escreve no Project em nenhum caso; quem
   mantém o sprint atual e o Project em acordo é só o RoadS (seção 4, `sync-board`).
-- Um `add` pode nomear `atual` em `lane_id`: é a issue que já estava em Development no Project quando entrou no
-  Roadmap, e entra direto no sprint atual.
+- Um `add` pode nomear a semana atual (`sprint-DD-MM-AAAA`) em `lane_id`: é a issue que já estava em Development no
+  Project quando entrou no Roadmap, e entra direto no sprint atual. `lane_id` e `from_lane_id` de uma sprint vêm
+  sempre por data; os que ainda estavam sem ack quando a migração 0030 rodou foram traduzidos por ela.
 - Um `modify` pode trazer `title` e `reason` `"title follows the issue on GitHub"`: a issue foi renomeada no GitHub
   e o título do item no Roadmap a acompanhou. É o `title` de `item` que vale para escrever o arquivo. O RoadS só
   acompanha uma **renomeação** (o título da issue mudou desde a última sincronização); um título que uma pessoa
@@ -157,17 +164,16 @@ resumo, nunca os cartões do quadro. Quem monta: `src/lib/frontlights/sync.ts`.
 - **`roadmap.retitled`** (opcional, número): quantos títulos do Roadmap acompanharam a renomeação da issue no
   GitHub nesta sincronização (cada um vira um `modify` com `title` na fila). Ausente quando nenhum.
 - **`roadmap.sprint`** (opcional, só contagens): o que a sincronização fez para manter o sprint atual do
-  Roadmap (a lane `atual`) e o Project em acordo. `pulled`: issues que o Project pôs no sprint atual;
+  Roadmap (a semana cujas datas contêm hoje) e o Project em acordo. `pulled`: issues que o Project pôs no sprint atual;
   `released`: issues que o Project tirou dele (voltaram ao seu bloco); `written`: Statuses que o RoadS escreveu
   no Project; `wouldWrite`: o que teria escrito com a escrita desligada; `failed`: moves ou escritas que
   falharam; `stuck`: issues que o Project tirou do sprint e que não tinham bloco para onde voltar (ficam onde
   estão). `error` (texto) aparece quando o passo todo falhou; as contagens vêm zeradas. O objeto não vem quando
   não havia cartão a julgar. Quem consome ignora o campo que não conhece, e a mudança é aditiva (seção 8).
 - **A regra do sprint é só do RoadS.** "No sprint atual do Roadmap" e "Status Development no Project" são o mesmo
-  fato; o Project não tem campo de sprint, então os próximos sprints (`proxima`, `terceira`) existem só no
-  Roadmap (Open no Project). Quando os dois lados discordam, vale quem mexeu por último: o horário que o GitHub
+  fato; o Project não tem campo de sprint, então as semanas seguintes existem só no Roadmap (Open no Project). Quando os dois lados discordam, vale quem mexeu por último: o horário que o GitHub
   guarda para o Status do cartão contra a linha `add`/`move_lane` mais nova do item na fila. Se o Project é o
-  mais recente, o RoadS move o item (para `atual`, ou de `atual` de volta ao seu bloco de tipo) e enfileira um
+  mais recente, o RoadS move o item (para a semana atual, criando a lane dela se faltar, ou dela de volta ao seu bloco de tipo) e enfileira um
   `move_lane` com as duas lanes (`origin` `"project"`); se o Roadmap é o mais recente, escreve o Status
   (Development ou Open) no Project. Só uma discordância é tratada, então uma escrita do RoadS nunca volta como
   mudança nova. Done e Blocker nunca são escritos nem movidos; só issues abertas do GeoCloud participam, nunca as
@@ -362,10 +368,10 @@ repositório, `roads-script/push` e `roads-script/attach`.
 
 | Rota | Regra (testada sem servidor) | Porta de entrada |
 | --- | --- | --- |
-| `roadmap-state` | `src/lib/frontlights/state.ts`, `src/lib/roadmap-state.ts` | `src/app/api/frontlights/roadmap-state/route.ts` |
+| `roadmap-state` | `src/lib/frontlights/state.ts`, `src/lib/roadmap-state.ts`, `src/lib/sprint-week.ts` (a semana: id, título, ordem e semana atual) | `src/app/api/frontlights/roadmap-state/route.ts` |
 | `pending-changes`, `ack` | `src/lib/frontlights/queue.ts` | `…/pending-changes/route.ts`, `…/ack/route.ts` |
 | `sync-board` | `src/lib/frontlights/sync.ts`, `src/lib/sync-summary.ts` | `…/sync-board/route.ts` |
-| sprint atual e Project em acordo (`roadmap.sprint`, `origin` do `move_lane`) | `src/lib/sprint-status-sync.ts` (a regra, testada sem servidor), `src/lib/board-sync.ts` (as portas reais), `src/lib/board.ts` (a leitura dos cartões) | o mesmo `sync-board`, o botão Sincronizar e o cron diário |
+| sprint atual e Project em acordo (`roadmap.sprint`, `origin` do `move_lane`) | `src/lib/sprint-status-sync.ts` (a regra, testada sem servidor), `src/lib/sprint-week.ts` (qual é a semana atual), `src/lib/board-sync.ts` (as portas reais), `src/lib/board.ts` (a leitura dos cartões) | o mesmo `sync-board`, o botão Sincronizar e o cron diário |
 | rotas do resumo | `src/lib/progress/ingest.ts`, `draft.ts`, `shot-upload.ts`, `attach.ts` | `…/progress-report/**/route.ts` |
 | fatos do GitHub (`facts.json`: família, `subIssues`, `slices`, `ignored.cut`) | `src/lib/progress/gh-client.ts`, `gh-facts.ts`, `gh-status.ts`, `src/lib/criteria.ts` (as caixas) | `scripts/progress/github.ts` (`gh-cli.ts`) |
 | versão, segredo, registro | `src/lib/frontlights/contract.ts`, `door.ts`, `calls.ts` | `src/lib/frontlights/doors.ts` |
@@ -417,3 +423,12 @@ repositório, `roads-script/push` e `roads-script/attach`.
   sprint sem sub-issues. Nenhum nome ou tipo de campo mudou e a `schemaVersion` segue 1. No e-mail, na visão semanal
   e na tela, "sub-issues" vira "partes" ("Concluído: N partes em M issues", "X de Y partes"), porque uma parte pode
   ser sub-issue ou caixa; o e-mail já enviado não muda, mas a tela monta o texto na hora e mostra a palavra nova.
+- **2026-10-16 (mudança de sentido, `schemaVersion` segue 1):** as sprints viram semanas com id pela data. Em
+  `roadmap-state`, `sprintId` e `laneId` passam a `sprint-DD-MM-AAAA` (a segunda-feira; antes, `sprintId` era
+  `sprint-AAAA-MM-DD` e `laneId` era `atual`, `proxima` ou `terceira`), `title` passa a ser só as datas, e
+  `sprints[]` traz N semanas na ordem da data. `removedPending[].laneId` de sprint e `lane_id`/`from_lane_id` na
+  fila de `pending-changes` também vêm por data; a migração 0030 traduziu as mudanças ainda sem ack. Pela seção 2
+  isto seria uma quebra; **por decisão do usuário no rollout, a `schemaVersion` continua 1** em `roadmap-state`,
+  `pending-changes` e `ack`, porque o Frontlights publicou antes a versão que aceita as duas formas (ids
+  posicionais e por data). O RoadS faz o `db push` da 0030 e o deploy depois disso. Nenhum campo foi tirado ou
+  renomeado.

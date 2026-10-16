@@ -5,16 +5,11 @@ import { withIssueStatus } from "@/lib/board";
 import { createGeoCloudIssue } from "@/lib/github";
 import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
 import { moveLanePayload } from "@/lib/move-payload";
-import { CURRENT_SPRINT } from "@/lib/sprint-status-sync";
+import { currentSprintIn, currentSprintLane } from "@/lib/current-sprint";
+import { sprintLanesByDate, weekDates, weekTitle } from "@/lib/sprint-week";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { NEW_ITEM_TITLE, type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
-
-function formatDateRange(start: string, end: string): string {
-  const [, sm, sd] = start.split("-");
-  const [, em, ed] = end.split("-");
-  return sm === em ? `${sd}–${ed}/${em}` : `${sd}/${sm}–${ed}/${em}`;
-}
 
 type ItemRow = {
   id: string;
@@ -78,21 +73,19 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
     byLane.set(it.lane_id, list);
   }
 
-  const sprintLanes: Lane[] = [];
-  const groups: RoadmapGroup[] = [];
-  for (const lane of lanes ?? []) {
-    const laneItems = (byLane.get(lane.id) ?? []).map(toRoadmapItem);
-    if (lane.kind === "sprint") {
-      sprintLanes.push({
-        id: lane.id,
-        title: lane.title,
-        dates: lane.start_date && lane.end_date ? formatDateRange(lane.start_date, lane.end_date) : "",
-        items: laneItems,
-      });
-    } else {
-      groups.push({ id: lane.id, title: lane.title, items: laneItems });
-    }
-  }
+  // The sprints are weeks (src/lib/sprint-week.ts): in the order of their start date, titled by their dates only,
+  // and the one whose dates hold today in São Paulo is the current one, whatever its id.
+  const current = currentSprintIn(lanes ?? []);
+  const sprintLanes: Lane[] = sprintLanesByDate((lanes ?? []).filter((lane) => lane.kind === "sprint")).map((lane) => ({
+    id: lane.id,
+    title: lane.start_date && lane.end_date ? weekTitle(lane.start_date, lane.end_date) : lane.title,
+    dates: lane.start_date && lane.end_date ? weekDates(lane.start_date, lane.end_date) : "",
+    current: lane.id === current?.id,
+    items: (byLane.get(lane.id) ?? []).map(toRoadmapItem),
+  }));
+  const groups: RoadmapGroup[] = (lanes ?? [])
+    .filter((lane) => lane.kind !== "sprint")
+    .map((lane) => ({ id: lane.id, title: lane.title, items: (byLane.get(lane.id) ?? []).map(toRoadmapItem) }));
 
   // The sprints show which items are already delivered, from the same Project #7 snapshot the Dashboard reads.
   const snapshot = await getLatestBoardSnapshot();
@@ -224,6 +217,8 @@ export async function saveRoadmapItemEdit(
     if (noteError) throw noteError;
   }
 
+  // Born in the current week, the issue is Development on the Project from the start (Open when that can't be read).
+  const current = await currentSprintLane(supabase).catch(() => null);
   const issue = await ensureIssue(
     itemId,
     {
@@ -235,8 +230,7 @@ export async function saveRoadmapItemEdit(
       tipo: input.content ? input.content.tipo : access.item.tipo ?? "feature",
       stack: input.content ? input.content.stack : access.item.stack ?? "Geral",
     },
-    // Born in the current sprint, the issue is Development on the Project from the start.
-    access.item.lane_id === CURRENT_SPRINT ? "Development" : "Open"
+    access.item.lane_id === current?.id ? "Development" : "Open"
   );
 
   await queueChange(itemId, "modify", {
