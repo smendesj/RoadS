@@ -39,11 +39,28 @@ async function seedSprintIssue() {
     ],
     boxes: SEED.boxes,
   };
-  const others = async () => ((await L.svc.from("board_sync_state").select("slices").eq("id", true).single()).data?.slices ?? []).filter((g) => g?.parent?.number !== SEED.number);
-  await L.svc.from("board_sync_state").update({ slices: [group, ...(await others())] }).eq("id", true);
+  // A failed read would write the snapshot back empty, and a failed write would leave the seed behind: both stop the run.
+  const others = async () => {
+    const { data, error } = await L.svc.from("board_sync_state").select("slices").eq("id", true).single();
+    if (error) throw error;
+    return (data?.slices ?? []).filter((g) => g?.parent?.number !== SEED.number);
+  };
+  const setSlices = async (slices) => {
+    const { error } = await L.svc.from("board_sync_state").update({ slices }).eq("id", true);
+    if (error) throw error;
+  };
+  await setSlices([group, ...(await others())]);
   return async () => {
-    await L.svc.from("board_sync_state").update({ slices: await others() }).eq("id", true);
-    await L.svc.from("roadmap_items").delete().eq("id", item.id);
+    // The item is taken out even when the snapshot can't be restored; the first failure is the one thrown.
+    const failures = [];
+    try {
+      await setSlices(await others());
+    } catch (e) {
+      failures.push(e);
+    }
+    const { error } = await L.svc.from("roadmap_items").delete().eq("id", item.id);
+    if (error) failures.push(error);
+    if (failures.length > 0) throw failures[0];
   };
 }
 
@@ -54,6 +71,7 @@ async function seedSprintIssue() {
   // The Dashboard's own sync and its button are checked past the brake, whatever production synced lately.
   const restoreSnapshot = await L.ageSnapshot();
   let unseed = async () => {};
+  let unseedFailed = false;
   try {
     unseed = await seedSprintIssue();
     const s = await L.newSession(browser, "dev");
@@ -247,10 +265,14 @@ async function seedSprintIssue() {
   } catch (e) {
     expect("run completed without an exception", false, L.scrub(e && e.message ? e.message : e).slice(0, 200));
   } finally {
-    await unseed().catch((e) => console.error("unseed failed:", L.scrub(e && e.message ? e.message : e)));
+    // A seed left behind fails the run, without counting as one of its checks.
+    await unseed().catch((e) => {
+      unseedFailed = true;
+      console.error("unseed failed:", L.scrub(e && e.message ? e.message : e));
+    });
     await restoreSnapshot();
     await browser.close();
     await L.cleanup(t0);
   }
-  process.exit(L.summary("DEV") ? 1 : 0);
+  process.exit(L.summary("DEV") || unseedFailed ? 1 : 0);
 })();
