@@ -746,6 +746,40 @@ async function seedBoard() {
         reloaded.copies === 1 && reloaded.label === null && (await count(page.locator(`[data-lane-id] [data-item-id="${created.id}"]`))) === 0, JSON.stringify(reloaded));
     }
 
+    // ------------------------------------------------ unplan by keyboard: "Mover para" → "Kanban (sem semana)"
+    // The same server action as the drop on Open, without a drag. Back in the test week first (the service role, like the
+    // phone above), then below lg, where the select shows.
+    {
+      const title = "[TESTE] criado e editado pelo SM";
+      await svc.from("roadmap_items").update({ lane_id: "zz-test-sprint" }).eq("id", created.id);
+      await page.setViewportSize({ width: 800, height: 1000 });
+      await page.reload({ waitUntil: "load" });
+      await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+      await card(title).waitFor({ timeout: 15000 });
+      const options = (loc) => loc.locator('select[aria-label="Mover para"] option').evaluateAll((els) => els.map((el) => ({ value: el.value, text: el.textContent })));
+      const weekOptions = await options(card(title));
+      const openOptions = await options(openCard(title));
+      expect("unplan (Mover para): the card in a week offers 'Kanban (sem semana)'; its card in Open does not",
+        weekOptions.some((o) => o.value === "kanban" && o.text === "Kanban (sem semana)") && !openOptions.some((o) => o.value === "kanban"),
+        JSON.stringify({ weekOptions, openOptions }));
+
+      const since = new Date().toISOString();
+      const saved = moveAnswer(created.id, "kanban");
+      await card(title).locator('select[aria-label="Mover para"]').selectOption("kanban");
+      await saved;
+      expect("unplan (Mover para → Kanban): the item is saved in the bug type lane, out of the week", (await laneOfItem(created.id)) === "tipo-bug", await laneOfItem(created.id));
+      const { data: q } = await svc.from("roadmap_sync_queue").select("payload").eq("item_id", created.id).eq("action", "move_lane").gte("created_at", since);
+      const moves = (q ?? []).map((r) => r.payload);
+      expect("unplan (Mover para): one move_lane is queued, from the test week to the bug type lane, from the app",
+        moves.length === 1 && moves[0]?.from_lane_id === "zz-test-sprint" && moves[0]?.lane_id === "tipo-bug" && moves[0]?.origin === "app", JSON.stringify(moves));
+      await openCard(title).waitFor({ timeout: 15000 });
+      const shown = await inOpen(title);
+      expect("unplan (Mover para): the card is in Open with no week label, and in no week",
+        shown.copies === 1 && shown.label === null && (await count(card(title))) === 0, JSON.stringify(shown));
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await sleep(500);
+    }
+
     // ------------------------------------------------ delete: own yes, others no; from the card in Open
     const toDelete = openCard("[TESTE] criado e editado pelo SM");
     await btn(toDelete, "Excluir").click();

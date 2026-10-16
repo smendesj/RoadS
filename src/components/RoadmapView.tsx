@@ -143,10 +143,10 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   // there from the week it was planned in), and its card stays in Open, labelled with the week.
   // A card taken out of a week and dropped on the Kanban's Open (KANBAN) unplans the item: the server puts it in a type
   // lane of its choosing, so the screen shows it there at once by the item's stored type and then reads the board again.
-  // Its own card in Open dropped back on Open is no unplanning: nothing changes.
-  function moveToLane(targetLaneId: string, itemId: string | null = draggingId, beforeId: string | null = null) {
+  // Its own card in Open dropped back on Open is no unplanning: nothing changes. The "Mover para" select names the place
+  // its card is in (`taken`), since no drag says it.
+  function moveToLane(targetLaneId: string, itemId: string | null = draggingId, beforeId: string | null = null, taken: Place | null = dragFrom) {
     setDropBefore(null);
-    const taken = dragFrom;
     setDragFrom(null);
     if (!itemId) return;
     setDraggingId(null);
@@ -191,8 +191,9 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   // The week whose dates hold today (the server tells which); null when the board has no lane for it.
   const currentWeek = lanes.find((l) => l.current)?.id ?? null;
 
-  // A card goes to a week: the Kanban is no lane to pick.
+  // A card goes to a week; a card in a week can also go back to the Kanban, unplanned the way a drop on Open does it.
   const moveTargets = lanes.map((l) => ({ id: l.id, label: `${l.title} (${l.items.length}/${MAX_ITEMS_PER_SPRINT})` }));
+  const weekMoveTargets = [...moveTargets, { id: KANBAN, label: "Kanban (sem semana)" }];
 
   // "+ Novo item": born in a type lane, with no week, it shows first in the Kanban's Open, open for editing.
   function addItem() {
@@ -265,8 +266,8 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
       item,
       canDrag: canModifyItem(item),
       laneId,
-      moveTargets,
-      onMoveTo: (target: string) => moveToLane(target, item.id),
+      moveTargets: place === "week" ? weekMoveTargets : moveTargets,
+      onMoveTo: (target: string) => moveToLane(target, item.id, null, place),
       isEditing,
       editDraft: isEditing ? editDraft : null,
       onDragStart: (e: React.DragEvent<HTMLDivElement>) => {

@@ -47,7 +47,8 @@ export function ItemCard({
   weekLabel?: string | null;
   canDelete?: boolean;
   canEditContent?: boolean;
-  /** The lane the card is in and every lane it can go to — drive the "Mover para" select. */
+  /** The lane the card is in and every lane it can go to — drive the "Mover para" select. A card in a week also lists
+   *  "Kanban (sem semana)" (KANBAN), which unplans it like a drop on the Kanban's Open. */
   laneId?: string;
   moveTargets?: { id: string; label: string }[];
   onMoveTo?: (laneId: string) => void;
