@@ -92,13 +92,10 @@ export function buildRoadmapState(input: {
     pendingByItem.set(change.item_id, [...(pendingByItem.get(change.item_id) ?? []), change.id]);
   }
 
-  // The stored order, made stable: sort_order, then the issue number (an item with no issue after the numbered
-  // ones), then the id, so two reads of the same rows never hand two different positions.
+  // The stored order, made stable: sort_order, then the id, the same order the Roadmap and the Dashboard read from
+  // the database (getRoadmapBoard), so a tie left by older rows lands in one place on the screen and in the file.
   const itemOrder = (a: ItemRow, b: ItemRow): number => {
     if (a.sort_order !== b.sort_order) return a.sort_order - b.sort_order;
-    const na = issueNumberOf(a) ?? Infinity;
-    const nb = issueNumberOf(b) ?? Infinity;
-    if (na !== nb) return na < nb ? -1 : 1;
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   };
   const itemsByLane = new Map<string, ItemRow[]>();

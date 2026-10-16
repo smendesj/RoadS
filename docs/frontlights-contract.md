@@ -104,8 +104,8 @@ O Roadmap como está agora, só leitura: não consome nada e nunca dá ack. É o
   (ids posicionais, lanes de tipo, grupos e `zz-test-*` ficam de fora), e uma semana que já tem lane nunca vem
   duas vezes. As semanas vazias que só a tela mostra (a do fim, para receber o próximo arraste, e os buracos no
   meio) nunca entram.
-- **Ordem dos itens.** `position` segue o `sort_order` gravado; no empate, o número da issue (item sem issue
-  depois dos numerados) e, por fim, o id do item.
+- **Ordem dos itens.** `position` segue o `sort_order` gravado; no empate, o id do item, a mesma ordem em que o
+  Roadmap e o Dashboard mostram a semana.
 - `removedPending[].laneId` de um item que saiu de uma sprint também vem como `sprint-DD-MM-AAAA`.
 - `snapshotSyncedAt` é `null` enquanto o quadro nunca foi sincronizado; então todo `status` é `none`.
 - Falha de leitura de qualquer tabela é `500`, nunca um Roadmap pela metade.
@@ -443,7 +443,7 @@ repositório, `roads-script/push` e `roads-script/attach`.
   item e, até o ack, toda semana que uma mudança sem ack cita em `lane_id` ou `from_lane_id`, guardada vazia ou já
   apagada (a futura que perdeu o último item, a que a virada encerrou; sem lane, vem com `items: []`); uma lane
   vazia que não é a atual nem é citada fica de fora. O `sprintId` de uma semana é fixo e não anda com a virada. A
-  ordem dos itens desempata pelo número da issue e depois pelo id. `removedPending[].laneId` de sprint e
+  ordem dos itens desempata pelo id, como na tela. `removedPending[].laneId` de sprint e
   `lane_id`/`from_lane_id` na fila de `pending-changes` também vêm por data; a migração 0031 traduziu as mudanças
   ainda sem ack. Pela seção 2 isto seria uma quebra; **por decisão do usuário no rollout, a `schemaVersion`
   continua 1** em `roadmap-state`, `pending-changes` e `ack`, porque o Frontlights publicou antes a versão que
