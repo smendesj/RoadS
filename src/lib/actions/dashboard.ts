@@ -8,7 +8,6 @@
 import { getRoadmapBoard } from "@/lib/actions/roadmap";
 import { getLatestBoardSnapshot, syncBoardAsViewer } from "@/lib/actions/sync";
 import { statusByUrl } from "@/lib/board";
-import { newestIssueFirst } from "@/lib/issue-order";
 import type { SyncColumn } from "@/lib/board-sync";
 import { sliceBlocks, type SliceBlock, type SliceGroup } from "@/lib/slices";
 import { brakeMessage, roadmapChanged, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
@@ -49,8 +48,9 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null, sl
   // Issue URL -> Kanban status key, from the snapshot (every issue, per status).
   const statusOf = statusByUrl(columns);
 
+  // In the order the week was given on the Roadmap (sort_order), the same as the week and roadmap-state's position.
   const atual = lanes.find((l) => l.current);
-  const sprintItems = newestIssueFirst(atual?.items ?? [], (it) => it.number);
+  const sprintItems = atual?.items ?? [];
 
   const entregas = sprintItems.map((it) => {
     const key = it.url ? statusOf.get(it.url) : undefined;
