@@ -817,6 +817,7 @@ async function seedBoard() {
       console.error("unseed failed:", L.scrub(e && e.message ? e.message : e));
     });
     await browser.close();
+    await L.expectNoTestIssues(t0);
     await L.cleanup(t0);
   }
   process.exit(L.summary("SCRUM MASTER") || unseedFailed ? 1 : 0);
