@@ -5,13 +5,13 @@ const { BASE, expect, sleep, svc } = L;
 // with a "Bloqueada:" sub-item), one sub-issue still open and two closed in the conversion. The test server can't
 // read GitHub (GITHUB_TOKEN is empty), so its parts go straight into the board snapshot, the way the sync stores
 // them; the closed ones are kept there, as a snapshot written before 16/10/2026 has them, and must not show. The
-// numbers are far above any real issue, so nothing real is ever named.
+// numbers are far above any real issue (from L.SYNTHETIC_ISSUE_MIN up), so nothing real is ever named.
 const GEOCLOUD = "https://github.com/Essencis-Labs/GeoCloudAI/issues/";
 const SEED = {
-  number: 990001,
+  number: L.SYNTHETIC_ISSUE_MIN + 1,
   title: "[TESTE] issue com critérios",
-  open: { number: 990004, title: "[TESTE] sub-issue aberta" },
-  closed: [990002, 990003].map((number) => ({ number, title: `[TESTE] sub-issue fechada ${number}` })),
+  open: { number: L.SYNTHETIC_ISSUE_MIN + 4, title: "[TESTE] sub-issue aberta" },
+  closed: [L.SYNTHETIC_ISSUE_MIN + 2, L.SYNTHETIC_ISSUE_MIN + 3].map((number) => ({ number, title: `[TESTE] sub-issue fechada ${number}` })),
   boxes: [
     { text: "S1. [TESTE] primeira parte.", checked: true, blocked: null },
     { text: "S2. [TESTE] segunda parte.", checked: false, blocked: "falta a chave de teste" },

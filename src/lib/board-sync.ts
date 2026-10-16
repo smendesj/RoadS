@@ -31,6 +31,7 @@ import "server-only";
 // session) and writes with the admin client.
 
 import { createGeoCloudIssue, GEOCLOUD_REPO, setProjectStatus } from "@/lib/github";
+import { importableIssues, mayGetIssue } from "@/lib/test-data";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
 import { laneForLabels, releaseLane, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
@@ -46,7 +47,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteFutureWeekIfEmpty, deleteWeekIfEmpty, ensureWeekLane } from "@/lib/week-lanes";
 import { brakedSync } from "@/lib/sync-claim";
 import { SYNC_COOLDOWN_MS } from "@/lib/sync-cooldown";
-import { NEW_ITEM_TITLE } from "@/lib/types";
 
 const STATUS_META: Record<string, { key: string; tone: "neutral" | "brand" | "red" | "green" }> = {
   Open: { key: "open", tone: "neutral" },
@@ -531,7 +531,7 @@ async function syncSprintWithProject(
 
 // Every Roadmap item is a GitHub issue, and every open GeoCloud issue that is on Project #7 is on the
 // Roadmap, ready to be dragged into a sprint. A GeoCloud item without an issue (its creation on save
-// failed) gets one now, Open on Project #7. An open issue
+// failed) gets one now, Open on Project #7; test data (src/lib/test-data.ts) never does, and is never imported. An open issue
 // the Roadmap doesn't have yet lands in the group of its type label (laneForLabels). A Roadmap item whose issue is
 // no longer open, or no longer on the project, leaves the Roadmap from the groups; one whose issue was closed before its
 // week came leaves that week too (src/lib/closed-before-week.ts); in the current week or one that ended it stays as
@@ -595,7 +595,7 @@ async function reconcileRoadmapWithIssues(
   const closed: { id: string; lane_id: string; title: string; github_issue_url: string }[] = [];
   let issuesCreated = 0;
   for (const item of items ?? []) {
-    if (!item.github_issue_url && item.produto === "GeoCloud" && item.title !== NEW_ITEM_TITLE) {
+    if (item.produto === "GeoCloud" && mayGetIssue(item)) {
       const issue = await createGeoCloudIssue(
         token,
         {
@@ -663,7 +663,8 @@ async function reconcileRoadmapWithIssues(
   }
 
   // An issue with no type:* label stays out of the Roadmap until it gets one: there is no block for it.
-  const notYet = open.filter((i) => !onRoadmap.has(i.number)).sort((a, b) => a.number - b.number);
+  // Test data (src/lib/test-data.ts) is never imported, not even counted as untyped.
+  const notYet = importableIssues(open.filter((i) => !onRoadmap.has(i.number))).sort((a, b) => a.number - b.number);
   const missing = notYet.filter((i) => laneForLabels(i.labels));
   if (missing.length) {
     // An issue already in Development on the Project comes straight into the current sprint, after what is there

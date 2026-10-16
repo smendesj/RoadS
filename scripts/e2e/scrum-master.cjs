@@ -5,15 +5,15 @@ const { BASE, expect, sleep, svc } = L;
 // test server can't refresh (GITHUB_TOKEN is empty). Made-up cards go into it for the run, the way the sync stores
 // them, with when their Status changed: an issue Open on the Project that a Roadmap item holds, one no item holds, one
 // in Development (its item must stay out of Open), one that went to Done yesterday and one 30 days ago. The numbers
-// are far above any real issue, so nothing real is ever named; the returned function takes them out again, leaving
+// are far above any real issue (from L.SYNTHETIC_ISSUE_MIN up), so nothing real is ever named; the returned function takes them out again, leaving
 // the rest of the snapshot as the last real sync wrote it.
 const GEOCLOUD = "https://github.com/Essencis-Labs/GeoCloudAI/issues/";
 const BOARD = {
-  open: { number: 990101, title: "[TESTE] issue aberta no Project" },
-  orphan: { number: 990102, title: "[TESTE] issue aberta sem item" },
-  dev: { number: 990103, title: "[TESTE] issue em Development" },
-  doneRecent: { number: 990104, title: "[TESTE] issue concluída ontem" },
-  doneOld: { number: 990105, title: "[TESTE] issue concluída há 30 dias" },
+  open: { number: L.SYNTHETIC_ISSUE_MIN + 101, title: "[TESTE] issue aberta no Project" },
+  orphan: { number: L.SYNTHETIC_ISSUE_MIN + 102, title: "[TESTE] issue aberta sem item" },
+  dev: { number: L.SYNTHETIC_ISSUE_MIN + 103, title: "[TESTE] issue em Development" },
+  doneRecent: { number: L.SYNTHETIC_ISSUE_MIN + 104, title: "[TESTE] issue concluída ontem" },
+  doneOld: { number: L.SYNTHETIC_ISSUE_MIN + 105, title: "[TESTE] issue concluída há 30 dias" },
 };
 const DAY = 24 * 60 * 60 * 1000;
 async function seedBoard() {
@@ -817,6 +817,7 @@ async function seedBoard() {
       console.error("unseed failed:", L.scrub(e && e.message ? e.message : e));
     });
     await browser.close();
+    await L.expectNoTestIssues(t0);
     await L.cleanup(t0);
   }
   process.exit(L.summary("SCRUM MASTER") || unseedFailed ? 1 : 0);
