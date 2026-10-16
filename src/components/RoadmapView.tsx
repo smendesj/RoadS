@@ -13,6 +13,7 @@ import { useTouchDrag } from "@/lib/use-touch-drag";
 import { isStack } from "@/lib/issue-fields";
 import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { DONE_WINDOW_DAYS, kanbanColumns, type KanbanIssue } from "@/lib/kanban";
+import { columnClass, KANBAN_TABS, shownTab, type KanbanTab } from "@/lib/kanban-tabs";
 import { moveItem } from "@/lib/roadmap-move";
 import { brakeMessage, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
 import { badgeClass } from "@/lib/tones";
@@ -129,6 +130,8 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   const [editing, setEditing] = useState<{ id: string; place: Place } | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
   const [allDone, setAllDone] = useState(false);
+  // Below lg the Kanban shows one column at a time, picked by its tabs (src/lib/kanban-tabs.ts).
+  const [tab, setTab] = useState<KanbanTab>("open");
 
   const canEdit = activeView === "scrum_master";
 
@@ -297,6 +300,9 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   // A finger carrying a card taken out of a week is over the Kanban's Open.
   const unplanOver = touchDrag.over === KANBAN && dragFrom === "week";
   const done = allDone ? kanban.done.all : kanban.done.recent;
+  // A card taken out of a week, carried by mouse or finger, brings Open on screen, where it is dropped to unplan it.
+  const shown = shownTab(tab, dragFrom === "week" && (draggingId !== null || touchDrag.lifted !== null));
+  const counts: Record<KanbanTab, number> = { open: kanban.open.length, done: done.length };
   const elims = columns.reduce((sum, c) => sum + (c.elims ?? 0), 0);
 
   return (
@@ -326,11 +332,11 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
         ) : (
           <>
             {/* The sprints are weeks, in date order, titled by their dates; the current one is tinted. They sit in one row
-                that scrolls sideways at every width (below lg each week is close to one screen wide): from the current
-                week to the last one with an item, plus an empty one at the end. A week the database lacks (dashed) is
-                still a drop target: dropping an item on it creates it. On a wide screen the row stays at the top while
-                the Kanban under it scrolls, so a week is always in reach of a card dragged from Open; a long week
-                scrolls inside itself, so the row never covers the screen. */}
+                that scrolls sideways at every width (below lg each week is 85% of the screen wide, so the next one shows
+                at the edge): from the current week to the last one with an item, plus an empty one at the end. A week the
+                database lacks (dashed) is still a drop target: dropping an item on it creates it. On a wide screen the row
+                stays at the top while the Kanban under it scrolls, so a week is always in reach of a card dragged from
+                Open; a long week scrolls inside itself, so the row never covers the screen. */}
             <div data-weeks className="lg:sticky lg:top-0 lg:z-20 lg:-mx-10 lg:bg-rs-bg lg:px-10 lg:pb-3 lg:pt-3">
               <div data-drag-scroll="x" className="-mx-4 flex snap-x snap-mandatory items-start gap-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:snap-none lg:gap-5 lg:px-0">
                 {lanes.map((lane) => (
@@ -348,7 +354,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                       e.preventDefault();
                       moveToLane(lane.id);
                     }}
-                    className={`flex min-h-[240px] w-[85%] max-w-[380px] shrink-0 snap-start flex-col gap-3 rounded-2xl border p-4 lg:max-h-[45vh] lg:w-[340px] lg:max-w-none ${
+                    className={`flex min-h-[240px] w-[85vw] max-w-[380px] shrink-0 snap-start flex-col gap-3 rounded-2xl border p-4 lg:max-h-[45vh] lg:w-[340px] lg:max-w-none ${
                       lane.current ? "bg-rs-brand-soft" : "bg-rs-lane"
                     } ${lane.virtual ? "border-dashed" : ""} ${touchDrag.over === lane.id ? "border-rs-brand" : "border-rs-border"}`}
                   >
@@ -412,11 +418,32 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
 
             {/* The Kanban (src/lib/kanban.ts): Open, to plan, and Done, to look at. Blocker and Development stay out. Open is
                 where a card taken out of a week is dropped to unplan it (data-unplan-target, for a finger too); it is no
-                lane (no data-lane-id), and the server picks the type lane the item goes to. Unlike the weeks, it is no
-                scrolling area: a long word or link in a title or a description (an issue's body) breaks anywhere, or it
-                would widen the whole page on a narrow phone. */}
+                lane (no data-lane-id), and the server picks the type lane the item goes to. Below lg one column shows at a
+                time, picked by the tabs Open and Done (src/lib/kanban-tabs.ts); from lg both sit side by side and the tabs
+                are hidden. Unlike the weeks, it is no scrolling area: a long word or link in a title or a description (an
+                issue's body) breaks anywhere, or it would widen the whole page on a narrow phone. */}
             <div data-kanban className="grid grid-cols-1 items-start gap-4 [overflow-wrap:anywhere] lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-5">
+              <div role="tablist" aria-label="Kanban" className="flex gap-2 lg:hidden">
+                {KANBAN_TABS.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="tab"
+                    data-kanban-tab={t.id}
+                    aria-selected={shown === t.id}
+                    aria-controls={`kanban-${t.id}`}
+                    onClick={() => setTab(t.id)}
+                    className={`flex flex-1 items-center justify-center gap-2 rounded-[10px] border px-3 py-2 text-[13px] font-bold ${
+                      shown === t.id ? "border-rs-brand bg-rs-brand-soft text-rs-brand-text" : "border-rs-border bg-rs-card text-rs-text-soft"
+                    }`}
+                  >
+                    {t.label}
+                    <span className="text-[12px] text-rs-text-faint">{counts[t.id]}</span>
+                  </button>
+                ))}
+              </div>
               <section
+                id="kanban-open"
                 data-kanban-column="open"
                 data-unplan-target
                 data-drop-target={unplanOver ? "" : undefined}
@@ -429,7 +456,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                   e.preventDefault();
                   moveToLane(KANBAN);
                 }}
-                className={`flex min-w-0 flex-col gap-3 rounded-2xl border bg-rs-lane p-4 ${unplanOver ? "border-rs-brand" : "border-rs-border"}`}
+                className={`${columnClass("open", shown)} min-w-0 flex-col gap-3 rounded-2xl border bg-rs-lane p-4 ${unplanOver ? "border-rs-brand" : "border-rs-border"}`}
               >
                 <div className="flex items-center justify-between">
                   <span className={badgeClass("neutral")}>Open</span>
@@ -455,7 +482,11 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                 {kanban.open.length === 0 && <div className="p-2.5 text-[13px] text-rs-text-faint">Nenhuma issue aberta.</div>}
               </section>
 
-              <section data-kanban-column="done" className="flex min-w-0 flex-col gap-3 rounded-2xl border border-rs-border bg-rs-lane p-4">
+              <section
+                id="kanban-done"
+                data-kanban-column="done"
+                className={`${columnClass("done", shown)} min-w-0 flex-col gap-3 rounded-2xl border border-rs-border bg-rs-lane p-4`}
+              >
                 <div className="flex items-center justify-between">
                   <span className={badgeClass("green")}>Done</span>
                   <span className="text-[13px] font-bold text-rs-text-faint">{done.length}</span>
