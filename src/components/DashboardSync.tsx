@@ -122,77 +122,62 @@ export function KpiCards() {
   );
 }
 
+// The issues of the current sprint, each followed by its parts (src/lib/slices.ts): one indented row per box of its
+// acceptance criteria (no link: the boxes are ticked on the issue) and one per sub-issue still open, with its link.
+// "x de y" counts the parts by the rule of src/lib/parts.ts.
 export function SprintPanels() {
   const { model } = useSync();
   return (
     <div className="flex flex-col gap-1 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-7">
       <span className="mb-2 text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Sprint</span>
-      {model.entregas.map((e) => {
+      {model.entregas.map((e, i) => {
         const row = (
           <>
             <span className={badgeClass(e.tone) + " rounded-full whitespace-nowrap"}>{e.status}</span>
             <span className="order-first basis-full text-[15px] font-semibold text-rs-text sm:order-none sm:basis-0 sm:flex-grow">{e.title}</span>
             <span className="text-[13px] text-rs-text-faint">{e.effort}</span>
+            {e.parts && (
+              <span data-parts-count className="whitespace-nowrap text-[13px] text-rs-text-faint">
+                {e.parts.done} de {e.parts.total}
+              </span>
+            )}
             <span className="font-mono text-[13px] text-rs-brand-text">{e.ref}</span>
           </>
         );
-        return e.url ? (
-          <a key={e.title} href={e.url} target="_blank" rel="noreferrer" className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-bg py-3.5 sm:flex-nowrap">
-            {row}
-          </a>
-        ) : (
-          <div key={e.title} className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-bg py-3.5 sm:flex-nowrap">
-            {row}
-          </div>
+        const rowClass = "flex flex-wrap items-center gap-x-3.5 gap-y-1.5 py-3.5 sm:flex-nowrap";
+        return (
+          <section key={`${e.url ?? e.title}|${i}`} data-issue className="flex flex-col border-t border-rs-bg">
+            {e.url ? (
+              <a href={e.url} target="_blank" rel="noreferrer" className={rowClass}>
+                {row}
+              </a>
+            ) : (
+              <div className={rowClass}>{row}</div>
+            )}
+            {e.parts?.rows.map((part, j) => {
+              const partClass = "flex flex-wrap items-center gap-x-3 gap-y-1 py-2 pl-5 sm:flex-nowrap sm:pl-9";
+              const inner = (
+                <>
+                  <span className={badgeClass(part.tone) + " rounded-full whitespace-nowrap"}>{part.status}</span>
+                  <span className="order-first basis-full text-[14px] text-rs-text sm:order-none sm:basis-0 sm:flex-grow">{part.title}</span>
+                  {part.ref && <span className="font-mono text-[12px] text-rs-brand-text">{part.ref}</span>}
+                </>
+              );
+              return part.url ? (
+                <a key={`${part.url}|${j}`} data-part="sub-issue" href={part.url} target="_blank" rel="noreferrer" className={partClass + " hover:opacity-80"}>
+                  {inner}
+                </a>
+              ) : (
+                <div key={`box|${j}`} data-part="box" className={partClass}>
+                  {inner}
+                </div>
+              );
+            })}
+          </section>
         );
       })}
       {model.entregas.length === 0 && (
         <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">Nenhum item na sprint atual.</div>
-      )}
-    </div>
-  );
-}
-
-// The parts of every issue in the sprint (its sub-issues, or the boxes of its acceptance criteria), one block per issue. A sub-issue's status is the
-// one the Kanban shows for that issue, so a slice reads the same here and there.
-export function SlicesPanel() {
-  const { model } = useSync();
-  return (
-    <div className="flex flex-col gap-1 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-7">
-      <span className="mb-2 text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Slices</span>
-      {model.slices.map((block) => (
-        <section key={block.url} className="mb-2 flex flex-col last:mb-0">
-          <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-border py-3.5 sm:flex-nowrap">
-            <a
-              href={block.url}
-              target="_blank"
-              rel="noreferrer"
-              className="basis-full text-[15px] font-bold text-rs-text hover:underline sm:basis-0 sm:flex-grow"
-            >
-              {block.title}
-            </a>
-            <span className="text-[13px] text-rs-text-faint">
-              {block.done} de {block.total}
-            </span>
-            <span className="font-mono text-[13px] text-rs-brand-text">{block.ref}</span>
-          </div>
-          {block.rows.map((row, i) => (
-            <a
-              key={`${row.url}|${i}`}
-              href={row.url}
-              target="_blank"
-              rel="noreferrer"
-              className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 border-t border-rs-bg py-3.5 sm:flex-nowrap"
-            >
-              <span className={badgeClass(row.tone) + " rounded-full whitespace-nowrap"}>{row.status}</span>
-              <span className="order-first basis-full text-[15px] font-semibold text-rs-text sm:order-none sm:basis-0 sm:flex-grow">{row.title}</span>
-              <span className="font-mono text-[13px] text-rs-brand-text">{row.ref}</span>
-            </a>
-          ))}
-        </section>
-      ))}
-      {model.slices.length === 0 && (
-        <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">Nenhuma parte (sub-issue ou critério de aceitação) nas issues da sprint atual.</div>
       )}
     </div>
   );

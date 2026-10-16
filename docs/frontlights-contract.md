@@ -417,3 +417,8 @@ repositório, `roads-script/push` e `roads-script/attach`.
   sprint sem sub-issues. Nenhum nome ou tipo de campo mudou e a `schemaVersion` segue 1. No e-mail, na visão semanal
   e na tela, "sub-issues" vira "partes" ("Concluído: N partes em M issues", "X de Y partes"), porque uma parte pode
   ser sub-issue ou caixa; o e-mail já enviado não muda, mas a tela monta o texto na hora e mostra a palavra nova.
+- **2026-10-16 (só o Dashboard):** o bloco Slices do Dashboard deixa de existir e vira o quadro Sprint: cada issue da
+  sprint atual com as caixas dos critérios de aceitação logo abaixo, em linhas recuadas, e as sub-issues ainda
+  abertas como linha extra com link. As partes de uma issue passam a ser as caixas, sempre, mais as sub-issues
+  abertas; sub-issue fechada (concluída, não planejada ou duplicada) não aparece nem conta, e o "x de y" deixa de usar
+  o total de sub-issues do GitHub. Nenhuma rota, campo ou `schemaVersion` muda.
