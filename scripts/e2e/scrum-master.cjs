@@ -234,11 +234,13 @@ async function seedBoard() {
     await btn(own, "Editar").click();
     const editing = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
     await editing.locator("input").first().fill("[TESTE] criado e editado pelo SM");
+    // A bug: unplanned later, the item goes back to the bug type lane (the server picks it by the item's type).
+    await labelled(editing, "Tipo").selectOption("bug");
     await btn(editing, "Salvar").click();
     await page.getByText("[TESTE] criado e editado pelo SM").first().waitFor({ timeout: 15000 });
     await sleep(1000);
-    const { data: edited } = await svc.from("roadmap_items").select("title").eq("id", created.id).single();
-    expect("edit own item: the new title is saved", edited.title === "[TESTE] criado e editado pelo SM", edited.title);
+    const { data: edited } = await svc.from("roadmap_items").select("title, tipo").eq("id", created.id).single();
+    expect("edit own item: the new title and the type bug are saved", edited.title === "[TESTE] criado e editado pelo SM" && edited.tipo === "bug", JSON.stringify(edited));
 
     // ------------------------------------------------ seeded item: note + priority only, on its card in Open
     await btn(openCard("[TESTE] item semeado (sem dono)"), "+ nota").click();
@@ -562,6 +564,37 @@ async function seedBoard() {
       await svc.from("roadmap_items").update({ lane_id: "zz-test-sprint" }).eq("id", created.id);
       await page.reload({ waitUntil: "load" });
       await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+    }
+
+    // ------------------------------------------------ unplan: a card dragged from a week back to the Kanban
+    // The item is in the test week, its card labelled in Open. The server picks the type lane: the issue's type label,
+    // else the type the item is stored with (bug, saved above; the test server reads no labels, its token is empty).
+    await page.getByText("[TESTE] criado e editado pelo SM").first().waitFor({ timeout: 15000 });
+    await L.fitWholePage(page);
+    {
+      const title = "[TESTE] criado e editado pelo SM";
+      const since = new Date().toISOString();
+      // Its own card in Open, dropped back on Open, is no unplanning: only a card taken out of a week is.
+      await mouseDrag(openCard(title), open);
+      await sleep(2000);
+      expect("unplan: the Open card dropped back on Open changes nothing (the item stays in its week)", (await laneOfItem(created.id)) === "zz-test-sprint", await laneOfItem(created.id));
+
+      await mouseDrag(card(title), open);
+      await sleep(2500);
+      expect("unplan (drag from the week to the Kanban): the item is saved in the bug type lane, out of the week", (await laneOfItem(created.id)) === "tipo-bug", await laneOfItem(created.id));
+      const { data: q } = await svc.from("roadmap_sync_queue").select("payload").eq("item_id", created.id).eq("action", "move_lane").gte("created_at", since);
+      const moves = (q ?? []).map((r) => r.payload);
+      expect("unplan: one move_lane is queued, from the test week to the bug type lane, from the app",
+        moves.length === 1 && moves[0]?.from_lane_id === "zz-test-sprint" && moves[0]?.lane_id === "tipo-bug" && moves[0]?.origin === "app", JSON.stringify(moves));
+      const shown = await inOpen(title);
+      expect("unplan: the card stays in Open with no week label, not faded, and is in no week",
+        shown.copies === 1 && shown.label === null && shown.opacity === "1" && (await count(card(title))) === 0, JSON.stringify(shown));
+      await page.reload({ waitUntil: "load" });
+      await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+      await openCard(title).waitFor({ timeout: 15000 });
+      const reloaded = await inOpen(title);
+      expect("unplan: on a fresh load the card is in Open with no week label, and in no week",
+        reloaded.copies === 1 && reloaded.label === null && (await count(page.locator(`[data-lane-id] [data-item-id="${created.id}"]`))) === 0, JSON.stringify(reloaded));
     }
 
     // ------------------------------------------------ delete: own yes, others no; from the card in Open
