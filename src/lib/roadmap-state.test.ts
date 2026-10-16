@@ -334,3 +334,27 @@ test("items with the same sort_order go by id, as the Roadmap and the Dashboard 
   assert.deepEqual(state.sprints[0].items.map((i) => [i.id, i.position]), [["z", 1], ["a", 2], ["b", 3], ["c", 4], ["d", 5]]);
   assert.deepEqual(state.groups[0].items.map((i) => i.id), ["h", "k"]);
 });
+
+test("before migration 0031 the turn leaves 'atual' empty in the database: it comes, empty, while a change names it, then stays out", () => {
+  // Saturday 17/10: the week of 12–16/10 ended, its done item left, the other one went to "proxima" (19–23/10).
+  const lanes = [lane("atual", "sprint", 1, "2026-10-12", "2026-10-16"), lane("proxima", "sprint", 2, "2026-10-19", "2026-10-23")];
+  const items = [item("a2", "proxima", 0), item("p1", "proxima", 1)];
+  const now = new Date("2026-10-17T15:00:00Z");
+  const turned = base({
+    now,
+    lanes,
+    items,
+    pending: [
+      { id: "q1", item_id: null, action: "remove", payload: { item_id: "a1", lane_id: "atual", title: "Feito" } },
+      { id: "q2", item_id: "a2", action: "move_lane", payload: { lane_id: "proxima", from_lane_id: "atual" } },
+    ],
+  });
+  assert.deepEqual(turned.sprints.map((s) => [s.sprintId, s.laneId, s.items.map((i) => i.id)]), [
+    ["sprint-12-10-2026", "atual", []],
+    ["sprint-19-10-2026", "proxima", ["a2", "p1"]],
+  ]);
+  assert.deepEqual(turned.removedPending.map((r) => r.laneId), ["sprint-12-10-2026"]);
+
+  const acked = base({ now, lanes, items });
+  assert.deepEqual(acked.sprints.map((s) => s.laneId), ["proxima"]);
+});
