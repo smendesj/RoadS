@@ -91,9 +91,13 @@ const { BASE, expect, sleep, svc } = L;
       (await count(openCard("[TESTE] SM item, renomeado pelo admin").locator("[data-week-label]"))) === 0);
     await L.fitWholePage(page);
     const source = openCard("[TESTE] SM item, renomeado pelo admin");
+    // The test week is the last of the row, which scrolls sideways: brought on screen first, then the card of Open
+    // (never in that row), so the native drop lands with both in view.
+    const week = page.locator('[data-lane-id="zz-test-sprint"]');
+    await week.scrollIntoViewIfNeeded();
     await source.scrollIntoViewIfNeeded();
     const c = await source.boundingBox();
-    const tgt = await page.locator('[data-lane-id="zz-test-sprint"]').boundingBox();
+    const tgt = await week.boundingBox();
     await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2);
     await page.mouse.down();
     await page.mouse.move(c.x + c.width / 2 + 10, c.y + c.height / 2 + 10, { steps: 5 });
@@ -102,9 +106,10 @@ const { BASE, expect, sleep, svc } = L;
     await sleep(2000);
     const { data: moved } = await svc.from("roadmap_items").select("lane_id").eq("id", L.ids.smItem).single();
     expect("admin drags another user's item from Open into a week: saved", moved.lane_id === "zz-test-sprint", moved.lane_id);
+    const label = openCard("[TESTE] SM item, renomeado pelo admin").locator("[data-week-label]");
     expect("…and the card stays in Open, labelled '▸ Sprint 07/12', and shows in the week too",
       (await count(openCard("[TESTE] SM item, renomeado pelo admin"))) === 1 &&
-        ((await openCard("[TESTE] SM item, renomeado pelo admin").locator("[data-week-label]").textContent()) ?? "").trim() === "▸ Sprint 07/12" &&
+        (await count(label)) === 1 && ((await label.textContent()) ?? "").trim() === "▸ Sprint 07/12" &&
         (await count(page.locator('[data-lane-id="zz-test-sprint"] div[draggable]', { hasText: "[TESTE] SM item, renomeado pelo admin" }))) === 1);
     await page.setViewportSize({ width: 1440, height: 900 });
 
