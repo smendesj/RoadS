@@ -39,15 +39,61 @@ test("the answer carries the contract's header", () => {
   assert.equal(state.timezone, "America/Sao_Paulo");
 });
 
-test("sprints carry ISO dates and a stable id built from the start date, groups carry none", () => {
+test("a sprint is a week: its id is sprint- and its Monday as DD-MM-AAAA, and laneId is the lane's own id", () => {
   const state = base({
-    lanes: [lane("proxima", "sprint", 2, "2026-01-05", "2026-01-09"), lane("g1", "group", 4)],
+    lanes: [lane("sprint-05-01-2026", "sprint", 2, "2026-01-05", "2026-01-09"), lane("g1", "group", 4)],
   });
   assert.deepEqual(
     state.sprints.map((s) => ({ sprintId: s.sprintId, laneId: s.laneId, startDate: s.startDate, endDate: s.endDate })),
-    [{ sprintId: "sprint-2026-01-05", laneId: "proxima", startDate: "2026-01-05", endDate: "2026-01-09" }]
+    [{ sprintId: "sprint-05-01-2026", laneId: "sprint-05-01-2026", startDate: "2026-01-05", endDate: "2026-01-09" }]
   );
   assert.deepEqual(state.groups.map((g) => g.laneId), ["g1"]);
+});
+
+test("a positional lane still in the database (before migration 0030) is a week too: the sprintId comes from its date", () => {
+  const state = base({ lanes: [lane("proxima", "sprint", 2, "2026-01-05", "2026-01-09")] });
+  assert.deepEqual(state.sprints.map((s) => [s.sprintId, s.laneId]), [["sprint-05-01-2026", "proxima"]]);
+});
+
+test("a sprint is titled by its dates only, never by its position", () => {
+  const state = base({
+    lanes: [{ ...lane("atual", "sprint", 1, "2026-09-28", "2026-10-02"), title: "Sprint atual" }, lane("sprint-05-10-2026", "sprint", 2, "2026-10-05", "2026-10-09")],
+  });
+  assert.deepEqual(state.sprints.map((s) => s.title), ["Sprint 28/09–02/10", "Sprint 05–09/10"]);
+});
+
+test("the weeks come in the order of their start date, whatever their stored order or id", () => {
+  const state = base({
+    lanes: [
+      lane("sprint-19-01-2026", "sprint", 1, "2026-01-19", "2026-01-23"),
+      lane("sprint-05-01-2026", "sprint", 3, "2026-01-05", "2026-01-09"),
+      lane("sprint-12-01-2026", "sprint", 2, "2026-01-12", "2026-01-16"),
+    ],
+  });
+  assert.deepEqual(state.sprints.map((s) => s.sprintId), ["sprint-05-01-2026", "sprint-12-01-2026", "sprint-19-01-2026"]);
+});
+
+test("the e2e fixture lanes (zz-test-*) and what is in them never reach Frontlights", () => {
+  const state = base({
+    lanes: [lane("zz-test-sprint", "sprint", 98, "2026-12-07", "2026-12-11"), lane("zz-test-a", "group", 990), lane("g1", "group", 4)],
+    items: [item("t1", "zz-test-sprint", 0), item("t2", "zz-test-a", 0), item("a", "g1", 1)],
+    pending: [{ id: "q1", item_id: null, action: "remove", payload: { title: "[TESTE] x", lane_id: "zz-test-sprint" } }],
+  });
+  assert.deepEqual(state.sprints, []);
+  assert.deepEqual(state.groups.map((g) => g.laneId), ["g1"]);
+  assert.deepEqual(state.removedPending, []);
+});
+
+test("a pending removal from a sprint names the week by its date id, a removal from a group names the group", () => {
+  const state = base({
+    lanes: [lane("atual", "sprint", 1, "2026-01-05", "2026-01-09"), lane("g1", "group", 4)],
+    pending: [
+      { id: "q1", item_id: null, action: "remove", payload: { title: "Da sprint", lane_id: "atual" } },
+      { id: "q2", item_id: null, action: "remove", payload: { title: "Do grupo", lane_id: "g1" } },
+      { id: "q3", item_id: null, action: "remove", payload: { title: "Já por data", lane_id: "sprint-12-01-2026" } },
+    ],
+  });
+  assert.deepEqual(state.removedPending.map((r) => r.laneId), ["sprint-05-01-2026", "g1", "sprint-12-01-2026"]);
 });
 
 test("a sprint lane without both dates is left out, since it cannot be named", () => {
