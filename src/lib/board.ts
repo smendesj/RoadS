@@ -101,7 +101,7 @@ export function withStatusWrites<C extends { key: string; count: number; items: 
   return next;
 }
 
-/** The Project view whose order the Dashboard's Kanban follows. */
+/** The Project view whose order the Roadmap's Kanban follows. */
 export const KANBAN_VIEW = "Kanban";
 const SORTABLE = ["Created", "Updated", "Title"] as const;
 
