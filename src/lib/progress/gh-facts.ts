@@ -2,7 +2,8 @@
 // timelines, Project #7 items). Pure: the network lives in gh-client.ts, the clock is passed in. The
 // output is a PROPOSAL for the drafting step and the screen: status, delivery date, rolled-up sub-issues,
 // the evidence behind each choice, what looks internal, and the git work the coverage check needs.
-import { boxCheckedAt, boxTitle, criteriaBoxes } from "../criteria.ts";
+import { boxCheckedAt, boxTitle, criteriaBoxes, type Box } from "../criteria.ts";
+import { partsOf } from "../parts.ts";
 import type { EntryStatus, ReportWindow, SprintCover } from "../progress-report.ts";
 import type { GitWork } from "./gaps.ts";
 import { MAIN_BRANCH, asBoardStatus, boardStatusAt, classifyEntry, pickDelivery, prStateAt, toSaoPauloIso } from "./gh-status.ts";
@@ -25,14 +26,14 @@ export type GhIssue = {
   /** Set when this issue is a sub-issue: it is rolled up into that parent (its direct one, at any depth). */
   parent: number | null;
   /**
-   * What GitHub says about this issue's DIRECT sub-issues. The report counts the leaves of the tree it was
-   * given instead; this is how a tree that was read only in part is noticed (and what stands in for the parts
-   * under an issue none of whose sub-issues were read).
+   * What GitHub says about this issue's DIRECT sub-issues. The report reads the sub-issues it was given instead;
+   * this is how a tree that was read only in part is noticed (and what stands in for the open sub-issues of an
+   * issue none of whose sub-issues were read).
    */
   subIssues: { total: number; completed: number } | null;
   /**
    * The versions of the body, oldest first (`complete` when the first one is the body as the issue was written).
-   * Read only for an issue with no sub-issues and a ticked box in its acceptance criteria: GitHub keeps no date for
+   * Read only for an issue with a ticked box in its acceptance criteria, sub-issues or not: GitHub keeps no date for
    * a tick, so a box is dated by the edit that ticked it (src/lib/criteria.ts). Absent when not read, null when the
    * read failed: either way its boxes count, undated.
    */
@@ -92,13 +93,13 @@ export type FactsInput = {
 /** What happened to the parts of an umbrella in the window: evidence for whoever writes, never part of the draft. */
 export type PartsSlices = {
   /**
-   * Parts closed as completed inside the window, in closing order (São Paulo time): sub-issues at any depth, or, for
-   * a delivery cut into boxes, the boxes ticked inside the window (title = the box's text up to its first sentence).
+   * The boxes ticked inside the window, in ticking order (São Paulo time; title = the box's text up to its first
+   * sentence). A closed sub-issue is no part, so it is never here.
    */
   closed: { title: string; closedAt: string }[];
   /**
-   * Open parts that are parked: a sub-issue with a blocker label or on the Blocker column of Project #7, or an open
-   * box with a "Bloqueada:" sub-item, whose text is the `reason`.
+   * Open parts that are parked: an open box with a "Bloqueada:" sub-item, whose text is the `reason`, or an open
+   * sub-issue with a blocker label or on the Blocker column of Project #7.
    */
   blocked: { title: string; reason?: string }[];
 };
@@ -119,11 +120,11 @@ export type FactEntry = {
   status: EntryStatus;
   deliveredAt: string | null;
   /**
-   * The parts of the issue: the leaves of its whole tree of sub-issues, at any depth (cancelled ones left out); for
-   * an issue with no sub-issues, the boxes of its acceptance criteria (`done` = the ticked ones). Never both.
+   * The parts of the issue, by the Dashboard's rule (src/lib/parts.ts): the boxes of its acceptance criteria
+   * (`done` = the ticked ones) plus its direct sub-issues still open. A closed sub-issue is no part. Null when none.
    */
   subIssues: { total: number; done: number } | null;
-  /** Only for an issue that has sub-issues or boxes. Kept in facts.json: the assembled draft does not carry it. */
+  /** Only for an issue that has parts. Kept in facts.json: the assembled draft does not carry it. */
   slices?: PartsSlices;
   /** Only for a delivery with an epic above it; kept in facts.json like `slices`: the assembled draft does not carry it. */
   epic?: EpicContext;
@@ -379,14 +380,23 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     };
   };
 
-  // The parts of an issue are the leaves of its tree. A cancelled leaf is not a part; a leaf that GitHub says has
-  // sub-issues nobody read stands for the parts GitHub counts under it.
+  // The steps of an umbrella are the leaves of its tree: they hold its status (a step still open keeps it under way, its
+  // last step delivers it), never its count of parts. A cancelled leaf is no step; a leaf that GitHub says has
+  // sub-issues nobody read stands for the ones GitHub counts under it.
   const cancelled = (i: GhIssue): boolean => i.state === "closed" && i.stateReason === "not_planned";
   const unread = (i: GhIssue | undefined): { total: number; done: number } | null =>
     i?.subIssues && i.subIssues.total > 0 ? { total: i.subIssues.total, done: Math.min(i.subIssues.completed, i.subIssues.total) } : null;
-  // A delivery with no sub-issues is cut into the boxes of its acceptance criteria (Frontlights since 13/10/2026): they
-  // are its parts, each dated by the body edit that ticked it when the body's history was read (undated otherwise).
-  type Boxed = { total: number; done: number; ticked: { title: string; at: string }[]; blocked: { title: string; reason: string }[] };
+  const stepsOf = (n: number, family: GhIssue[]): { total: number; done: number } | null => {
+    const counts =
+      family.length === 0
+        ? [unread(issueOf.get(n))]
+        : family.filter((i) => !childrenOf.has(i.number)).map((i) => unread(i) ?? (cancelled(i) ? { total: 0, done: 0 } : { total: 1, done: i.state === "closed" ? 1 : 0 }));
+    const total = counts.reduce((sum, p) => sum + (p?.total ?? 0), 0);
+    return total > 0 ? { total, done: counts.reduce((sum, p) => sum + (p?.done ?? 0), 0) } : null;
+  };
+  // The boxes of an issue's acceptance criteria (Frontlights since 13/10/2026), each dated by the body edit that ticked
+  // it when the body's history was read (undated otherwise).
+  type Boxed = { boxes: Box[]; ticked: { title: string; at: string }[]; blocked: { title: string; reason: string }[] };
   const boxedCache = new Map<number, Boxed | null>();
   const boxesOf = (i: GhIssue | undefined): Boxed | null => {
     if (!i) return null;
@@ -394,7 +404,6 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     return boxedCache.get(i.number) ?? null;
   };
   const readBoxes = (i: GhIssue): Boxed | null => {
-    if ((i.subIssues?.total ?? 0) > 0 || childrenOf.has(i.number)) return null;
     const boxes = criteriaBoxes(i.body);
     if (!boxes || boxes.length === 0) return null;
     const h = i.bodyHistory;
@@ -407,21 +416,24 @@ export function buildFacts(input: FactsInput): ProgressFacts {
       dates = boxCheckedAt(versions, h.complete ? i.createdAt : null);
     }
     return {
-      total: boxes.length,
-      done: boxes.filter((b) => b.checked).length,
+      boxes,
       ticked: boxes.flatMap((b, k) => (b.checked && dates[k] ? [{ title: boxTitle(b.text), at: dates[k] as string }] : [])),
       blocked: boxes.filter((b) => !b.checked && b.blocked).map((b) => ({ title: boxTitle(b.text), reason: b.blocked as string })),
     };
   };
-  const partsOf = (n: number, family: GhIssue[]): { total: number; done: number } | null => {
-    const boxed = family.length === 0 ? boxesOf(issueOf.get(n)) : null;
-    if (boxed) return { total: boxed.total, done: boxed.done };
-    const counts =
-      family.length === 0
-        ? [unread(issueOf.get(n))]
-        : family.filter((i) => !childrenOf.has(i.number)).map((i) => unread(i) ?? (cancelled(i) ? { total: 0, done: 0 } : { total: 1, done: i.state === "closed" ? 1 : 0 }));
-    const total = counts.reduce((sum, p) => sum + (p?.total ?? 0), 0);
-    return total > 0 ? { total, done: counts.reduce((sum, p) => sum + (p?.done ?? 0), 0) } : null;
+  // The parts of a delivery, by the rule the Dashboard counts with (src/lib/parts.ts, since 16/10/2026): the boxes of
+  // its acceptance criteria, always, plus its direct sub-issues still open. A closed sub-issue (completed, not planned
+  // or a duplicate) is no part. When none of its sub-issues was read, the ones GitHub counts as open stand for them.
+  // `open` lists the open sub-issues that were read; `openCount` counts every open one, the unread stand-ins too.
+  type Counted = { total: number; done: number; boxed: Boxed | null; open: GhIssue[]; openCount: number };
+  const deliveryParts = (i: GhIssue): Counted => {
+    const boxed = boxesOf(i);
+    const kids = (childrenOf.get(i.number) ?? []).map((k) => issueOf.get(k)).filter((k): k is GhIssue => !!k);
+    const unreadOpen = kids.length === 0 && i.subIssues ? Math.max(0, i.subIssues.total - i.subIssues.completed) : 0;
+    const subs: (GhIssue | { state: "open" })[] = kids.length > 0 ? kids : Array.from({ length: unreadOpen }, () => ({ state: "open" as const }));
+    const parts = partsOf(boxed?.boxes ?? [], subs);
+    const open = parts.open.filter((s): s is GhIssue => "number" in s);
+    return { total: parts.total, done: parts.done, boxed, open, openCount: parts.open.length };
   };
   const deliveredPart = (i: GhIssue): boolean => i.state === "closed" && !cancelled(i) && !!i.closedAt;
   const incomplete = (i: GhIssue): boolean => !!i.subIssues && i.subIssues.total > (childrenOf.get(i.number)?.length ?? 0);
@@ -462,15 +474,19 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     });
   const coverFact = (cover: GhIssue): SprintFact => {
     const family = descendantsOf(cover.number);
-    // An empty epic inside a cover is no part. A cover with no children is its own single part.
-    const boxed = family.length === 0 ? boxesOf(cover) : null;
-    const counts =
-      family.length === 0
-        ? [boxed ? { total: boxed.total, done: boxed.done } : unread(cover) ?? { total: 1, done: 0 }]
-        : family.filter((i) => !isEpic(i) && !childrenOf.has(i.number)).map((i) => unread(i) ?? (cancelled(i) ? { total: 0, done: 0 } : { total: 1, done: i.state === "closed" ? 1 : 0 }));
-    const total = counts.reduce((sum, p) => sum + p.total, 0);
-    const done = counts.reduce((sum, p) => sum + p.done, 0);
     const deliveries = deliveriesUnder(cover);
+    // A cover is counted by the rule, like any delivery. An epic cover is counted by the deliveries under it, each by
+    // the rule (one with no parts is one part, done when closed). A cover never broken down at all is its own single part.
+    const counts =
+      isEpic(cover) && family.length > 0
+        ? deliveries.map((d) => {
+            const p = deliveryParts(d);
+            return p.total > 0 ? p : { total: 1, done: d.state === "closed" ? 1 : 0 };
+          })
+        : [deliveryParts(cover)];
+    let total = counts.reduce((sum, p) => sum + p.total, 0);
+    let done = counts.reduce((sum, p) => sum + p.done, 0);
+    if (total === 0 && family.length === 0 && !unread(cover)) [total, done] = [1, 0];
     return {
       issue: cover.number,
       title: cover.title,
@@ -521,9 +537,11 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     const epics = ancestorsOf(issue) ?? []; // closest first; all of them are epics
     const { family, prs, commits, history } = gathered(issue.number);
     const closedParts = family.filter(deliveredPart);
-    const boxed = family.length === 0 ? boxesOf(issue) : null;
-    // When each part was done: a sub-issue's closing, or a box's tick (only the dated ones).
-    const partDates = boxed ? boxed.ticked.map((t) => t.at) : closedParts.map((p) => p.closedAt as string);
+    const parts = deliveryParts(issue);
+    // When each part was done: a box's tick (only the dated ones). A sub-issue's closing is no part, but it is work done.
+    const tickDates = parts.boxed ? parts.boxed.ticked.map((t) => t.at) : [];
+    const closingDates = closedParts.map((p) => p.closedAt as string);
+    const partDates = [...tickDates, ...closingDates];
     const item = boardItem.get(issue.number) ?? null;
     const atEnd = boardStatusAt(item, history, input.window.end);
     const now = asBoardStatus(item?.status);
@@ -552,7 +570,7 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     }
 
     const closedAt = issue.state === "closed" ? issue.closedAt : null;
-    const subIssues = partsOf(issue.number, family);
+    const subIssues = parts.total > 0 ? { total: parts.total, done: parts.done } : null;
     const decision = classifyEntry({
       windowEnd: input.window.end,
       closedAt,
@@ -560,8 +578,8 @@ export function buildFacts(input: FactsInput): ProgressFacts {
       prs,
       closers: timelineOf.get(issue.number)?.closers,
       commits: commits.map((c) => c.at),
-      // Boxes are parts to count, not pending children: the status of a delivery cut into boxes still follows its PR and its closing.
-      subIssues: boxed ? null : subIssues,
+      // Boxes are parts to count, not pending children: the status follows the steps of the tree, its PRs and its closing.
+      subIssues: stepsOf(issue.number, family),
       closedParts: partDates,
     });
     if (!decision) {
@@ -591,27 +609,17 @@ export function buildFacts(input: FactsInput): ProgressFacts {
       status: decision.status,
       deliveredAt: decision.deliveredAt,
       subIssues,
-      ...(family.length > 0
+      ...(parts.total > 0
         ? {
             slices: {
-              closed: closedParts
-                .filter((p) => inWindow(p.closedAt))
-                .sort((a, b) => Date.parse(a.closedAt as string) - Date.parse(b.closedAt as string) || a.number - b.number)
-                .map((p) => ({ title: p.title, closedAt: toSaoPauloIso(p.closedAt as string) })),
-              blocked: family.filter(blockedPart).map((p) => ({ title: p.title })),
+              closed: (parts.boxed?.ticked ?? [])
+                .filter((t) => inWindow(t.at))
+                .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+                .map((t) => ({ title: t.title, closedAt: toSaoPauloIso(t.at) })),
+              blocked: [...(parts.boxed?.blocked ?? []), ...parts.open.filter(blockedPart).map((p) => ({ title: p.title }))],
             },
           }
-        : boxed
-          ? {
-              slices: {
-                closed: boxed.ticked
-                  .filter((t) => inWindow(t.at))
-                  .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
-                  .map((t) => ({ title: t.title, closedAt: toSaoPauloIso(t.at) })),
-                blocked: boxed.blocked,
-              },
-            }
-          : {}),
+        : {}),
       ...(epics.length > 0
         ? {
             epic: { issue: epics[0].number, title: epics[0].title, parts: epicParts(epics[0]) },
@@ -629,9 +637,10 @@ export function buildFacts(input: FactsInput): ProgressFacts {
         since: item?.statusUpdatedAt ?? null,
         windowEnd: input.window.end,
         subIssues,
-        boxes: boxed !== null,
-        closedInWindow: partDates.filter(inWindow).length,
-        lastPartClosed: partDates.filter(inWindow).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1) ?? null,
+        boxes: parts.boxed?.boxes.length ?? 0,
+        openSubIssues: parts.openCount,
+        ticked: tickDates.filter(inWindow),
+        closedSubIssues: closingDates.filter(inWindow),
         cut: [issue, ...family].some(incomplete),
         epic: epics.length > 0 ? { path: [...epics].reverse().map((e) => e.title), parts: epicParts(epics[0]) } : null,
       }),
@@ -677,11 +686,12 @@ function evidenceLines(a: {
   since: string | null;
   windowEnd: string;
   subIssues: { total: number; done: number } | null;
-  /** The parts are the boxes of the acceptance criteria (not sub-issues). */
-  boxes: boolean;
-  /** Parts closed as completed (or boxes ticked) inside the window, and when the last one was. */
-  closedInWindow: number;
-  lastPartClosed: string | null;
+  /** How many of the parts are the boxes of the acceptance criteria, and how many are sub-issues still open. */
+  boxes: number;
+  openSubIssues: number;
+  /** When the boxes ticked inside the window were ticked (the dated ones), and when its sub-issues closed as completed were closed. */
+  ticked: string[];
+  closedSubIssues: string[];
   /** Some issue of the family has sub-issues that were not read. */
   cut: boolean;
   /** The epics above the issue (outermost first) and how far the closest one has come. */
@@ -728,19 +738,24 @@ function evidenceLines(a: {
   if (a.issue.state === "closed" && a.issue.closedAt) {
     lines.push(`Issue fechada em ${formatSaoPaulo(a.issue.closedAt)}${Date.parse(a.issue.closedAt) >= end ? ", depois do fim da janela" : ""}`);
   }
-  if (a.subIssues && a.boxes) {
-    lines.push(`Partes (as caixas dos critérios de aceitação): ${a.subIssues.done} de ${a.subIssues.total} marcadas`);
+  if (a.subIssues) {
+    const what =
+      a.openSubIssues === 0 ? "as caixas dos critérios de aceitação" : a.boxes === 0 ? "as sub-issues abertas" : "as caixas dos critérios de aceitação e as sub-issues abertas";
+    lines.push(`Partes (${what}): ${a.subIssues.done} de ${a.subIssues.total} ${a.openSubIssues === 0 ? "marcadas" : "prontas"}`);
     // Closed by its PR with boxes nobody ticked: the count says what GitHub shows, and whoever reviews is told.
-    const open = a.subIssues.total - a.subIssues.done;
+    const open = a.boxes - a.subIssues.done;
     if (a.decision.status === "concluido" && open > 0) {
       lines.push(`Concluída com ${open} caixa${open > 1 ? "s" : ""} dos critérios de aceitação ainda aberta${open > 1 ? "s" : ""}`);
     }
   }
-  else if (a.subIssues) lines.push(`Partes (as folhas das sub-issues, em qualquer nível): ${a.subIssues.done} de ${a.subIssues.total} concluídas`);
-  if (a.closedInWindow > 0 && a.lastPartClosed) {
-    const s = a.closedInWindow > 1 ? "s" : "";
-    const what = a.boxes ? `caixa${s} marcada${s}` : `sub-issue${s} fechada${s}`;
-    lines.push(`${a.closedInWindow} ${what} no período, a última em ${formatSaoPaulo(a.lastPartClosed)}`);
+  const last = (dates: string[]): string => formatSaoPaulo([...dates].sort((x, y) => Date.parse(x) - Date.parse(y)).at(-1) as string);
+  if (a.ticked.length > 0) {
+    const s = a.ticked.length > 1 ? "s" : "";
+    lines.push(`${a.ticked.length} caixa${s} marcada${s} no período, a última em ${last(a.ticked)}`);
+  }
+  if (a.closedSubIssues.length > 0) {
+    const s = a.closedSubIssues.length > 1 ? "s" : "";
+    lines.push(`${a.closedSubIssues.length} sub-issue${s} fechada${s} no período (fechada não conta como parte), a última em ${last(a.closedSubIssues)}`);
   }
   if (a.epic) lines.push(`Dentro do epic ${a.epic.path.join(" > ")}: ${a.epic.parts.done} de ${a.epic.parts.total} entregas dele prontas`);
   if (a.cut) lines.push("Leitura das sub-issues cortada (árvore funda ou grande demais, ou sub-issues de outro repositório): a contagem de partes pode estar abaixo do real");

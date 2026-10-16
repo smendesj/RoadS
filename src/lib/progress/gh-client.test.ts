@@ -220,7 +220,7 @@ test("collecting reads issues, the board, sub-issues and PRs, and the facts come
   assert.deepEqual(facts.entries.map((e) => [e.issue, e.status]), [[60, "concluido"]]);
   assert.deepEqual(facts.sprint.epics.map((c) => [c.issue, c.parts.remaining]), [[50, 1]]);
   assert.equal(facts.entries[0].deliveredAt, "2026-03-09T15:00:00-03:00");
-  assert.deepEqual(facts.entries[0].subIssues, { total: 1, done: 1 });
+  assert.equal(facts.entries[0].subIssues, null); // its only step is closed: a closed sub-issue is no part
   assert.equal(facts.internal.count, 0);
   // Git work: the merge of PR 62, the commits found, and the direct commit on the default branch.
   assert.deepEqual(
@@ -333,7 +333,7 @@ async function factsOf(gh: ReturnType<typeof treeGithub>) {
   return { data, facts: buildFacts({ repository: REPO, window: WINDOW, generatedAt: "2026-03-11T12:00:00-03:00", author: "dev-a", ...data }) };
 }
 
-test("the grandchildren are read too: their PRs and their closures are the umbrella's, and its parts are the leaves", async () => {
+test("the grandchildren are read too: their PRs and their closures are the umbrella's, and its parts are its open sub-issues", async () => {
   const gh = treeGithub({
     listed: [oldIssue(70, { created_at: "2026-03-09T12:00:00Z", sub_issues_summary: { total: 2, completed: 1 } })],
     kids: { 70: [{ number: 71 }, closedKid(72, "2026-03-08T12:00:00Z")], 71: [closedKid(73, "2026-03-10T12:00:00Z"), { number: 74, labels: ["status:blocker"] }] },
@@ -346,10 +346,10 @@ test("the grandchildren are read too: their PRs and their closures are the umbre
   assert.deepEqual([...gh.reads].sort(), [70, 71, 72, 73, 74]); // every issue of the tree, once
   assert.deepEqual(data.prs.map((p) => p.number), [80]);
   const [entry] = facts.entries;
-  assert.deepEqual([entry.issue, entry.status], [70, "em_andamento"]); // a part merged, but 2 of 3 parts are done
-  assert.deepEqual(entry.subIssues, { total: 3, done: 2 }); // 72, 73 and 74: the step 71 counts through its parts
+  assert.deepEqual([entry.issue, entry.status], [70, "em_andamento"]); // a part merged, but the step 71 is still open
+  assert.deepEqual(entry.subIssues, { total: 1, done: 0 }); // the open 71, whatever hangs from it; the closed 72 is no part
   assert.ok(entry.sources.includes(`https://github.com/${REPO}/pull/80`));
-  assert.deepEqual(entry.slices, { closed: [{ title: "Parte 73", closedAt: "2026-03-10T09:00:00-03:00" }], blocked: [{ title: "Parte 74" }] });
+  assert.deepEqual(entry.slices, { closed: [], blocked: [] });
   assert.equal(facts.ignored.children, 4);
   assert.equal(facts.ignored.cut, 0);
   assert.ok(facts.gitWork.some((w) => w.ref === "PR #80 mesclado"));
@@ -378,7 +378,7 @@ test("a sub-issue touched in the window brings its quiet umbrella with it, howev
   });
   const { facts } = await factsOf(gh);
   assert.deepEqual([...gh.gets].sort(), [300, 301]); // each ancestor fetched once
-  assert.deepEqual(facts.entries.map((e) => [e.issue, e.status, e.subIssues]), [[300, "em_andamento", { total: 1, done: 1 }]]);
+  assert.deepEqual(facts.entries.map((e) => [e.issue, e.status, e.subIssues]), [[300, "em_andamento", { total: 1, done: 0 }]]); // the open 301
   assert.equal(facts.ignored.quiet, 0);
 });
 
@@ -408,7 +408,7 @@ test("a tree is read only up to its size limit, whole issues at a time, and `ign
   assert.equal(gh.reads.length, 1 + 3 + 2 * per); // the third step's sub-issues would pass the limit: none of them is read
   assert.ok(gh.reads.every((n) => n < 5000));
   assert.equal(facts.ignored.cut, 1);
-  assert.deepEqual(facts.entries[0].subIssues, { total: 3 * per, done: 0 }); // the unread step stands for the parts GitHub counts under it
+  assert.deepEqual(facts.entries[0].subIssues, { total: 3, done: 0 }); // the three open steps, read or not below
   assert.ok(facts.entries[0].evidence.some((l) => /cortad/i.test(l)));
 });
 
@@ -515,7 +515,7 @@ test("the same tree off the sprint board is not read down: nothing happened in i
 
 const boxesBody = (s1: string, s2: string) => ["## Critérios de aceitação", `- [${s1}] S1. Primeira parte.`, `- [${s2}] S2. Segunda parte.`].join("\n");
 
-test("the body's history is read only for an issue with no sub-issues and a ticked box, and dates each tick", async () => {
+test("the body's history is read for every issue with a ticked box, sub-issues or not, and dates each tick", async () => {
   const gh = treeGithub({
     listed: [
       oldIssue(5, { body: boxesBody("x", "x") }),
@@ -536,7 +536,7 @@ test("the body's history is read only for an issue with no sub-issues and a tick
     prs: {},
   });
   const { data, facts } = await factsOf(gh);
-  assert.deepEqual(gh.historyAsked, [[5]], "no box ticked (6) or a family (7): nothing to date");
+  assert.deepEqual(gh.historyAsked, [[5, 7]], "no box ticked (6): nothing to date; a family (7) counts its boxes too");
   assert.ok(gh.queries.filter((q) => /userContentEdits/.test(q)).every((q) => /userContentEdits\(first: \d+\)/.test(q) && !/mutation/i.test(q)), "the newest edits, and a read");
   assert.equal(data.issues.find((i) => i.number === 5)?.bodyHistory?.complete, true);
   const e = facts.entries.find((x) => x.issue === 5);
@@ -563,4 +563,37 @@ test("a failed read of a body's history never stops the report: the boxes still 
   assert.equal(five?.bodyHistory, null, "tried and failed: the CLI warns about it");
   const facts = buildFacts({ repository: REPO, window: WINDOW, generatedAt: "2026-03-11T12:00:00-03:00", ...data });
   assert.deepEqual(facts.sprint.epics.find((c) => c.issue === 5)?.parts, { total: 2, done: 1, remaining: 1 }, "the boxes still count");
+});
+
+/* ---------- The parts of a delivery: the boxes, always, plus the sub-issues still open (src/lib/parts.ts) ---------- */
+
+const threeBoxes = (s1: string) =>
+  ["## Critérios de aceitação", `- [${s1}] S1. Primeira parte.`, "- [ ] S2. Segunda parte.", "- [ ] S3. Terceira parte."].join("\n");
+// Two sub-issues closed when the issue was converted to boxes (one as completed, one as not planned) and one still open.
+const converted = (n: number): Kid[] => [
+  closedKid(n + 1, "2026-03-09T13:00:00Z"),
+  { number: n + 2, state: "CLOSED", stateReason: "NOT_PLANNED", closedAt: "2026-03-09T13:00:00Z" },
+  { number: n + 3 },
+];
+
+test("a converted delivery counts its three boxes and its open sub-issue, 1 of 4 parts, never the sub-issues it closed", async () => {
+  const edits = { nodes: [{ editedAt: "2026-03-10T15:00:00Z", diff: threeBoxes("x") }, { editedAt: "2026-02-20T12:00:00Z", diff: threeBoxes(" ") }] };
+  const gh = treeGithub({
+    listed: [
+      oldIssue(30, { body: threeBoxes("x"), sub_issues_summary: { total: 3, completed: 2 } }),
+      oldIssue(40, { body: threeBoxes("x"), sub_issues_summary: { total: 3, completed: 2 }, created_at: "2026-03-09T12:00:00Z" }),
+    ],
+    kids: { 30: converted(30), 40: converted(40) },
+    edits: { 30: edits, 40: edits },
+    board: [boardNode(30, "Development"), boardNode(40, "Open")],
+  });
+  const { facts } = await factsOf(gh);
+  // 30 is on the sprint: a cover, "1 de 4 partes".
+  assert.deepEqual(facts.sprint.epics.map((c) => [c.issue, c.parts]), [[30, { total: 4, done: 1, remaining: 3 }]]);
+  // 40 is off the sprint: an entry with the same count, whose slices are its boxes and nothing it closed.
+  const forty = facts.entries.find((e) => e.issue === 40);
+  assert.deepEqual(forty?.subIssues, { total: 4, done: 1 });
+  assert.deepEqual(forty?.slices, { closed: [{ title: "S1. Primeira parte.", closedAt: "2026-03-10T12:00:00-03:00" }], blocked: [] });
+  // The ticks are still dated by the body's history, sub-issues or not.
+  assert.deepEqual(gh.historyAsked.flat().sort((a, b) => a - b), [30, 40]);
 });
