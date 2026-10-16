@@ -160,11 +160,20 @@ async function testItemIds() {
 // Test data never reaches GitHub (src/lib/test-data.ts): checked at the end of every suite that creates items, before
 // the cleanup removes them. No "[TESTE]" item has an issue (a save that creates one links it on the item), and since
 // `since` the queue has no "issue linked" modify for a test item (what the board sync queues when it creates one).
+// The suites also seed "[TESTE]" items linked on purpose to made-up issues, numbered from SYNTHETIC_ISSUE_MIN up, far
+// above any real issue; those don't count. A "[TESTE]" item linked to any other issue (a real number) fails the check.
 const TEST_TITLE = /^\s*\[TESTE\]/;
+const SYNTHETIC_ISSUE_MIN = 990000;
+const ISSUE_NUMBER = /\/issues\/(\d+)/;
 async function expectNoTestIssues(since) {
   try {
-    const { data: linked, error } = await svc.from("roadmap_items").select("id").like("title", "[TESTE]%").not("github_issue_url", "is", null);
+    const { data: withUrl, error } = await svc
+      .from("roadmap_items")
+      .select("id, github_issue_url, github_issue_number")
+      .like("title", "[TESTE]%")
+      .not("github_issue_url", "is", null);
     if (error) throw error;
+    const linked = withUrl.filter((r) => !(Number(r.github_issue_number ?? r.github_issue_url.match(ISSUE_NUMBER)?.[1]) >= SYNTHETIC_ISSUE_MIN));
     expect("test data: no [TESTE] item has a GitHub issue", linked.length === 0, linked.map((r) => r.id).join(","));
     const testIds = await testItemIds();
     const { data: rows, error: qError } = await svc.from("roadmap_sync_queue").select("id, item_id, payload").eq("action", "modify").gte("created_at", since);
@@ -217,4 +226,4 @@ async function ageSnapshot() {
 }
 
 module.exports = {
-  ageSnapshot, addDays, createdWeeks, weekId, weeks, E2E_UA, cleanupCalls, BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, expectNoTestIssues, scrub, fitWholePage };
+  ageSnapshot, addDays, createdWeeks, weekId, weeks, E2E_UA, cleanupCalls, BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, expectNoTestIssues, SYNTHETIC_ISSUE_MIN, scrub, fitWholePage };
