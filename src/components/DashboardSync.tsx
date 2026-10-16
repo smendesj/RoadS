@@ -24,8 +24,8 @@ function useSync() {
   return ctx;
 }
 
-// Holds the whole Dashboard. "Sincronizar" pulls GitHub Project #7 and re-reads the Roadmap
-// (sprints + roadmap), so every block below — not only the Kanban — reflects the latest state.
+// Holds the whole Dashboard. "Sincronizar" pulls GitHub Project #7 and re-reads the Roadmap, so every block below
+// reflects the latest state. The Kanban is no longer here: it is on the Roadmap, under the weeks.
 export function DashboardSyncProvider({
   initialModel,
   canSync,
@@ -179,54 +179,6 @@ export function SprintPanels() {
       {model.entregas.length === 0 && (
         <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">Nenhum item na sprint atual.</div>
       )}
-    </div>
-  );
-}
-
-// The Project's ELIMS cards are never shown (only GeoCloud is RoadS's), so the gap to GitHub's counts is said here.
-export function ElimsNote() {
-  const { model } = useSync();
-  const elims = model.columns.reduce((sum, c) => sum + (c.elims ?? 0), 0);
-  if (elims === 0) return null;
-  return (
-    <p data-elims-note className="text-[13px] text-rs-text-faint">
-      {elims === 1 ? "1 issue do ELIMS no Project #7 não aparece aqui." : `${elims} issues do ELIMS no Project #7 não aparecem aqui.`}
-    </p>
-  );
-}
-
-export function KanbanColumns() {
-  const { model } = useSync();
-  return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5">
-      {model.columns.map((col) => (
-        <div key={col.key} className="flex flex-col gap-3 rounded-2xl border border-rs-border bg-rs-card p-4.5">
-          <div className="flex items-center justify-between">
-            <span className={badgeClass(col.tone)}>{col.title}</span>
-            <span className="text-[13px] font-bold text-rs-text-faint">{col.count}</span>
-          </div>
-          {/* Every issue in the column; the list caps at ~5 cards tall and scrolls for the rest. */}
-          <div className="-mr-2 flex max-h-[320px] flex-col sm:max-h-[440px] gap-2 overflow-y-auto pr-2">
-            {col.items.map((it) => (
-              <a
-                key={it.url}
-                href={it.url}
-                target="_blank"
-                rel="noreferrer"
-                className="block rounded-[10px] bg-rs-lane p-2.5 text-[13px] text-rs-text hover:opacity-80"
-              >
-                {it.title}
-                <div className="mt-0.5 font-mono text-[11px] text-rs-text-faint">{it.ref}</div>
-              </a>
-            ))}
-            {col.items.length === 0 && (
-              <div className="p-2.5 text-[13px] text-rs-text-faint">
-                {col.key === "blocker" ? "Nenhum bloqueio agora." : "Nenhuma issue aqui."}
-              </div>
-            )}
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

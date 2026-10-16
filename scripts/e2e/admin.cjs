@@ -48,12 +48,15 @@ const { BASE, expect, sleep, svc } = L;
     // ------------------------------------------------ Roadmap: full control over everybody's items
     await page.goto(BASE + "/roadmap", { waitUntil: "load" });
     await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
-    await page.getByText("[TESTE] item do scrum master").waitFor();
+    // Each item of the test week shows twice: in the week, and in the Kanban's Open with the week's label.
+    await page.getByText("[TESTE] item do scrum master").first().waitFor();
     const card = (title) => page.locator("div[draggable]", { hasText: title }).first();
+    const openCard = (title) => page.locator('[data-kanban-column="open"] div[draggable]', { hasText: title }).first();
     const btn = (c, name) => c.getByRole("button", { name, exact: true });
     for (const [label, title] of [["admin's own item", "[TESTE] item do admin"], ["Scrum Master's item", "[TESTE] item do scrum master"], ["seeded item", "[TESTE] item semeado (sem dono)"]]) {
-      const c = card(title);
-      expect(`roadmap: ${label} is draggable with Editar and Excluir`, (await c.getAttribute("draggable")) === "true" && (await count(btn(c, "Editar"))) === 1 && (await count(btn(c, "Excluir"))) === 1);
+      for (const [where, c] of [["in the week", card(title)], ["in the Kanban's Open", openCard(title)]]) {
+        expect(`roadmap: ${label} ${where} is draggable with Editar and Excluir`, (await c.getAttribute("draggable")) === "true" && (await count(btn(c, "Editar"))) === 1 && (await count(btn(c, "Excluir"))) === 1);
+      }
     }
     expect("roadmap: no 'Config' tab missing, and the subtitle is the editor one", (await count(page.getByText(/defina o que entra e quando/))) === 1);
 
@@ -78,13 +81,23 @@ const { BASE, expect, sleep, svc } = L;
     const { data: seededRow } = await svc.from("roadmap_items").select("title").eq("id", L.ids.seeded).single();
     expect("admin can rename a seeded item (the one thing no Scrum Master can do)", seededRow.title === "[TESTE] semeado, renomeado pelo admin");
 
-    // drag the Scrum Master's item into a group lane, and it must stay on screen
-    const groupBox = (t) => page.getByText(t, { exact: true }).locator("xpath=ancestor::div[contains(@class,'rounded-2xl')][1]");
+    // drag the Scrum Master's item, with no week, from the Kanban's Open into the test week: saved, and its card stays in
+    // Open, labelled with the week
+    await svc.from("roadmap_items").update({ lane_id: "zz-test-a" }).eq("id", L.ids.smItem);
+    await page.reload({ waitUntil: "load" });
+    await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+    await openCard("[TESTE] SM item, renomeado pelo admin").waitFor({ timeout: 15000 });
+    expect("roadmap: the Scrum Master's item with no week is in Open with no week label",
+      (await count(openCard("[TESTE] SM item, renomeado pelo admin").locator("[data-week-label]"))) === 0);
     await L.fitWholePage(page);
-    const source = card("[TESTE] SM item, renomeado pelo admin");
+    const source = openCard("[TESTE] SM item, renomeado pelo admin");
+    // The test week is the last of the row, which scrolls sideways: brought on screen first, then the card of Open
+    // (never in that row), so the native drop lands with both in view.
+    const week = page.locator('[data-lane-id="zz-test-sprint"]');
+    await week.scrollIntoViewIfNeeded();
     await source.scrollIntoViewIfNeeded();
     const c = await source.boundingBox();
-    const tgt = await groupBox("[TESTE] lane A (apagar)").boundingBox();
+    const tgt = await week.boundingBox();
     await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2);
     await page.mouse.down();
     await page.mouse.move(c.x + c.width / 2 + 10, c.y + c.height / 2 + 10, { steps: 5 });
@@ -92,8 +105,12 @@ const { BASE, expect, sleep, svc } = L;
     await page.mouse.up();
     await sleep(2000);
     const { data: moved } = await svc.from("roadmap_items").select("lane_id").eq("id", L.ids.smItem).single();
-    expect("admin drags another user's item into a group lane: saved", moved.lane_id === "zz-test-a", moved.lane_id);
-    expect("…and the card stays on screen (it used to vanish until a reload)", (await count(card("[TESTE] SM item, renomeado pelo admin"))) === 1);
+    expect("admin drags another user's item from Open into a week: saved", moved.lane_id === "zz-test-sprint", moved.lane_id);
+    const label = openCard("[TESTE] SM item, renomeado pelo admin").locator("[data-week-label]");
+    expect("…and the card stays in Open, labelled '▸ Sprint 07/12', and shows in the week too",
+      (await count(openCard("[TESTE] SM item, renomeado pelo admin"))) === 1 &&
+        (await count(label)) === 1 && ((await label.textContent()) ?? "").trim() === "▸ Sprint 07/12" &&
+        (await count(page.locator('[data-lane-id="zz-test-sprint"] div[draggable]', { hasText: "[TESTE] SM item, renomeado pelo admin" }))) === 1);
     await page.setViewportSize({ width: 1440, height: 900 });
 
     // delete other people's items

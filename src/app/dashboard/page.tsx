@@ -1,5 +1,5 @@
 import { NavBar } from "@/components/NavBar";
-import { DashboardBranch, DashboardSyncProvider, ElimsNote, KanbanColumns, KpiCards, SprintPanels, SyncPill } from "@/components/DashboardSync";
+import { DashboardBranch, DashboardSyncProvider, KpiCards, SprintPanels, SyncPill } from "@/components/DashboardSync";
 import { getDashboard } from "@/lib/actions/dashboard";
 import { getViewerOrReset } from "@/lib/get-viewer";
 import { dashboardData } from "@/lib/mock-data";
@@ -13,7 +13,7 @@ export default async function DashboardPage() {
   const roleLabel = labelFor(viewer?.role ?? null);
   const isAdmin = viewer?.role === "admin";
 
-  // Everything comes from the Roadmap + the last GitHub sync; the mock columns only fill in
+  // Everything comes from the Roadmap + the last GitHub sync; the mock columns (only the KPIs read them) fill in
   // before the very first sync ever ran.
   const model = await getDashboard(dashboardData.columns);
 
@@ -36,16 +36,10 @@ export default async function DashboardPage() {
           <KpiCards />
 
           <SprintPanels />
-
-          <div className="flex flex-col gap-3.5">
-            <span className="text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Kanban</span>
-            <KanbanColumns />
-            <ElimsNote />
-          </div>
         </DashboardSyncProvider>
 
         <div className="py-3 text-center text-xs text-rs-text-faint">
-          RoadS · dados reais do GitHub Projects, Essencis-Labs #7 no KANBAN
+          RoadS · dados reais do GitHub Projects, Essencis-Labs #7
         </div>
       </div>
     </div>

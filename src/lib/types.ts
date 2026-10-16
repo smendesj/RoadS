@@ -1,6 +1,6 @@
 export type Role = "admin" | "scrum_master" | "dev";
 
-/** Sprint lanes should hold at most this many items (the Roadmap groups below have no limit).
+/** Sprint lanes should hold at most this many items (the type lanes, where an item with no week sits, have no limit).
  *  Not enforced: a sprint over it shows n/4 and a warning asking for the overflow to move out. */
 export const MAX_ITEMS_PER_SPRINT = 4;
 /** Title a "+ Novo item" card starts with; it gets no GitHub issue until someone writes a real one. */
@@ -42,6 +42,8 @@ export type RoadmapItem = {
   stack?: string | null;
   /** Profile that created the item from RoadS; null for the seeded/GitHub-backed items. */
   createdBy?: string | null;
+  /** When the item was stored: the Kanban's Open lists the items with no issue on the board newest first. */
+  createdAt?: string;
   /** The issue's Status on Project #7 (last snapshot), set only on sprint items; "done" shows as Concluído. */
   status?: "open" | "dev" | "blocker" | "done";
   notes: Note[];
@@ -52,6 +54,8 @@ export type Lane = {
   id: string;
   title: string;
   dates: string;
+  /** The week's first day ("2026-10-12"), which names it on a Kanban card planned in it ("▸ Sprint 12/10"). */
+  start?: string;
   /** The week whose dates hold today in São Paulo (src/lib/sprint-week.ts); at most one lane has it. */
   current?: boolean;
   /** A week shown on the Roadmap that the database doesn't have (a gap, or the empty one at the end of the row): it

@@ -29,7 +29,8 @@ const { BASE, expect, sleep } = L;
       const mover = await page.locator('select[aria-label="Mover para"]').count();
       const editable = role !== "dev";
       expect(`${label}: roadmap controls ${editable ? "present" : "absent"} (novo ${novo}, sync ${syncIssues}, draggable ${draggable}, mover ${mover})`,
-        editable ? novo === 3 && syncIssues === 1 && draggable > 0 && mover > 0 : novo === 0 && syncIssues === 1 && draggable === 0 && mover === 0);
+        // One "+ Novo item": in the Kanban's Open, the one place an item is born.
+        editable ? novo === 1 && syncIssues === 1 && draggable > 0 && mover > 0 : novo === 0 && syncIssues === 1 && draggable === 0 && mover === 0);
       expect(`${label}: never sees 'Entrar' while signed in`, (await page.locator('a[href="/login"]').count()) === 0);
 
       await page.goto(BASE + "/config", { waitUntil: "load" });
