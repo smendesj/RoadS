@@ -73,6 +73,37 @@ async function loggedCalls(wanted) {
       `${state.status}`
     );
 
+    // The sprints are weeks by date: sprintId sprint-DD-MM-AAAA from the Monday, titled by the dates, in date order,
+    // and never the e2e fixture (zz-test-*).
+    const sprints = state.json?.sprints ?? [];
+    const dateId = (iso) => `sprint-${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
+    expect(
+      "roadmap-state: every sprintId is sprint-DD-MM-AAAA, taken from the week's start date",
+      sprints.length > 0 && sprints.every((sp) => /^sprint-\d{2}-\d{2}-\d{4}$/.test(sp.sprintId) && sp.sprintId === dateId(sp.startDate)),
+      JSON.stringify(sprints.map((sp) => [sp.sprintId, sp.startDate]))
+    );
+    expect(
+      "roadmap-state: the weeks come in the order of their start date",
+      sprints.every((sp, i) => i === 0 || sprints[i - 1].startDate < sp.startDate),
+      JSON.stringify(sprints.map((sp) => sp.startDate))
+    );
+    expect(
+      "roadmap-state: a sprint is titled by its dates only, never by its position",
+      sprints.every((sp) => /^Sprint \d{2}(\/\d{2})?–\d{2}\/\d{2}$/.test(sp.title)),
+      JSON.stringify(sprints.map((sp) => sp.title))
+    );
+    expect(
+      "roadmap-state: the e2e fixture lanes never reach Frontlights",
+      ![...sprints, ...(state.json?.groups ?? [])].some((l) => String(l.laneId).startsWith("zz-test-")) &&
+        !(state.json?.removedPending ?? []).some((r) => String(r.laneId ?? "").startsWith("zz-test-"))
+    );
+    // Holds only after migration 0030 is pushed: before it the lanes are still atual/proxima/terceira.
+    expect(
+      "roadmap-state (after 0030): laneId is the same sprint-DD-MM-AAAA as sprintId",
+      sprints.length > 0 && sprints.every((sp) => sp.laneId === sp.sprintId),
+      JSON.stringify(sprints.map((sp) => [sp.laneId, sp.sprintId]))
+    );
+
     const pending = await call("GET", "/pending-changes");
     expect(
       "pending-changes: 200, version 1, a list of changes and an asOf that is null or a timestamp",
