@@ -49,3 +49,28 @@ export function weekFate(start: string, today: string): "future" | "current" | "
   const monday = currentMonday(today);
   return start > monday ? "future" : start === monday ? "current" : "ended";
 }
+
+export type RowWeek = { id: string; start: string; end: string; virtual: boolean; current: boolean };
+
+/**
+ * The Roadmap's row of weeks: every week stored in the database (`weekLanes` of sprint-week.ts, so the e2e fixture
+ * and lanes with no dates are not here), past ones included until the rotation deletes them, and every week from
+ * the current one to the last stored one that the database lacks (a gap), plus one empty week after that: the
+ * ones it lacks are `virtual`, shown but not stored until an item is dropped in them. Nothing is added past the
+ * 52-week horizon. In date order; `current` is the week whose dates hold today (the next one on a weekend).
+ */
+export function weekRow(stored: { id: string; start_date: string; end_date: string }[], today: string): RowWeek[] {
+  const monday = currentMonday(today);
+  const horizon = addDays(monday, 7 * WEEK_HORIZON_WEEKS);
+  const weeks: RowWeek[] = stored.map((l) => ({ id: l.id, start: l.start_date, end: l.end_date, virtual: false, current: false }));
+  const last = weeks.reduce((max, w) => (w.start > max ? w.start : max), monday);
+  const until = addDays(last, 7) < horizon ? addDays(last, 7) : horizon;
+  for (let m = monday; m <= until; m = addDays(m, 7)) {
+    if (!weeks.some((w) => w.start <= m && m <= w.end)) weeks.push({ id: sprintIdFor(m), start: m, end: addDays(m, 4), virtual: true, current: false });
+  }
+  weeks.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+  const day = today < monday ? monday : today;
+  const current = weeks.find((w) => w.start <= day && day <= w.end);
+  if (current) current.current = true;
+  return weeks;
+}

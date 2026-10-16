@@ -5,8 +5,9 @@ import { withIssueStatus } from "@/lib/board";
 import { createGeoCloudIssue } from "@/lib/github";
 import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
 import { moveLanePayload } from "@/lib/move-payload";
-import { currentSprintIn, currentSprintLane } from "@/lib/current-sprint";
-import { sprintLanesByDate, weekDates, weekTitle } from "@/lib/sprint-week";
+import { currentSprintLane } from "@/lib/current-sprint";
+import { sprintLanesByDate, todayInSaoPaulo, weekDates, weekLanes, weekTitle } from "@/lib/sprint-week";
+import { weekRow } from "@/lib/week-plan";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import { deleteFutureWeekIfEmpty, ensureWeekLane } from "@/lib/week-lanes";
@@ -74,16 +75,28 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
     byLane.set(it.lane_id, list);
   }
 
-  // The sprints are weeks (src/lib/sprint-week.ts): in the order of their start date, titled by their dates only,
-  // and the one whose dates hold today in São Paulo is the current one, whatever its id.
-  const current = currentSprintIn(lanes ?? []);
-  const sprintLanes: Lane[] = sprintLanesByDate((lanes ?? []).filter((lane) => lane.kind === "sprint")).map((lane) => ({
+  // The sprints are weeks (src/lib/sprint-week.ts), titled by their dates only: the row of src/lib/week-plan.ts, every
+  // stored week and the ones from this week to the last stored one that the database lacks, plus one empty week at
+  // the end (virtual: shown, not stored), in date order, with the one whose dates hold today in São Paulo marked as
+  // the current one. The sprint lanes that are no week (the e2e fixture, a lane with no dates) come after them.
+  const sprintRows = (lanes ?? []).filter((lane) => lane.kind === "sprint");
+  const weeks = weekLanes(sprintRows);
+  const row: Lane[] = weekRow(weeks, todayInSaoPaulo(new Date())).map((week) => ({
+    id: week.id,
+    title: weekTitle(week.start, week.end),
+    dates: weekDates(week.start, week.end),
+    current: week.current,
+    ...(week.virtual ? { virtual: true } : {}),
+    items: (byLane.get(week.id) ?? []).map(toRoadmapItem),
+  }));
+  const others: Lane[] = sprintLanesByDate(sprintRows.filter((lane) => !weeks.includes(lane))).map((lane) => ({
     id: lane.id,
     title: lane.start_date && lane.end_date ? weekTitle(lane.start_date, lane.end_date) : lane.title,
     dates: lane.start_date && lane.end_date ? weekDates(lane.start_date, lane.end_date) : "",
-    current: lane.id === current?.id,
+    current: false,
     items: (byLane.get(lane.id) ?? []).map(toRoadmapItem),
   }));
+  const sprintLanes = [...row, ...others];
   const groups: RoadmapGroup[] = (lanes ?? [])
     .filter((lane) => lane.kind !== "sprint")
     .map((lane) => ({ id: lane.id, title: lane.title, items: (byLane.get(lane.id) ?? []).map(toRoadmapItem) }));
