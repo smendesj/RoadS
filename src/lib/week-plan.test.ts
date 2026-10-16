@@ -37,15 +37,12 @@ test("a week at most 52 weeks after the current one may be created, not later", 
   assert.deepEqual(weekToCreate("sprint-18-10-2027", "2026-10-16"), { ok: false, reason: "too_far" });
 });
 
-test("a week lane is future, current or ended by its Monday against today's; any other lane is none of them", () => {
-  assert.equal(weekFate("sprint-19-10-2026", "2026-10-16"), "future");
-  assert.equal(weekFate("sprint-12-10-2026", "2026-10-16"), "current");
-  assert.equal(weekFate("sprint-05-10-2026", "2026-10-16"), "ended");
+test("a sprint lane is future, current or ended by its first day against the current week's Monday", () => {
+  assert.equal(weekFate("2026-10-19", "2026-10-16"), "future");
+  assert.equal(weekFate("2026-10-12", "2026-10-16"), "current");
+  assert.equal(weekFate("2026-10-05", "2026-10-16"), "ended");
   // Saturday: the week that ended is over, the next Monday's is the current one.
-  assert.equal(weekFate("sprint-12-10-2026", "2026-10-17"), "ended");
-  assert.equal(weekFate("sprint-19-10-2026", "2026-10-17"), "current");
-  assert.equal(weekFate("sprint-26-10-2026", "2026-10-17"), "future");
-  for (const id of ["zz-test-sprint", "atual", "proxima", "tipo-bug", "sprint-20-10-2026", "sprint-31-02-2027"]) {
-    assert.equal(weekFate(id, "2026-10-16"), null, id);
-  }
+  assert.equal(weekFate("2026-10-12", "2026-10-17"), "ended");
+  assert.equal(weekFate("2026-10-19", "2026-10-17"), "current");
+  assert.equal(weekFate("2026-10-26", "2026-10-17"), "future");
 });

@@ -42,13 +42,10 @@ export function weekToCreate(id: string, today: string): { ok: true; lane: NewWe
 }
 
 /**
- * Where a week lane stands today, by the Monday in its id: "future" (after the current week; it goes when it
- * empties), "current" (never deleted for being empty) or "ended". Any lane that is not a week by date (a type
- * group, the e2e fixture, a positional lane) is null: never created nor deleted by these rules.
+ * Where a sprint lane stands today, by its first day against the current week's Monday: "future" (it goes when it
+ * empties), "current" (never deleted for being empty) or "ended" (the rotation's to empty and delete).
  */
-export function weekFate(id: string, today: string): "future" | "current" | "ended" | null {
-  const parsed = parseWeekId(id);
-  if (!parsed || parsed.weekday !== 1) return null;
+export function weekFate(start: string, today: string): "future" | "current" | "ended" {
   const monday = currentMonday(today);
-  return parsed.start > monday ? "future" : parsed.start === monday ? "current" : "ended";
+  return start > monday ? "future" : start === monday ? "current" : "ended";
 }
