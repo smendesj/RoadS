@@ -92,7 +92,7 @@ test("a sub-issue is rolled up into its parent and never becomes an entry of its
     projectItems: [board(100, "Open"), board(101, "Done")],
   });
   assert.deepEqual(out.entries.map((e) => e.id), ["gc-100"]);
-  assert.deepEqual(out.entries[0].subIssues, { total: 3, done: 1 });
+  assert.deepEqual(out.entries[0].subIssues, { total: 2, done: 0 }); // 102 and 103 are open; the closed 101 is no part
   assert.equal(out.entries[0].status, "em_andamento"); // 1 of 3 steps: the parent is not under validation
   assert.equal(out.ignored.children, 3);
   assert.equal(out.ignored.cut, 0);
@@ -104,8 +104,8 @@ const closedIn = (at: string): Partial<GhIssue> => ({ state: "closed", stateReas
 const OLD = "2026-02-20T09:00:00-03:00"; // before the window opened
 const c = (oid: string, at: string, author = "dev-a") => ({ oid, at, author });
 
-test("the parts of an umbrella are the leaves of its whole tree, at any depth", () => {
-  // 100 has a step with two parts (103 done, 104 open), a part of its own (102, open), and a cancelled one.
+test("the parts of an umbrella are its sub-issues still open, not the leaves of its tree", () => {
+  // 100 has a step with parts of its own (103 done, 104 open, 105 cancelled) and another step (102, open).
   const out = facts({
     issues: [
       issue(100),
@@ -118,7 +118,7 @@ test("the parts of an umbrella are the leaves of its whole tree, at any depth", 
     projectItems: [board(100, "Open")],
   });
   assert.deepEqual(out.entries.map((e) => e.issue), [100]);
-  assert.deepEqual(out.entries[0].subIssues, { total: 3, done: 1 }); // 101 counts through 103 and 104, not as a part itself
+  assert.deepEqual(out.entries[0].subIssues, { total: 2, done: 0 }); // 101 and 102: 101 is one part, whatever hangs from it
   assert.equal(out.ignored.children, 5);
 });
 
@@ -181,7 +181,8 @@ test("a part closed in the window makes a quiet umbrella part of it, with no PR 
     issues: [issue(150, { createdAt: OLD }), issue(151, { parent: 150, createdAt: OLD, ...closedIn("2026-03-09T15:00:00-03:00") }), issue(152, { parent: 150, createdAt: OLD })],
     projectItems: [board(150, "Open")],
   });
-  assert.deepEqual(closed.entries.map((e) => [e.issue, e.status, e.subIssues]), [[150, "em_andamento", { total: 2, done: 1 }]]);
+  // The closed 151 is work done in the window, but no part: only the open 152 is.
+  assert.deepEqual(closed.entries.map((e) => [e.issue, e.status, e.subIssues]), [[150, "em_andamento", { total: 1, done: 0 }]]);
 
   const planned = facts({
     issues: [issue(155, { createdAt: OLD }), issue(156, { parent: 155, createdAt: "2026-03-09T10:00:00-03:00" })],
@@ -211,11 +212,11 @@ test("an umbrella with parts closed before the window and nothing since is under
   });
   const [entry] = out.entries;
   assert.equal(entry.status, "em_andamento");
-  assert.deepEqual(entry.subIssues, { total: 5, done: 3 });
+  assert.deepEqual(entry.subIssues, { total: 2, done: 0 }); // 164 and 165: the closed ones are no parts
   assert.deepEqual(entry.slices, { closed: [], blocked: [] }); // none was closed inside the window
 });
 
-test("slices list the parts closed inside the window, at any depth and in closing order, and the parts that are blocked", () => {
+test("slices never list a closed sub-issue, whenever it was closed: only the open ones that are blocked", () => {
   const out = facts({
     issues: [
       issue(300),
@@ -232,14 +233,7 @@ test("slices list the parts closed inside the window, at any depth and in closin
     ],
     projectItems: [board(300, "Open"), board(306, "Blocker")],
   });
-  assert.deepEqual(out.entries[0].slices, {
-    closed: [
-      { title: "Funcionalidade 302", closedAt: "2026-03-09T12:00:00-03:00" },
-      { title: "Funcionalidade 301", closedAt: "2026-03-09T15:00:00-03:00" },
-      { title: "Funcionalidade 308", closedAt: "2026-03-10T12:00:00-03:00" },
-    ],
-    blocked: [{ title: "Funcionalidade 305" }, { title: "Funcionalidade 306" }],
-  });
+  assert.deepEqual(out.entries[0].slices, { closed: [], blocked: [{ title: "Funcionalidade 305" }, { title: "Funcionalidade 306" }] });
   // The parts tell the progress; the status is still the collector's, from the umbrella's own card.
   assert.equal(out.entries[0].status, "em_andamento");
 });
@@ -254,8 +248,8 @@ test("a part's Blocker card counts as blocked as of the end of the window", () =
 });
 
 test("slices are evidence for whoever writes: the facts carry them, and the entry stays one JSON object of plain values", () => {
-  const out = facts({ issues: [issue(320), issue(321, { parent: 320, ...closedIn("2026-03-09T12:00:00-03:00") })], projectItems: [board(320, "Open")] });
-  assert.deepEqual(JSON.parse(JSON.stringify(out.entries[0].slices)), { closed: [{ title: "Funcionalidade 321", closedAt: "2026-03-09T12:00:00-03:00" }], blocked: [] });
+  const out = facts({ issues: [issue(320), issue(321, { parent: 320, labels: ["status:blocker"] })], timelines: [timeline(321, { commits: [c("aaaa111", "2026-03-09T10:00:00-03:00")] })], projectItems: [board(320, "Open")] });
+  assert.deepEqual(JSON.parse(JSON.stringify(out.entries[0].slices)), { closed: [], blocked: [{ title: "Funcionalidade 321" }] });
 });
 
 test("an umbrella planned in one go is not internal once its parts have a PR", () => {
@@ -269,8 +263,8 @@ test("an umbrella planned in one go is not internal once its parts have a PR", (
   assert.deepEqual(out.internal.items.map((i) => i.ref), ["#520", "#521", "#522", "#523"]);
 });
 
-test("a tree read only in part is said so: the entry carries a line, `ignored` counts it, and the parts GitHub counts stand in", () => {
-  // 400 says it has 3 sub-issues but only 401 was read; 410 says it has 4 and none was read.
+test("a tree read only in part is said so: the entry carries a line, `ignored` counts it, and the open ones GitHub counts stand in", () => {
+  // 400 says it has 3 sub-issues but only 401 (closed) was read; 410 says it has 4, one closed, and none was read.
   const out = facts({
     issues: [
       issue(400, { subIssues: { total: 3, completed: 1 } }),
@@ -282,8 +276,8 @@ test("a tree read only in part is said so: the entry carries a line, `ignored` c
   });
   assert.equal(out.ignored.cut, 2);
   const [partial, none] = out.entries;
-  assert.deepEqual(partial.subIssues, { total: 1, done: 1 });
-  assert.deepEqual(none.subIssues, { total: 4, done: 1 });
+  assert.equal(partial.subIssues, null); // what was read is closed: no part
+  assert.deepEqual(none.subIssues, { total: 3, done: 0 }); // the three GitHub counts open
   for (const e of [partial, none]) assert.ok(e.evidence.some((l) => /cortad/i.test(l)), e.evidence.join("|"));
   const whole = facts({ issues: [issue(420, { subIssues: { total: 1, completed: 0 } }), issue(421, { parent: 420 })], timelines: [timeline(421, { commits: [c("eeee555", "2026-03-09T10:00:00-03:00")] })], projectItems: [board(420, "Open")] });
   assert.equal(whole.ignored.cut, 0);
@@ -680,13 +674,13 @@ test("an epic is never a delivery: each work root under it is, with the rules of
   assert.equal(out.ignored.epics, 3); // 1000, 1010 (on the sprint board and all) and 1020
   assert.equal(out.ignored.children, 4); // 1031, 1032, 1033 and 1041 hang from a delivery
   assert.equal(out.ignored.quiet, 2); // 1023 was not touched, and 1024 was delivered before the window
-  // The epic on the sprint board is a cover: its deliveries are 1021 to 1024, its parts the leaves under them.
+  // The epic on the sprint board is a cover: its deliveries are 1021 to 1024, each counted by its parts (one with none is one part).
   assert.deepEqual(out.sprint.epics, [
     {
       issue: 1010,
       title: "Epic 1010",
       issues: { total: 4, done: 2 },
-      parts: { total: 6, done: 4, remaining: 2 }, // open: 1033 and 1023
+      parts: { total: 5, done: 2, remaining: 3 }, // 1021 and 1024 done; open: 1031 and 1033 (of 1022), and 1023
       open: [{ issue: 1022, title: "Funcionalidade 1022" }, { issue: 1023, title: "Funcionalidade 1023" }],
     },
   ]);
@@ -696,14 +690,8 @@ test("a work root takes the parts, the PRs and the closures of its own subtree, 
   const [one, two] = epicTree().entries;
   assert.equal(one.subIssues, null);
   assert.equal("slices" in one, false);
-  assert.deepEqual(two.subIssues, { total: 3, done: 2 }); // 1041, 1032 and 1033
-  assert.deepEqual(two.slices, {
-    closed: [
-      { title: "Funcionalidade 1032", closedAt: "2026-03-10T09:00:00-03:00" },
-      { title: "Funcionalidade 1041", closedAt: "2026-03-10T11:00:00-03:00" },
-    ],
-    blocked: [],
-  });
+  assert.deepEqual(two.subIssues, { total: 2, done: 0 }); // 1031 and 1033, open; the closed 1032 is no part
+  assert.deepEqual(two.slices, { closed: [], blocked: [] });
   assert.ok(two.sources.includes(`https://github.com/${REPO}/pull/2041`) && !two.sources.includes(`https://github.com/${REPO}/pull/2021`));
   assert.ok(!one.sources.includes(`https://github.com/${REPO}/pull/2041`));
 });
@@ -744,7 +732,7 @@ test("an epic below a delivery is just one more part of it, and an epic with not
     issues: [issue(1400, { createdAt: OLD }), epic(1401, { parent: 1400 }), part(1402, 1401, closedIn("2026-03-10T10:00:00-03:00")), epic(1500)],
     projectItems: [board(1400, "Open")],
   });
-  assert.deepEqual(out.entries.map((e) => [e.issue, e.subIssues]), [[1400, { total: 1, done: 1 }]]);
+  assert.deepEqual(out.entries.map((e) => [e.issue, e.subIssues]), [[1400, { total: 1, done: 0 }]]); // the open epic 1401
   assert.equal(out.ignored.epics, 1); // 1500; 1401 is inside a delivery
   assert.equal(out.ignored.children, 2);
 });
@@ -793,9 +781,10 @@ test("each open item on Development is a cover with what is left of it: deliveri
   const out = sprintTree();
   const [a, b, c, d] = out.sprint.epics;
   assert.deepEqual(out.sprint.epics.map((x) => x.issue), [2000, 2100, 2200, 2300]);
-  // 2000: deliveries 2010, 2020, 2030, 2040 (2 done); parts 1 + 4 + 1 + 2 = 8, 6 done... 2010, 2021-2024, 2041 are done.
+  // 2000: deliveries 2010, 2020, 2030, 2040 (2 done), one part each: 2010 and 2020 have none and are closed, 2030
+  // has none and is open, 2040 has the open 2042 (the closed 2041 is no part).
   assert.deepEqual(a.issues, { total: 4, done: 2 });
-  assert.deepEqual(a.parts, { total: 8, done: 6, remaining: 2 }); // 2030 and 2042 are left
+  assert.deepEqual(a.parts, { total: 4, done: 2, remaining: 2 }); // 2030 and 2042 are left
   assert.deepEqual(a.open, [{ issue: 2030, title: "Funcionalidade 2030" }, { issue: 2040, title: "Funcionalidade 2040" }]);
   assert.deepEqual(b.parts, { total: 2, done: 0, remaining: 2 });
   assert.deepEqual(b.issues, { total: 2, done: 0 });
@@ -812,15 +801,15 @@ test("each open item on Development is a cover with what is left of it: deliveri
 test("a cover is never an entry, but the deliveries closed under it are: concluded in the window, on the sprint or not", () => {
   const out = sprintTree();
   assert.deepEqual(out.entries.map((e) => [e.issue, e.status]), [[2010, "concluido"], [2020, "concluido"], [2040, "em_andamento"]]);
-  // 2010 has no parts and counts one; 2020 has four done. The delivery still under way is no "concluído".
-  assert.deepEqual(out.delivered, { issues: 2, parts: 1 + 4 });
+  // 2010 and 2020 have no parts (closed sub-issues are none) and count one each. The delivery still under way is no "concluído".
+  assert.deepEqual(out.delivered, { issues: 2, parts: 1 + 1 });
 });
 
 test("the delivered count only takes what is visible and concluded: hidden and unfinished ones do not count, a delivery with no parts counts one", () => {
   const none = facts({ issues: [issue(2400, { createdAt: OLD })], projectItems: [board(2400, "Open")] });
   assert.deepEqual(none.delivered, { issues: 0, parts: 0 });
   const hidden = sprintTree({ hide: { issues: [2010], patterns: [] } });
-  assert.deepEqual(hidden.delivered, { issues: 1, parts: 4 });
+  assert.deepEqual(hidden.delivered, { issues: 1, parts: 1 });
 });
 
 test("a cover with nothing left is not in the block, and a cover inside another cover is not counted twice", () => {
@@ -989,7 +978,7 @@ test("a delivery with no sub-issues counts its parts in the boxes of its accepta
   assert.ok(e?.evidence.some((l) => /1 caixa marcada no período, a última em 10\/03 14:30/.test(l)), e?.evidence.join(" | "));
 });
 
-test("a family that still has sub-issues keeps counting its leaves, whatever boxes its body has", () => {
+test("a family with sub-issues counts its boxes too, plus its sub-issues still open: never the closed ones", () => {
   const f = facts({
     issues: [
       issue(6, { body: BOXES_V3, bodyHistory: history, subIssues: { total: 2, completed: 1 } }),
@@ -999,8 +988,11 @@ test("a family that still has sub-issues keeps counting its leaves, whatever box
     prs: [pr(1007, { title: "Parte (#7)" })],
   });
   const e = f.entries.find((x) => x.issue === 6);
-  assert.deepEqual(e?.subIssues, { total: 2, done: 1 });
-  assert.deepEqual(e?.slices?.closed.map((s) => s.title), ["Funcionalidade 7"]);
+  assert.deepEqual(e?.subIssues, { total: 4, done: 2 }); // three boxes (two ticked) and the open 8
+  assert.deepEqual(e?.slices?.closed.map((s) => s.title), ["S2. Segunda parte (evidência: testes verdes)."]);
+  assert.deepEqual(e?.slices?.blocked.map((s) => s.title), ["S3. Terceira parte."]);
+  assert.ok(e?.evidence.includes("Partes (as caixas dos critérios de aceitação e as sub-issues abertas): 2 de 4 prontas"), e?.evidence.join(" | "));
+  assert.ok(e?.evidence.some((l) => /^1 sub-issue fechada no período \(fechada não conta como parte\)/.test(l)), e?.evidence.join(" | "));
 });
 
 test("a delivery with neither sub-issues nor boxes still has no parts and counts 1 when concluded", () => {

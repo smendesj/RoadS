@@ -605,8 +605,8 @@ export async function collectGithubData(
     level = next;
   }
 
-  // A delivery cut into boxes (no sub-issues) needs the dates of its ticks, which GitHub keeps only in the body's history.
-  await fetchBodyHistories(client, repository, [...issues.values()].filter((i) => (i.subIssues?.total ?? 0) === 0 && (criteriaBoxes(i.body) ?? []).some((b) => b.checked)));
+  // An issue with a ticked box needs the dates of its ticks (its boxes are parts, sub-issues or not), which GitHub keeps only in the body's history.
+  await fetchBodyHistories(client, repository, [...issues.values()].filter((i) => (criteriaBoxes(i.body) ?? []).some((b) => b.checked)));
 
   const prs = await fetchPrs(client, repository, [...prNumbers].sort((a, b) => a - b));
 
