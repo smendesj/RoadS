@@ -92,6 +92,17 @@ const { BASE, expect, sleep, svc } = L;
     const { data: created } = await svc.from("roadmap_items").select("id, title, prioridade, effort, created_by, github_issue_url, lane_id").eq("title", "[TESTE] criado pelo Scrum Master").maybeSingle();
     expect("create: saved with the SM as owner, High/Low, in the test lane", created && created.created_by === L.ids.sm && created.prioridade === "High" && created.effort === "Low" && created.lane_id === "zz-test-sprint", JSON.stringify(created));
     expect("create: no GitHub issue was opened (the token is empty in this test server)", created && created.github_issue_url === null);
+    // The week's order is roadmap_items.sort_order (the Roadmap's week, the Dashboard's Sprint and roadmap-state's
+    // position all read it); a new item, and an item moved with "Mover para", goes last.
+    const isLastOfWeek = async (id) => {
+      const rows = (await svc.from("roadmap_items").select("id, sort_order").eq("lane_id", "zz-test-sprint")).data ?? [];
+      const mine = rows.find((r) => r.id === id);
+      return { ok: !!mine && rows.every((r) => r.id === id || r.sort_order < mine.sort_order), rows };
+    };
+    {
+      const last = await isLastOfWeek(created.id);
+      expect("create: the new item is saved last in its week (a sort_order past every other item's)", last.ok, JSON.stringify(last.rows));
+    }
     const { data: note } = await svc.from("item_notes").select("author_role, body").eq("item_id", created.id);
     expect("create: the note is stored, pinned to scrum_master", note.length === 1 && note[0].author_role === "scrum_master" && /primeira nota/.test(note[0].body), JSON.stringify(note));
     expect("create: the note shows on the card as 'Scrum Master'", (await count(page.locator("div[draggable]", { hasText: "[TESTE] criado pelo Scrum Master" }).getByText("[TESTE] primeira nota"))) === 1);
@@ -164,6 +175,10 @@ const { BASE, expect, sleep, svc } = L;
     await sleep(2000);
     const { data: movedBack } = await svc.from("roadmap_items").select("lane_id").eq("id", created.id).single();
     expect("move (select, phone width): own item goes back to the test sprint", movedBack.lane_id === "zz-test-sprint", movedBack.lane_id);
+    {
+      const last = await isLastOfWeek(created.id);
+      expect("move (select): \"Mover para\" puts the item last in the week", last.ok, JSON.stringify(last.rows));
+    }
     await page.setViewportSize({ width: 1440, height: 900 });
     await sleep(500);
 
@@ -184,6 +199,8 @@ const { BASE, expect, sleep, svc } = L;
       expect("new week: dropped on the empty week, the item is saved there and the week's lane exists, dated by its Monday",
         inWeek.lane_id === trailing && born.length === 1 && born[0].kind === "sprint" && born[0].start_date === W.trailing && born[0].end_date === L.addDays(W.trailing, 4),
         JSON.stringify({ lane: inWeek.lane_id, born }));
+      const { data: first } = await svc.from("roadmap_items").select("sort_order").eq("id", created.id).single();
+      expect("new week: the item dropped on it is its first one (sort_order 0)", first.sort_order === 0, String(first.sort_order));
       await page.locator(`[data-lane-id="${next}"][data-virtual]`).waitFor({ timeout: 15000 }).catch(() => {});
       expect("new week: the week shows as stored, and a new empty week follows it at the end",
         (await count(page.locator(`[data-lane-id="${trailing}"]:not([data-virtual])`))) === 1 && (await count(page.locator(`[data-lane-id="${next}"][data-virtual]`))) === 1);
@@ -199,6 +216,72 @@ const { BASE, expect, sleep, svc } = L;
         (await count(page.locator(`[data-lane-id="${trailing}"][data-virtual]`))) === 1 && (await count(page.locator(`[data-lane-id="${next}"]`))) === 0);
       await page.setViewportSize({ width: 1440, height: 900 });
       await sleep(500);
+    }
+
+    // ------------------------------------------------ a card dropped on another one of a week goes right before it
+    // Ties and gaps an older writer left (7, 7, 9) are set first, on items of three owners: the server renumbers the
+    // whole week 0, 1, 2… in its new order, the admin's item too, which the scrum master's own session can't write.
+    const weekOrder = async () => (await svc.from("roadmap_items").select("id, sort_order").eq("lane_id", "zz-test-sprint").order("sort_order").order("id")).data ?? [];
+    const shownOrder = (p) => p.locator('[data-lane-id="zz-test-sprint"] [data-item-id]').evaluateAll((els) => els.map((el) => el.dataset.itemId));
+    const at = (order, id) => order.findIndex((r) => r.id === id);
+    const numbered = (order) => order.every((r, i) => r.sort_order === i);
+    const lineOn = (p, id) => p.locator(`[data-item-id="${id}"] [data-drop-line]`).count();
+    {
+      const queued = async (id) => ((await svc.from("roadmap_sync_queue").select("id").eq("item_id", id).eq("action", "move_lane")).data ?? []).length;
+      await svc.from("roadmap_items").update({ sort_order: 7 }).in("id", [L.ids.adminItem, L.ids.smItem]);
+      await svc.from("roadmap_items").update({ sort_order: 9 }).eq("id", created.id);
+      await page.reload({ waitUntil: "load" });
+      await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+      await page.getByText("[TESTE] criado e editado pelo SM").first().waitFor({ timeout: 15000 });
+      await L.fitWholePage(page);
+      await page.locator('[data-lane-id="zz-test-sprint"]').scrollIntoViewIfNeeded();
+      // Like mouseDrag, but the button stays down over the target, so the line can be looked at before the drop.
+      const holdOver = async (source, target) => {
+        await source.scrollIntoViewIfNeeded();
+        const c = await source.boundingBox();
+        await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(c.x + c.width / 2 + 10, c.y + c.height / 2 + 10, { steps: 5 });
+        const t = await target.boundingBox();
+        await page.mouse.move(t.x + t.width / 2, t.y + 12, { steps: 25 });
+        await page.mouse.move(t.x + t.width / 2 + 2, t.y + 14, { steps: 2 });
+        await sleep(300);
+      };
+
+      // From a group onto the admin's card in the test week.
+      const queuedSeeded = await queued(L.ids.seeded);
+      await holdOver(seeded, adminItem);
+      const litA = await lineOn(page, L.ids.adminItem);
+      await page.mouse.up();
+      await sleep(2500);
+      const afterA = await weekOrder();
+      expect("drop on a card (mouse): held over a card of a week, an orange line shows above that card", litA === 1, `lines=${litA}`);
+      expect("drop on a card (mouse): the item from a group is saved in the week right before the card it was dropped on",
+        at(afterA, L.ids.seeded) >= 0 && at(afterA, L.ids.seeded) + 1 === at(afterA, L.ids.adminItem), JSON.stringify(afterA));
+      expect("drop on a card (mouse): the week is numbered 0, 1, 2… in its new order, the admin's item renumbered too (by the server)",
+        afterA.length === 4 && numbered(afterA), JSON.stringify(afterA));
+      expect("drop on a card (mouse): the move into the week is queued, once", (await queued(L.ids.seeded)) === queuedSeeded + 1);
+      const shownA = await shownOrder(page);
+      expect("drop on a card (mouse): the week on the screen shows the order saved", JSON.stringify(shownA) === JSON.stringify(afterA.map((r) => r.id)), JSON.stringify(shownA));
+
+      // Within the same week: the item, last there, onto the card just dropped.
+      const queuedOwn = await queued(created.id);
+      await holdOver(card("[TESTE] criado e editado pelo SM"), seeded);
+      const litB = await lineOn(page, L.ids.seeded);
+      await page.mouse.up();
+      await sleep(2500);
+      const afterB = await weekOrder();
+      expect("reorder within a week (mouse): the line shows on the card, and the item is saved right before it",
+        litB === 1 && at(afterB, created.id) + 1 === at(afterB, L.ids.seeded) && numbered(afterB), JSON.stringify({ litB, afterB }));
+      expect("reorder within a week: nothing is queued (roadmap-state's position carries the order)", (await queued(created.id)) === queuedOwn);
+      const shownB = await shownOrder(page);
+      await page.reload({ waitUntil: "load" });
+      await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+      await page.getByText("[TESTE] criado e editado pelo SM").first().waitFor({ timeout: 15000 });
+      const reloadedB = await shownOrder(page);
+      expect("reorder within a week: the screen shows the order saved, right after the drop and on a fresh load",
+        JSON.stringify(shownB) === JSON.stringify(afterB.map((r) => r.id)) && JSON.stringify(reloadedB) === JSON.stringify(shownB), JSON.stringify({ shownB, reloadedB }));
+      expect("drop on a card: no line is left on the page after the drops", (await page.locator("[data-drop-line]").count()) === 0);
     }
 
     // ------------------------------------------------ move on a phone: hold the card, then drag it with the finger
@@ -270,6 +353,29 @@ const { BASE, expect, sleep, svc } = L;
       await sleep(1200);
       expect("phone: holding the card lifts it (a copy follows the finger)", ghost === 1, `ghosts=${ghost}`);
       expect("phone: dropped outside any sprint or group, the card goes back and nothing is saved", (await lane(created.id)) === "zz-test-sprint" && (await phone.page.locator("[data-touch-ghost]").count()) === 0);
+
+      // Held, then dropped on another card of its week: it goes right before that card, under the orange line. The
+      // target is the week's last card, never the one right after the held card (the held one is right before the
+      // seeded item since the mouse reorder above), so the drop is a real change.
+      {
+        const order0 = await weekOrder();
+        const targetId = order0.at(-1).id;
+        await phoneCard().scrollIntoViewIfNeeded();
+        from = await centre(phoneCard());
+        const onto = await centre(phone.page.locator(`[data-lane-id="zz-test-sprint"] [data-item-id="${targetId}"]`));
+        await holdTestCard(from);
+        await glide(from, onto, 16);
+        await sleep(200);
+        const lineLit = await lineOn(phone.page, targetId);
+        await touch("touchEnd");
+        await sleep(2500);
+        const order1 = await weekOrder();
+        expect("phone: held over another card of its week, an orange line shows above that card", lineLit === 1, `lines=${lineLit}`);
+        expect("phone: dropped on that card, the item is saved right before it, the week numbered 0, 1, 2…",
+          at(order1, created.id) + 1 === at(order1, targetId) && numbered(order1), JSON.stringify({ order0, order1 }));
+        const shown = await shownOrder(phone.page);
+        expect("phone: the week on the screen shows the order saved", JSON.stringify(shown) === JSON.stringify(order1.map((r) => r.id)), JSON.stringify(shown));
+      }
 
       // Held, then dragged onto a group: saved there, the same as a drag on the desktop.
       await phoneCard().scrollIntoViewIfNeeded();
