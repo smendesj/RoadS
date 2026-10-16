@@ -35,6 +35,17 @@ async function github(token: string, path: string, init: { method: string; body:
   return json;
 }
 
+/** The labels of a GeoCloud issue, read now (a type:* label names the type lane its item goes back to). */
+export async function readIssueLabels(token: string, number: number): Promise<string[]> {
+  const res = await fetch(`https://api.github.com/repos/${GEOCLOUD_REPO}/issues/${number}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`GitHub respondeu ${res.status} ao ler a issue`);
+  const json: { labels?: (string | { name?: string })[] } = await res.json();
+  return (json.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean);
+}
+
 function issueBody(description: string, effort: Effort): string {
   return [
     "## Por que entrou na fila",

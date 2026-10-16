@@ -7,6 +7,10 @@ export const TYPE_LANES = BLOCK_TYPES.map((t) => `tipo-${t}`);
  *  issue, the sync files it in the lane of the issue's type label. */
 export const NEW_ITEM_LANE = "tipo-feature";
 
+/** The target a card dropped on the Kanban's Open is moved to: no lane, but "no week". The server unplans the item into
+ *  the type lane unplanLane names; the caller never picks it. */
+export const KANBAN = "kanban";
+
 /** The type named by a type:* label that has a block; an epic wins over the type it also carries. */
 function blockType(labels: string[]): string | null {
   const types = labels.filter((l) => l.startsWith("type:")).map((l) => l.slice(5));

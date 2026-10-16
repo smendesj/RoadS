@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { KANBAN } from "@/lib/issue-lane";
 import { dropMove, edgeScrollSpeed, LONG_PRESS_MS, pressAfterMove, pressAfterTime, touchOwnsDrag, type PressState } from "@/lib/touch-drag";
 
 // Dragging a Roadmap card with a finger (src/lib/touch-drag.ts has the rules). The desktop keeps the browser's own
@@ -8,8 +9,9 @@ import { dropMove, edgeScrollSpeed, LONG_PRESS_MS, pressAfterMove, pressAfterTim
 // cancels the pointer, and a non-passive touchmove is the one way to keep the page still after the card lifts.
 //
 // The screen marks: every sprint and group carries data-lane-id (where a card can land), and every card in it
-// data-item-id (the one a dropped card goes before); a scrolling area that should follow the finger near its edges
-// carries data-drag-scroll="x" or "y" (the page itself always does).
+// data-item-id (the one a dropped card goes before); the Kanban's Open carries data-unplan-target (a card dropped there
+// lands on KANBAN, before no card: the Roadmap unplans it); a scrolling area that should follow the finger near its
+// edges carries data-drag-scroll="x" or "y" (the page itself always does).
 
 type Press = {
   itemId: string;
@@ -49,6 +51,7 @@ function touchDragController({ setLifted, setOver, setBefore }: Ports) {
   // through, so this is the card on the page).
   const spotAt = (x: number, y: number): { lane: string | null; card: string | null } => {
     const el = document.elementFromPoint(x, y);
+    if (!el?.closest("[data-lane-id]") && el?.closest("[data-unplan-target]")) return { lane: KANBAN, card: null };
     const lane = el?.closest("[data-lane-id]") as HTMLElement | null;
     const card = el?.closest("[data-item-id]") as HTMLElement | null;
     return { lane: lane?.dataset.laneId ?? null, card: lane && card && lane.contains(card) ? card.dataset.itemId ?? null : null };
