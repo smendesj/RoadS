@@ -289,20 +289,25 @@ async function rotateSprints(doneUrls: Set<string>, now = new Date()): Promise<v
   const byId = new Map((items ?? []).map((it) => [it.id, it]));
 
   for (const { id, laneId } of plan.finished) {
+    const item = byId.get(id)!;
+    // Queued first, so no item leaves without its change: with item_id null, since the row is about to go, and the
+    // payload carrying it all. Then the delete, only of the item still in the week this sync saw it in; when it
+    // fails or finds nothing (another sync took it), the change just queued is withdrawn. The item's notes go
+    // only with a delete that happened.
+    const { data: queued, error: queueError } = await admin
+      .from("roadmap_sync_queue")
+      .insert({
+        item_id: null,
+        action: "remove",
+        payload: { item_id: id, lane_id: laneId, title: item.title, github_issue_url: item.github_issue_url, reason: "sprint ended, issue done" },
+      })
+      .select("id")
+      .single();
+    if (queueError) throw queueError;
     const { data: removed, error } = await admin.from("roadmap_items").delete().eq("id", id).eq("lane_id", laneId).select();
-    if (error) throw error;
-    const row = removed?.[0];
-    if (!row) continue;
-    // The row is gone, so the queue's FK can't point at it: the payload carries it all. If the queue refuses, the
-    // item comes back, so the Roadmap and the files FrontlightS writes never disagree.
-    const { error: queueError } = await admin.from("roadmap_sync_queue").insert({
-      item_id: null,
-      action: "remove",
-      payload: { item_id: id, lane_id: laneId, title: row.title, github_issue_url: row.github_issue_url, reason: "sprint ended, issue done" },
-    });
-    if (queueError) {
-      await admin.from("roadmap_items").insert(row);
-      throw queueError;
+    if (error || !removed?.length) {
+      await admin.from("roadmap_sync_queue").delete().eq("id", queued.id);
+      if (error) throw error;
     }
   }
 
