@@ -13,11 +13,13 @@
 --     move emptied a future week). Only the changes naming a lane that still exists are translated, so that one
 --     keeps naming a week and the last check raises "an unacked change still names a week lane". What to do: wait
 --     for Frontlights to ack the pending changes (POST /ack) and run it again.
---   * There are more than three weeks by date, or they are not three consecutive weeks from the earliest one: the
---     first check raises "week lanes beyond three consecutive weeks", before anything is written. What to do: join
---     the weeks by hand, moving the items in the Roadmap into at most three consecutive weeks (each move queued as
---     usual), wait for the acks, and run it again. Which weeks join which is a decision about the plan, not a
---     rollback, so this script never makes it.
+--   * A week lane starts on a day other than the earliest week's first day or the days 7 and 14 after it (more
+--     than three weeks, or a week past the third): the check right after the one for week lanes with no dates
+--     raises "week lanes beyond three consecutive weeks", before anything is written. A gap is not refused: with
+--     weeks on the first day and 14 days later only, `proxima` is created empty between them. What to do: join
+--     the weeks by hand, moving the items in the Roadmap into those three weeks (each move queued as usual), wait
+--     for the acks, and run it again. Which weeks join which is a decision about the plan, not a rollback, so
+--     this script never makes it.
 
 do $$
 declare
