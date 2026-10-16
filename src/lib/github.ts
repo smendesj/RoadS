@@ -35,11 +35,23 @@ async function github(token: string, path: string, init: { method: string; body:
   return json;
 }
 
-/** The labels of a GeoCloud issue, read now (a type:* label names the type lane its item goes back to). */
-export async function readIssueLabels(token: string, number: number): Promise<string[]> {
-  const res = await fetch(`https://api.github.com/repos/${GEOCLOUD_REPO}/issues/${number}`, {
+/** How long unplanning waits for an issue's labels before it goes by the stored type instead. */
+export const LABELS_TIMEOUT_MS = 5000;
+
+/**
+ * The labels of a GeoCloud issue, read now (a type:* label names the type lane its item goes back to). Gives up
+ * after `timeoutMs` (a TimeoutError), so a slow GitHub never holds the move that waits on it; the caller then falls
+ * back to the stored type, as with no token. `fetch` is a port for the tests.
+ */
+export async function readIssueLabels(
+  token: string,
+  number: number,
+  { fetch: fetchImpl = fetch, timeoutMs = LABELS_TIMEOUT_MS }: { fetch?: typeof fetch; timeoutMs?: number } = {}
+): Promise<string[]> {
+  const res = await fetchImpl(`https://api.github.com/repos/${GEOCLOUD_REPO}/issues/${number}`, {
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
     cache: "no-store",
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`GitHub respondeu ${res.status} ao ler a issue`);
   const json: { labels?: (string | { name?: string })[] } = await res.json();
