@@ -11,10 +11,17 @@ test("a sync the page starts by itself goes to GitHub at most every 5 minutes; t
 });
 
 test("only a move into or out of the current sprint changes the Project, so only that one syncs right away", () => {
-  assert.equal(touchesCurrentSprint("atual", "proxima"), true);
-  assert.equal(touchesCurrentSprint("tipo-feature", "atual"), true);
-  assert.equal(touchesCurrentSprint("proxima", "terceira"), false);
-  assert.equal(touchesCurrentSprint("atual", "atual"), false);
+  const now = "sprint-12-10-2026";
+  assert.equal(touchesCurrentSprint(now, "sprint-19-10-2026", now), true);
+  assert.equal(touchesCurrentSprint("tipo-feature", now, now), true);
+  assert.equal(touchesCurrentSprint("sprint-19-10-2026", "sprint-26-10-2026", now), false);
+  assert.equal(touchesCurrentSprint(now, now, now), false);
+});
+
+test("the current sprint is the week the board names current, not a lane called atual", () => {
+  assert.equal(touchesCurrentSprint("atual", "tipo-feature", "sprint-12-10-2026"), false);
+  assert.equal(touchesCurrentSprint("atual", "tipo-feature", "atual"), true, "before migration 0030 the positional lane can be the current week");
+  assert.equal(touchesCurrentSprint("atual", "tipo-feature", null), false, "no current week on the board: no move touches it");
 });
 
 test("a move the 30-second brake held back is synced again when the server says the brake lets go", () => {

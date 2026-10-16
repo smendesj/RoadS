@@ -1,9 +1,11 @@
-// "In the current sprint" (the Roadmap's `atual` lane) and "Development" (the Status on GitHub Project #7)
-// are one fact told twice, and the sync keeps the two telling it the same way. The Project has no sprint
-// field, so the next sprints exist only in the Roadmap: their issues are Open on the Project.
+// "In the current sprint" (the Roadmap's lane of this week, told by the calendar in src/lib/sprint-week.ts and
+// handed in as `current`) and "Development" (the Status on GitHub Project #7) are one fact told twice, and the
+// sync keeps the two telling it the same way. The Project has no sprint field, so the next sprints exist only in
+// the Roadmap: their issues are Open on the Project. With no lane for this week yet (`current` null), nothing is
+// in the current sprint; a pull then goes into the week's lane, which the caller creates.
 //
-//   in `atual`, Development  -> agree, nothing to do          outside `atual`, Open -> agree, nothing to do
-//   in `atual`, Open         -> disagree                      outside `atual`, Development -> disagree
+//   in `current`, Development  -> agree, nothing to do        outside `current`, Open -> agree, nothing to do
+//   in `current`, Open         -> disagree                    outside `current`, Development -> disagree
 //
 // When they disagree the one that moved LAST wins: the Project's side is the time GitHub keeps for the
 // Status of that card, the Roadmap's is the item's latest add / move_lane row in the sync queue (a person's
@@ -14,8 +16,6 @@
 //
 // Pure on purpose, with the database and GitHub behind the ports of SprintSyncDeps, so the rule runs under
 // test without either. board-sync.ts plugs the real ones in.
-
-export const CURRENT_SPRINT = "atual";
 
 export type ProjectStatus = "Open" | "Development" | "Blocker" | "Done";
 type WritableStatus = "Open" | "Development";
@@ -43,30 +43,30 @@ export type SprintPlan = {
   stuck: string[];
 };
 
-const inSprint = (c: SprintCandidate) => c.laneId === CURRENT_SPRINT;
+const inSprint = (c: SprintCandidate, current: string | null) => current !== null && c.laneId === current;
 const sprintSays = (c: SprintCandidate) => c.card.status === "Development";
 const concerned = (c: SprintCandidate) => c.card.status === "Open" || c.card.status === "Development";
 
 /** The items whose two sides tell different stories, and so the only ones whose last move is worth looking up. */
-export function disagreeing(candidates: SprintCandidate[]): SprintCandidate[] {
-  return candidates.filter((c) => concerned(c) && inSprint(c) !== sprintSays(c));
+export function disagreeing(candidates: SprintCandidate[], current: string | null): SprintCandidate[] {
+  return candidates.filter((c) => concerned(c) && inSprint(c, current) !== sprintSays(c));
 }
 
-export function planSprintSync(candidates: SprintCandidate[], movedAt: Map<string, string>): SprintPlan {
+export function planSprintSync(candidates: SprintCandidate[], movedAt: Map<string, string>, current: string | null): SprintPlan {
   const plan: SprintPlan = { pull: [], release: [], write: [], stuck: [] };
-  for (const c of disagreeing(candidates)) {
+  for (const c of disagreeing(candidates, current)) {
     const roadmapAt = Date.parse(movedAt.get(c.id) ?? c.createdAt);
     const projectAt = Date.parse(c.card.statusAt);
     const projectLast = projectAt > roadmapAt; // a tie goes to the Roadmap
     if (projectLast) {
-      if (inSprint(c)) {
+      if (inSprint(c, current)) {
         if (c.releaseTo) plan.release.push({ id: c.id, from: c.laneId, to: c.releaseTo });
         else plan.stuck.push(c.id);
       } else {
         plan.pull.push({ id: c.id, from: c.laneId });
       }
     } else {
-      plan.write.push({ id: c.id, projectItemId: c.card.projectItemId, status: inSprint(c) ? "Development" : "Open" });
+      plan.write.push({ id: c.id, projectItemId: c.card.projectItemId, status: inSprint(c, current) ? "Development" : "Open" });
     }
   }
   return plan;
@@ -102,11 +102,12 @@ export const EMPTY_SPRINT_SUMMARY: SprintSyncSummary = { pulled: 0, released: 0,
  */
 export async function runSprintSync(
   candidates: SprintCandidate[],
-  deps: SprintSyncDeps
+  deps: SprintSyncDeps,
+  current: string | null
 ): Promise<{ summary: SprintSyncSummary; written: { id: string; status: WritableStatus }[] }> {
-  const apart = disagreeing(candidates);
+  const apart = disagreeing(candidates, current);
   const movedAt = apart.length ? await deps.movedAt(apart.map((c) => c.id)) : new Map<string, string>();
-  const plan = planSprintSync(candidates, movedAt);
+  const plan = planSprintSync(candidates, movedAt, current);
 
   const summary: SprintSyncSummary = { ...EMPTY_SPRINT_SUMMARY, stuck: plan.stuck.length };
   const written: { id: string; status: WritableStatus }[] = [];
