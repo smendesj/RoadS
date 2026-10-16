@@ -7,6 +7,17 @@
 -- weeks: folding more weeks into three positions is a decision, not a rollback. Like 0031, in one statement, with
 -- the same checks: items per week and in all, nothing left in a week lane, no unacked change naming one.
 -- Moves are not queued, because no item changes week. The e2e fixture lanes (`zz-test-*`) are not touched.
+--
+-- It aborts, safely (it raises, so nothing it did stays), in two cases that are expected, not faults:
+--   * An unacked change names a week whose lane is already gone (the rotation deleted the week that ended, or a
+--     move emptied a future week). Only the changes naming a lane that still exists are translated, so that one
+--     keeps naming a week and the last check raises "an unacked change still names a week lane". What to do: wait
+--     for Frontlights to ack the pending changes (POST /ack) and run it again.
+--   * There are more than three weeks by date, or they are not three consecutive weeks from the earliest one: the
+--     first check raises "week lanes beyond three consecutive weeks", before anything is written. What to do: join
+--     the weeks by hand, moving the items in the Roadmap into at most three consecutive weeks (each move queued as
+--     usual), wait for the acks, and run it again. Which weeks join which is a decision about the plan, not a
+--     rollback, so this script never makes it.
 
 do $$
 declare
