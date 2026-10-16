@@ -7,8 +7,9 @@ import { dropMove, edgeScrollSpeed, LONG_PRESS_MS, pressAfterMove, pressAfterTim
 // drag and drop; this only listens to touch. Touch events, not pointer events: once the browser starts panning it
 // cancels the pointer, and a non-passive touchmove is the one way to keep the page still after the card lifts.
 //
-// The screen marks: every sprint and group carries data-lane-id (where a card can land); a scrolling area that
-// should follow the finger near its edges carries data-drag-scroll="x" or "y" (the page itself always does).
+// The screen marks: every sprint and group carries data-lane-id (where a card can land), and every card in it
+// data-item-id (the one a dropped card goes before); a scrolling area that should follow the finger near its edges
+// carries data-drag-scroll="x" or "y" (the page itself always does).
 
 type Press = {
   itemId: string;
@@ -33,18 +34,24 @@ type Press = {
 type Ports = {
   setLifted(id: string | null): void;
   setOver(lane: string | null): void;
+  setBefore(card: string | null): void;
 };
 
 // Built once per Roadmap (the listeners it adds must be the very functions it later removes).
-function touchDragController({ setLifted, setOver }: Ports) {
+function touchDragController({ setLifted, setOver, setBefore }: Ports) {
   let press: Press | null = null;
-  let drop: (itemId: string, toLane: string) => void = () => {};
+  let drop: (itemId: string, toLane: string, beforeId: string | null) => void = () => {};
   let over: string | null = null;
+  let before: string | null = null;
   let lastTouchAt: number | null = null;
 
-  const laneAt = (x: number, y: number): string | null => {
+  // The lane under the finger, and the card under it in that lane (the copy that follows the finger lets the touch
+  // through, so this is the card on the page).
+  const spotAt = (x: number, y: number): { lane: string | null; card: string | null } => {
     const el = document.elementFromPoint(x, y);
-    return (el?.closest("[data-lane-id]") as HTMLElement | null)?.dataset.laneId ?? null;
+    const lane = el?.closest("[data-lane-id]") as HTMLElement | null;
+    const card = el?.closest("[data-item-id]") as HTMLElement | null;
+    return { lane: lane?.dataset.laneId ?? null, card: lane && card && lane.contains(card) ? card.dataset.itemId ?? null : null };
   };
 
   const track = (x: number, y: number) => {
@@ -52,10 +59,14 @@ function touchDragController({ setLifted, setOver }: Ports) {
     press.x = x;
     press.y = y;
     if (press.ghost) press.ghost.style.transform = `translate(${x - press.offsetX}px, ${y - press.offsetY}px) scale(1.03)`;
-    const lane = laneAt(x, y);
-    if (lane !== over) {
-      over = lane;
-      setOver(lane);
+    const spot = spotAt(x, y);
+    if (spot.lane !== over) {
+      over = spot.lane;
+      setOver(spot.lane);
+    }
+    if (spot.card !== before) {
+      before = spot.card;
+      setBefore(spot.card);
     }
   };
 
@@ -171,12 +182,14 @@ function touchDragController({ setLifted, setOver }: Ports) {
     document.removeEventListener("contextmenu", onContextMenu);
     document.removeEventListener("touchstart", onAnotherFinger);
     // A card that left the page mid-gesture (a reload replaced it) never drops anywhere.
-    const target = dropIt && p.card.isConnected ? laneAt(p.x, p.y) : null;
+    const spot = dropIt && p.card.isConnected ? spotAt(p.x, p.y) : { lane: null, card: null };
     over = null;
+    before = null;
     setOver(null);
+    setBefore(null);
     setLifted(null);
-    const move = dropMove(p.from, target);
-    if (move) drop(p.itemId, move.to);
+    const move = dropMove(p.itemId, p.from, spot.lane, spot.card);
+    if (move) drop(p.itemId, move.to, move.before);
   }
 
   /** Wire to a draggable card's onTouchStart. */
@@ -229,10 +242,11 @@ function touchDragController({ setLifted, setOver }: Ports) {
 // that is there all along (and does nothing) lets the drag hold the page still once the card lifts.
 const noop = () => {};
 
-export function useTouchDrag(onDrop: (itemId: string, toLane: string) => void) {
+export function useTouchDrag(onDrop: (itemId: string, toLane: string, beforeId: string | null) => void) {
   const [lifted, setLifted] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  const [controller] = useState(() => touchDragController({ setLifted, setOver }));
+  const [before, setBefore] = useState<string | null>(null);
+  const [controller] = useState(() => touchDragController({ setLifted, setOver, setBefore }));
   useEffect(() => {
     controller.onDrop(onDrop);
   });
@@ -243,5 +257,5 @@ export function useTouchDrag(onDrop: (itemId: string, toLane: string) => void) {
       controller.cancel();
     };
   }, [controller]);
-  return { start: controller.start, touchOwnsDrag: controller.touchOwnsDrag, lifted, over };
+  return { start: controller.start, touchOwnsDrag: controller.touchOwnsDrag, lifted, over, before };
 }

@@ -34,11 +34,14 @@ import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCa
 import { isStack, isTipo } from "@/lib/issue-fields";
 import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
-import { planRotation, SPRINT_IDS, type SprintDates, type SprintId } from "@/lib/sprint-rotation";
+import { planRotation, rotationIsIdle } from "@/lib/sprint-rotation";
+import { todayInSaoPaulo, weekLanes } from "@/lib/sprint-week";
 import { parseSlices, slicesQuery } from "@/lib/slices";
 import { planTitleFollow, type TitleCandidate } from "@/lib/title-follow";
-import { CURRENT_SPRINT, EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintSyncDeps, type SprintSyncSummary } from "@/lib/sprint-status-sync";
+import { currentSprintIn, currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
+import { EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintSyncDeps, type SprintSyncSummary } from "@/lib/sprint-status-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { deleteFutureWeekIfEmpty, deleteWeekIfEmpty, ensureWeekLane } from "@/lib/week-lanes";
 import { brakedSync } from "@/lib/sync-claim";
 import { SYNC_COOLDOWN_MS } from "@/lib/sync-cooldown";
 import { NEW_ITEM_TITLE } from "@/lib/types";
@@ -198,7 +201,7 @@ async function runBoardSync(): Promise<SyncResult> {
     }));
     const syncedAt = new Date().toISOString();
 
-    // A sprint whose week is over hands the current spot to the next one; a failure doesn't fail the sync.
+    // A week that is over hands what is left of it to today's week; a failure doesn't fail the sync.
     const doneUrls = new Set(columns.find((c) => c.key === "done")?.items.map((i) => i.url));
     await rotateSprints(doneUrls).catch((e) => console.error("syncBoard: sprint rotation failed", e));
 
@@ -256,70 +259,88 @@ async function runBoardSync(): Promise<SyncResult> {
   }
 }
 
-// Moves the three sprints up a step once the current one's last day has passed (see sprint-rotation.ts).
-// The guarded update of "atual" claims the rotation, so the cron and a button sync running together
-// can't rotate twice. Every removal and move is queued so FrontlightS mirrors it.
-async function rotateSprints(doneUrls: Set<string>): Promise<void> {
+// Turns the week once a week's last day has passed (src/lib/sprint-rotation.ts has the plan): only the week that
+// ended moves. Its Done items leave (a remove each); the rest go, in their order, on top of today's week, created
+// when it is missing (src/lib/week-lanes.ts), with a move_lane each (origin "rotation"); the items already there go
+// down with a new order only; the lane that ended goes once empty. The weeks to come are never touched. Any dated
+// sprint lane is a week, so before migration 0031 the positional "atual" ends like any other and "proxima" takes
+// its items, but "atual" stays, empty, for 0031 to rename with the changes just queued that name it; after it, the
+// lanes are named by their date.
+// Two syncs turning at once can't do it twice: every write takes an item only where this sync saw it (the update
+// and the delete are guarded by its lane, and only a row that changed is queued), and a lane goes only empty.
+async function rotateSprints(doneUrls: Set<string>, now = new Date()): Promise<void> {
   const admin = createAdminClient();
-  const [{ data: lanes, error: lanesError }, { data: items, error: itemsError }] = await Promise.all([
-    admin.from("lanes").select("id, start_date, end_date").in("id", [...SPRINT_IDS]),
-    admin.from("roadmap_items").select("id, lane_id, title, github_issue_url").in("lane_id", [...SPRINT_IDS]),
-  ]);
+  const { data: lanes, error: lanesError } = await admin.from("lanes").select("id, kind, start_date, end_date").eq("kind", "sprint");
   if (lanesError) throw lanesError;
+  const weeks = weekLanes(lanes ?? []);
+  if (!weeks.length) return;
+  const { data: items, error: itemsError } = await admin
+    .from("roadmap_items")
+    .select("id, lane_id, sort_order, title, github_issue_url")
+    .in("lane_id", weeks.map((w) => w.id));
   if (itemsError) throw itemsError;
 
-  const dates = {} as Record<SprintId, SprintDates>;
-  for (const id of SPRINT_IDS) {
-    const lane = lanes?.find((l) => l.id === id);
-    if (!lane?.start_date || !lane.end_date) return;
-    dates[id] = { start: lane.start_date, end: lane.end_date };
-  }
-
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
   const plan = planRotation({
-    today,
-    dates,
-    items: (items ?? []).map((it) => ({ id: it.id, laneId: it.lane_id, url: it.github_issue_url })),
+    today: todayInSaoPaulo(now),
+    lanes: weeks,
+    items: (items ?? []).map((it) => ({ id: it.id, laneId: it.lane_id, sortOrder: it.sort_order, url: it.github_issue_url })),
     doneUrls,
   });
-  if (plan.rotations === 0) return;
-
-  const { data: claimed, error: claimError } = await admin
-    .from("lanes")
-    .update({ start_date: plan.dates.atual.start, end_date: plan.dates.atual.end })
-    .eq("id", "atual")
-    .eq("end_date", dates.atual.end)
-    .select("id");
-  if (claimError) throw claimError;
-  if (!claimed?.length) return;
-  for (const id of ["proxima", "terceira"] as const) {
-    const { error } = await admin.from("lanes").update({ start_date: plan.dates[id].start, end_date: plan.dates[id].end }).eq("id", id);
-    if (error) throw error;
-  }
-
+  if (rotationIsIdle(plan)) return;
   const byId = new Map((items ?? []).map((it) => [it.id, it]));
-  for (const id of plan.finished) {
+
+  for (const { id, laneId } of plan.finished) {
     const item = byId.get(id)!;
-    // Queue first: the queue's FK goes null once the row is deleted, so the payload carries it all.
-    await admin.from("roadmap_sync_queue").insert({
-      item_id: id,
-      action: "remove",
-      payload: { item_id: id, lane_id: item.lane_id, title: item.title, github_issue_url: item.github_issue_url, reason: "sprint ended, issue done" },
-    });
-    const { error } = await admin.from("roadmap_items").delete().eq("id", id);
-    if (error) throw error;
-  }
-  for (const p of plan.placements) {
-    const { error } = await admin.from("roadmap_items").update({ lane_id: p.to, sort_order: p.sortOrder }).eq("id", p.id);
-    if (error) throw error;
-    if (p.from !== p.to) {
-      await admin.from("roadmap_sync_queue").insert({
-        item_id: p.id,
-        action: "move_lane",
-        payload: moveLanePayload({ from: p.from, to: p.to, title: byId.get(p.id)!.title, reason: "sprints rotated", origin: "rotation" }),
-      });
+    // Queued first, so no item leaves without its change: with item_id null, since the row is about to go, and the
+    // payload carrying it all. Then the delete, only of the item still in the week this sync saw it in; when it
+    // fails or finds nothing (another sync took it), the change just queued is withdrawn. The item's notes go
+    // only with a delete that happened.
+    const { data: queued, error: queueError } = await admin
+      .from("roadmap_sync_queue")
+      .insert({
+        item_id: null,
+        action: "remove",
+        payload: { item_id: id, lane_id: laneId, title: item.title, github_issue_url: item.github_issue_url, reason: "sprint ended, issue done" },
+      })
+      .select("id")
+      .single();
+    if (queueError) throw queueError;
+    const { data: removed, error } = await admin.from("roadmap_items").delete().eq("id", id).eq("lane_id", laneId).select();
+    if (error || !removed?.length) {
+      await admin.from("roadmap_sync_queue").delete().eq("id", queued.id);
+      if (error) throw error;
     }
   }
+
+  if (plan.target) {
+    const to = plan.createTarget ? await ensureWeekLane(admin, plan.target, now) : plan.target;
+    for (const r of plan.reorders) {
+      const { error } = await admin.from("roadmap_items").update({ sort_order: r.sortOrder }).eq("id", r.id).eq("lane_id", to);
+      if (error) throw error;
+    }
+    for (const m of plan.moves) {
+      const item = byId.get(m.id)!;
+      const { data: moved, error } = await admin
+        .from("roadmap_items")
+        .update({ lane_id: to, sort_order: m.sortOrder })
+        .eq("id", m.id)
+        .eq("lane_id", m.from)
+        .select("id");
+      if (error) throw error;
+      if (!moved?.length) continue;
+      const { error: queueError } = await admin.from("roadmap_sync_queue").insert({
+        item_id: m.id,
+        action: "move_lane",
+        payload: moveLanePayload({ from: m.from, to, title: item.title, reason: "sprint ended, carried over", origin: "rotation" }),
+      });
+      if (queueError) {
+        await admin.from("roadmap_items").update({ lane_id: m.from, sort_order: item.sort_order }).eq("id", m.id);
+        throw queueError;
+      }
+    }
+  }
+
+  for (const laneId of plan.deleteLanes) await deleteWeekIfEmpty(admin, laneId);
 }
 
 type Admin = ReturnType<typeof createAdminClient>;
@@ -375,7 +396,10 @@ async function followIssueTitles(open: OpenIssue[]): Promise<number> {
 // stored with the board snapshot for the Dashboard's Sprint block.
 async function syncSlices(token: string): Promise<void> {
   const admin = createAdminClient();
-  const { data: items, error } = await admin.from("roadmap_items").select("github_issue_url").eq("lane_id", CURRENT_SPRINT).order("sort_order");
+  const current = await currentSprintLane(admin);
+  const { data: items, error } = current
+    ? await admin.from("roadmap_items").select("github_issue_url").eq("lane_id", current.id).order("sort_order")
+    : { data: [], error: null };
   if (error) throw error;
   const numbers = (items ?? []).map((it) => Number(it.github_issue_url?.match(ISSUE_URL)?.[1])).filter((n) => n > 0);
 
@@ -397,8 +421,8 @@ async function syncSlices(token: string): Promise<void> {
 }
 
 // Where the next item goes in the current sprint: after the last one there.
-async function nextSprintOrder(admin: Admin): Promise<number> {
-  const { data, error } = await admin.from("roadmap_items").select("sort_order").eq("lane_id", CURRENT_SPRINT).order("sort_order", { ascending: false }).limit(1);
+async function nextSprintOrder(admin: Admin, laneId: string): Promise<number> {
+  const { data, error } = await admin.from("roadmap_items").select("sort_order").eq("lane_id", laneId).order("sort_order", { ascending: false }).limit(1);
   if (error) throw error;
   return (data?.[0]?.sort_order ?? -1) + 1;
 }
@@ -413,11 +437,16 @@ async function syncSprintWithProject(
 ): Promise<{ summary: SprintSyncSummary; written: { url: string; status: "Open" | "Development" }[] }> {
   const admin = createAdminClient();
   const [{ data: lanes, error: lanesError }, { data: items, error: itemsError }] = await Promise.all([
-    admin.from("lanes").select("id, kind"),
+    admin.from("lanes").select("id, kind, start_date, end_date"),
     admin.from("roadmap_items").select("id, lane_id, sort_order, title, tipo, github_issue_url, created_at"),
   ]);
   if (lanesError) throw lanesError;
   if (itemsError) throw itemsError;
+
+  // The week told by the calendar; a pull into it creates its lane when this week has none yet.
+  const current = currentSprintIn(lanes ?? [])?.id ?? null;
+  let pullInto: Promise<string> | null = null;
+  const sprintLane = () => (pullInto ??= ensureCurrentSprintLane(admin));
 
   const groupIds = new Set((lanes ?? []).filter((l) => l.kind === "group").map((l) => l.id));
   const openByNumber = new Map(open.map((i) => [i.number, i]));
@@ -483,12 +512,17 @@ async function syncSprintWithProject(
       }
       return found;
     },
-    pull: async ({ id }) => move(id, CURRENT_SPRINT, await nextSprintOrder(admin), "moved to Development on the Project"),
+    pull: async ({ id }) => {
+      const lane = await sprintLane();
+      await move(id, lane, await nextSprintOrder(admin, lane), "moved to Development on the Project");
+      // Pulled out of a future week it was the last item of: that week stops existing (src/lib/week-lanes.ts).
+      await deleteFutureWeekIfEmpty(admin, byId.get(id)!.laneId).catch((e) => console.error("deleteFutureWeekIfEmpty failed; the empty week stays", e));
+    },
     release: async ({ id, to }) => move(id, to, byId.get(id)!.number, "taken out of Development on the Project"),
     writeStatus: (projectItemId, status) => setProjectStatus(token, projectItemId, status),
   };
 
-  const { summary, written } = await runSprintSync(candidates, deps);
+  const { summary, written } = await runSprintSync(candidates, deps, current);
   return { summary, written: written.map((w) => ({ url: byId.get(w.id)!.url, status: w.status })) };
 }
 
@@ -545,12 +579,13 @@ async function reconcileRoadmapWithIssues(
 
   const admin = createAdminClient();
   const [{ data: lanes, error: lanesError }, { data: items, error: itemsError }] = await Promise.all([
-    admin.from("lanes").select("id, kind"),
+    admin.from("lanes").select("id, kind, start_date, end_date"),
     admin.from("roadmap_items").select("id, lane_id, title, description, produto, prioridade, effort, tipo, stack, github_issue_url"),
   ]);
   if (lanesError) throw lanesError;
   if (itemsError) throw itemsError;
   const groupIds = new Set((lanes ?? []).filter((l) => l.kind === "group").map((l) => l.id));
+  const current = currentSprintIn(lanes ?? [])?.id ?? null;
 
   const onRoadmap = new Set<number>();
   const closed: { id: string; lane_id: string; title: string; github_issue_url: string }[] = [];
@@ -567,7 +602,7 @@ async function reconcileRoadmapWithIssues(
           tipo: isTipo(item.tipo) ? item.tipo : "feature",
           stack: isStack(item.stack) ? item.stack : "Geral",
         },
-        item.lane_id === CURRENT_SPRINT ? "Development" : "Open"
+        item.lane_id === current ? "Development" : "Open"
       );
       const { error } = await admin
         .from("roadmap_items")
@@ -623,14 +658,16 @@ async function reconcileRoadmapWithIssues(
   const notYet = open.filter((i) => !onRoadmap.has(i.number)).sort((a, b) => a.number - b.number);
   const missing = notYet.filter((i) => laneForLabels(i.labels));
   if (missing.length) {
-    // An issue already in Development on the Project comes straight into the current sprint, after what is there.
-    let nextInSprint = await nextSprintOrder(admin);
+    // An issue already in Development on the Project comes straight into the current sprint, after what is there
+    // (its lane is created when this week has none yet).
     const inSprint = (i: OpenIssue) => cards.get(i.number)?.status === "Development";
+    const sprintLane = missing.some(inSprint) ? await ensureCurrentSprintLane(admin) : null;
+    let nextInSprint = sprintLane ? await nextSprintOrder(admin, sprintLane) : 0;
     const { data: inserted, error } = await admin
       .from("roadmap_items")
       .insert(
         missing.map((i) => ({
-          lane_id: inSprint(i) ? CURRENT_SPRINT : laneForLabels(i.labels)!,
+          lane_id: inSprint(i) && sprintLane ? sprintLane : laneForLabels(i.labels)!,
           sort_order: inSprint(i) ? nextInSprint++ : i.number,
           title: i.title,
           description: summarize(i.body),

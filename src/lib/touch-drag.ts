@@ -1,8 +1,8 @@
 // The rules of dragging a Roadmap card with a finger (use-touch-drag.ts plays them on the screen). A press lifts the
 // card only after the finger rests LONG_PRESS_MS in place: moving more than MOVE_TOLERANCE_PX before that is the
 // page being scrolled, and stays so. While a card is lifted, the scrolling area under the finger scrolls toward an
-// edge it comes near, faster the closer it gets. Dropping it on another sprint or group moves it; anywhere else it
-// goes back. Pure, so the rules run under test without a screen.
+// edge it comes near, faster the closer it gets. Dropping it on a sprint or group moves it, before the card under the
+// finger in a week; anywhere else it goes back. Pure, so the rules run under test without a screen.
 
 export const LONG_PRESS_MS = 250;
 export const MOVE_TOLERANCE_PX = 8;
@@ -28,8 +28,14 @@ export function edgeScrollSpeed(pos: number, start: number, end: number): number
   return 0;
 }
 
-export function dropMove(from: string, to: string | null): { from: string; to: string } | null {
-  return to && to !== from ? { from, to } : null;
+/**
+ * What a finger lifting card `itemId` (from lane `from`) asks for: the lane under it (`to`) and the card under it
+ * there (`before`), which the card goes right before; with no card under the finger, it goes last. Over its own card,
+ * or over no lane, it goes back and nothing is saved. Whether the drop changes anything else (a group keeps its own
+ * order, a card already in place stays) is moveItem's to say (src/lib/roadmap-move.ts).
+ */
+export function dropMove(itemId: string, from: string, to: string | null, before: string | null): { from: string; to: string; before: string | null } | null {
+  return to && before !== itemId ? { from, to, before } : null;
 }
 
 /** For this long after a finger last held a card, a browser drag on it is the browser's own long press: it gives way. */

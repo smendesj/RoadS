@@ -4,11 +4,18 @@
 // down, what is not, and the daily sweep that drops the old ones).
 //
 // What it must never do, because the database is the real one: no valid ack (that would close every real
-// change Frontlights has not written yet), no push of a draft and no print. The writes it tries are the ones
-// refused before anything is read, and it runs before any suite that creates data, so the sync-board call
+// change Frontlights has not written yet), no push of a draft and no print. The writes it tries at the doors are
+// the ones refused before anything is read, and it runs before any suite that creates data, so the sync-board call
 // (which needs the server started with an empty GITHUB_TOKEN, as in the README) has nothing of ours to push.
 // Its calls say they are e2e in their User-Agent, so the rows they leave in the log are told apart and removed.
+//
+// After the sync-board call, one block makes data of its own: the scrum master moves a "[TESTE]" item through two
+// throwaway future weeks with the app's move action, to see an emptied week stay in roadmap-state until the change
+// that names it is acked. It stands in for that ack by marking acked only its own item's queue rows, never through
+// the ack door, and the cleanup removes the item, the weeks and those rows.
 const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
 const L = require("./lib.cjs");
 const { BASE, expect, sleep, svc } = L;
 
@@ -42,7 +49,29 @@ async function loggedCalls(wanted) {
   return rows;
 }
 
+// A server action's id, by its name, from the production build (as actions.cjs finds them), and a call to it with a
+// signed-in context's cookies. "ok" is a 200 with no error in the answer.
+function actionId(name) {
+  const dir = path.join(__dirname, "..", "..", ".next", "static", "chunks");
+  for (const f of fs.readdirSync(dir).filter((f) => f.endsWith(".js"))) {
+    for (const m of fs.readFileSync(path.join(dir, f), "utf8").matchAll(/createServerReference\)\("([0-9a-f]{40,})",[^)]*?,"(\w+)"\)/g)) if (m[2] === name) return m[1];
+  }
+  throw new Error(`server action ${name} not found in the build`);
+}
+async function callAction(context, id, args) {
+  const res = await context.request.post(`${BASE}/roadmap`, {
+    headers: { "next-action": id, "content-type": "text/plain;charset=UTF-8", accept: "text/x-component", origin: BASE },
+    data: JSON.stringify(args),
+    maxRedirects: 0,
+  });
+  const text = await res.text();
+  return res.status() === 200 && !/(^|\n)\d+:E\{/.test(text) ? "ok" : `failed ${res.status()}`;
+}
+
 (async () => {
+  const t0 = new Date().toISOString();
+  let browser = null;
+  let fixtures = false;
   try {
     await L.cleanupCalls(); // leftovers of a run that died halfway
     expect("the shared secret is in .env.local", Boolean(SECRET));
@@ -72,6 +101,58 @@ async function loggedCalls(wanted) {
       state.status === 200 && state.json?.schemaVersion === 1 && Array.isArray(state.json?.sprints) && Array.isArray(state.json?.groups) && !Number.isNaN(Date.parse(state.json?.asOf)),
       `${state.status}`
     );
+
+    // The sprints are weeks by date: sprintId sprint-DD-MM-AAAA from the Monday, titled by the dates, in date order,
+    // and never the e2e fixture (zz-test-*).
+    const sprints = state.json?.sprints ?? [];
+    const dateId = (iso) => `sprint-${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
+    expect(
+      "roadmap-state: every sprintId is sprint-DD-MM-AAAA, taken from the week's start date",
+      sprints.length > 0 && sprints.every((sp) => /^sprint-\d{2}-\d{2}-\d{4}$/.test(sp.sprintId) && sp.sprintId === dateId(sp.startDate)),
+      JSON.stringify(sprints.map((sp) => [sp.sprintId, sp.startDate]))
+    );
+    expect(
+      "roadmap-state: the weeks come in the order of their start date",
+      sprints.every((sp, i) => i === 0 || sprints[i - 1].startDate < sp.startDate),
+      JSON.stringify(sprints.map((sp) => sp.startDate))
+    );
+    expect(
+      "roadmap-state: a sprint is titled by its dates only, never by its position",
+      sprints.every((sp) => /^Sprint \d{2}(\/\d{2})?–\d{2}\/\d{2}$/.test(sp.title)),
+      JSON.stringify(sprints.map((sp) => sp.title))
+    );
+    expect(
+      "roadmap-state: the e2e fixture lanes never reach Frontlights",
+      ![...sprints, ...(state.json?.groups ?? [])].some((l) => String(l.laneId).startsWith("zz-test-")) &&
+        !(state.json?.removedPending ?? []).some((r) => String(r.laneId ?? "").startsWith("zz-test-"))
+    );
+    // Holds only after migration 0031 is pushed: before it the lanes are still atual/proxima/terceira.
+    expect(
+      "roadmap-state (after 0031): laneId is the same sprint-DD-MM-AAAA as sprintId",
+      sprints.length > 0 && sprints.every((sp) => sp.laneId === sp.sprintId),
+      JSON.stringify(sprints.map((sp) => [sp.laneId, sp.sprintId]))
+    );
+
+    // ---- position (#15-S4): each week's items at 1, 2, 3… in the order the scrum master gave it on the Roadmap
+    // (roadmap_items.sort_order), the same order the Roadmap's week and the Dashboard's Sprint show.
+    {
+      const laneIds = sprints.map((sp) => sp.laneId);
+      const rows = (await svc.from("roadmap_items").select("id, lane_id, sort_order").in("lane_id", laneIds.length ? laneIds : ["-"])).data ?? [];
+      const stored = new Map(rows.map((r) => [r.id, r]));
+      const wrong = sprints.filter((sp) => {
+        const items = sp.items ?? [];
+        const inLane = rows.filter((r) => r.lane_id === sp.laneId).length;
+        return (
+          items.length !== inLane ||
+          items.some((it, i) => it.position !== i + 1 || stored.get(it.id)?.lane_id !== sp.laneId || (i > 0 && stored.get(it.id).sort_order < stored.get(items[i - 1].id).sort_order))
+        );
+      });
+      expect(
+        "roadmap-state: each week's items are its items in the database, at position 1, 2, 3… in the order of their sort_order",
+        sprints.some((sp) => (sp.items ?? []).length > 1) && wrong.length === 0,
+        JSON.stringify(wrong.map((sp) => [sp.sprintId, (sp.items ?? []).map((it) => [it.position, stored.get(it.id)?.sort_order ?? null])]))
+      );
+    }
 
     const pending = await call("GET", "/pending-changes");
     expect(
@@ -132,6 +213,62 @@ async function loggedCalls(wanted) {
       `${sync.status} ${sync.json?.ok} ${sync.json?.reason ?? ""} ran=${sync.json?.ran}`
     );
 
+    // ---- a future week its last item left stays in roadmap-state, empty, until the change that names it is acked
+    // Two weeks the database doesn't have: the empty one at the end of the Roadmap's row (`from`) and the one after it
+    // (`to`). The scrum master moves their own test item into `from` (the lane is created), then on to `to`: `from`
+    // empties and its lane is deleted, while the move_lane that names it as from_lane_id is still unacked.
+    await L.ensureFixtures();
+    fixtures = true;
+    const W = await L.weeks();
+    const from = L.weekId(W.trailing);
+    const to = L.weekId(L.addDays(W.trailing, 7));
+    const endWeek = L.weekId(L.addDays(W.trailing, 14));
+    L.createdWeeks.add(from);
+    L.createdWeeks.add(to);
+    const laneExists = async (id) => ((await svc.from("lanes").select("id").eq("id", id)).data ?? []).length === 1;
+    expect("weeks: the two test weeks are not in the database before the run", !(await laneExists(from)) && !(await laneExists(to)), `${from} ${to}`);
+
+    browser = await L.launch();
+    const sm = await L.newSession(browser, "sm");
+    await L.login(sm);
+    const move = actionId("moveRoadmapItemLane");
+    const into = await callAction(sm.context, move, [L.ids.smItem, from]);
+    expect("move into an empty future week: its lane is created", into === "ok" && (await laneExists(from)), `${into} ${from}`);
+    const away = await callAction(sm.context, move, [L.ids.smItem, to]);
+    const { data: moved } = await svc.from("roadmap_items").select("lane_id").eq("id", L.ids.smItem).single();
+    expect("move the week's only item on to the next week: the emptied lane is deleted", away === "ok" && moved?.lane_id === to && !(await laneExists(from)) && (await laneExists(to)), `${away} ${moved?.lane_id}`);
+
+    const emptied = await call("GET", "/roadmap-state");
+    const weeksNow = emptied.json?.sprints ?? [];
+    const emptiedWeek = weeksNow.find((sp) => sp.sprintId === from);
+    const end = L.addDays(W.trailing, 4);
+    const title = `Sprint ${W.trailing.slice(5, 7) === end.slice(5, 7) ? W.trailing.slice(8, 10) : `${W.trailing.slice(8, 10)}/${W.trailing.slice(5, 7)}`}–${end.slice(8, 10)}/${end.slice(5, 7)}`;
+    expect(
+      "roadmap-state: the deleted week is still there, empty, its laneId and sprintId the id, its dates and title from it",
+      emptied.status === 200 && emptiedWeek?.laneId === from && Array.isArray(emptiedWeek?.items) && emptiedWeek.items.length === 0 && emptiedWeek.startDate === W.trailing && emptiedWeek.endDate === end && emptiedWeek.title === title,
+      JSON.stringify(emptiedWeek ?? null)
+    );
+    expect(
+      "roadmap-state: the item is in the week it was moved to",
+      weeksNow.some((sp) => sp.sprintId === to && sp.laneId === to && sp.items.some((it) => it.id === L.ids.smItem)),
+      JSON.stringify(weeksNow.map((sp) => [sp.sprintId, sp.items.length]))
+    );
+    expect(
+      "roadmap-state: the empty week at the end of the Roadmap's row never comes, and the weeks stay in date order",
+      !weeksNow.some((sp) => sp.sprintId === endWeek) && weeksNow.every((sp, i) => i === 0 || weeksNow[i - 1].startDate < sp.startDate),
+      JSON.stringify(weeksNow.map((sp) => sp.sprintId))
+    );
+
+    // The ack, stood in for: only this item's own queue rows are marked acked, never through the ack door.
+    const { data: acked } = await svc.from("roadmap_sync_queue").update({ acked_at: new Date().toISOString() }).eq("item_id", L.ids.smItem).is("acked_at", null).gte("created_at", t0).select("id");
+    const afterAck = await call("GET", "/roadmap-state");
+    const weeksAfter = afterAck.json?.sprints ?? [];
+    expect(
+      "roadmap-state: once the change naming it is acked, the deleted week is gone and the other stays",
+      (acked ?? []).length === 2 && afterAck.status === 200 && !weeksAfter.some((sp) => sp.sprintId === from) && weeksAfter.some((sp) => sp.sprintId === to),
+      `${(acked ?? []).length} acked; ${JSON.stringify(weeksAfter.map((sp) => sp.sprintId))}`
+    );
+
     // ---- the log of calls: every call that got through the secret, and only those
     const rows = await loggedCalls(expectedLog.length);
     const kept = rows.map((r) => `${r.method} ${r.route} ${r.status}`).sort();
@@ -157,7 +294,10 @@ async function loggedCalls(wanted) {
   } catch (e) {
     expect("run completed without an exception", false, L.scrub(e && e.message ? e.message : e).slice(0, 300));
   } finally {
-    await L.cleanupCalls();
+    if (browser) await browser.close().catch(() => {});
+    // The test item, the fixture lanes, the two test weeks (deleted only if empty) and this run's queue rows.
+    if (fixtures) await L.cleanup(t0);
+    else await L.cleanupCalls();
   }
   process.exit(L.summary("FRONTLIGHTS DOORS") ? 1 : 0);
 })();
