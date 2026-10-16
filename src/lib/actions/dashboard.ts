@@ -51,7 +51,7 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null, sl
   const atual = lanes.find((l) => l.id === "atual");
   const sprintItems = newestIssueFirst(atual?.items ?? [], (it) => it.number);
   // The parts of each issue, read with the board snapshot (board-sync.ts, syncSlices).
-  const partsOf = partsByIssue(slices, statusOf);
+  const partsByNumber = partsByIssue(slices, statusOf);
 
   const entregas = sprintItems.map((it) => {
     const key = it.url ? statusOf.get(it.url) : undefined;
@@ -63,7 +63,7 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null, sl
       effort: it.effort,
       ref: it.url ? `#${it.url.split("/").pop()}` : "—",
       url: it.url,
-      parts: it.number ? partsOf.get(it.number) ?? null : null,
+      parts: it.number ? partsByNumber.get(it.number) ?? null : null,
     };
   });
 
