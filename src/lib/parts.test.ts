@@ -49,7 +49,8 @@ test("GitHub's REST spelling of the state (lower case) reads the same as GraphQL
 });
 
 test("a sub-issue whose state is missing or unknown is not shown as open", () => {
-  const parts = issueParts(null, [{ number: 11 }, sub(12, "MERGED")]);
+  const subIssues: { number: number; state?: string }[] = [{ number: 11 }, sub(12, "MERGED")];
+  const parts = issueParts(null, subIssues);
   assert.deepEqual([parts.open, parts.total], [[], 0]);
 });
 
