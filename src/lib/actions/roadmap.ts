@@ -5,10 +5,12 @@ import { withIssueStatus } from "@/lib/board";
 import { createGeoCloudIssue } from "@/lib/github";
 import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
 import { moveLanePayload } from "@/lib/move-payload";
-import { currentSprintIn, currentSprintLane } from "@/lib/current-sprint";
-import { sprintLanesByDate, weekDates, weekTitle } from "@/lib/sprint-week";
+import { currentSprintLane } from "@/lib/current-sprint";
+import { sprintLanesByDate, todayInSaoPaulo, weekDates, weekLanes, weekTitle } from "@/lib/sprint-week";
+import { weekRow } from "@/lib/week-plan";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
+import { deleteFutureWeekIfEmpty, ensureWeekLane } from "@/lib/week-lanes";
 import { NEW_ITEM_TITLE, type Effort, type Lane, type Prioridade, type Produto, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 
 type ItemRow = {
@@ -73,16 +75,28 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
     byLane.set(it.lane_id, list);
   }
 
-  // The sprints are weeks (src/lib/sprint-week.ts): in the order of their start date, titled by their dates only,
-  // and the one whose dates hold today in São Paulo is the current one, whatever its id.
-  const current = currentSprintIn(lanes ?? []);
-  const sprintLanes: Lane[] = sprintLanesByDate((lanes ?? []).filter((lane) => lane.kind === "sprint")).map((lane) => ({
+  // The sprints are weeks (src/lib/sprint-week.ts), titled by their dates only: the row of src/lib/week-plan.ts, every
+  // stored week and the ones from this week to the last stored one that the database lacks, plus one empty week at
+  // the end (virtual: shown, not stored), in date order, with the one whose dates hold today in São Paulo marked as
+  // the current one. The sprint lanes that are no week (the e2e fixture, a lane with no dates) come after them.
+  const sprintRows = (lanes ?? []).filter((lane) => lane.kind === "sprint");
+  const weeks = weekLanes(sprintRows);
+  const row: Lane[] = weekRow(weeks, todayInSaoPaulo(new Date())).map((week) => ({
+    id: week.id,
+    title: weekTitle(week.start, week.end),
+    dates: weekDates(week.start, week.end),
+    current: week.current,
+    ...(week.virtual ? { virtual: true } : {}),
+    items: (byLane.get(week.id) ?? []).map(toRoadmapItem),
+  }));
+  const others: Lane[] = sprintLanesByDate(sprintRows.filter((lane) => !weeks.includes(lane))).map((lane) => ({
     id: lane.id,
     title: lane.start_date && lane.end_date ? weekTitle(lane.start_date, lane.end_date) : lane.title,
     dates: lane.start_date && lane.end_date ? weekDates(lane.start_date, lane.end_date) : "",
-    current: lane.id === current?.id,
+    current: false,
     items: (byLane.get(lane.id) ?? []).map(toRoadmapItem),
   }));
+  const sprintLanes = [...row, ...others];
   const groups: RoadmapGroup[] = (lanes ?? [])
     .filter((lane) => lane.kind !== "sprint")
     .map((lane) => ({ id: lane.id, title: lane.title, items: (byLane.get(lane.id) ?? []).map(toRoadmapItem) }));
@@ -282,6 +296,18 @@ export async function deleteRoadmapItem(itemId: string): Promise<void> {
   const { data: deleted, error } = await supabase.from("roadmap_items").delete().eq("id", itemId).select("id");
   if (error) throw error;
   if (!deleted?.length) throw new Error("forbidden");
+
+  await dropFutureWeekIfEmpty(access.item.lane_id);
+}
+
+// A future week that an authorized move or delete has just left empty stops existing (src/lib/week-lanes.ts). The
+// item's change is already saved, so a failure here doesn't undo it: the week stays, empty, until it empties again.
+async function dropFutureWeekIfEmpty(laneId: string) {
+  try {
+    await deleteFutureWeekIfEmpty(createAdminClient(), laneId);
+  } catch (e) {
+    console.error("deleteFutureWeekIfEmpty failed; the empty week stays", e);
+  }
 }
 
 export async function moveRoadmapItemLane(itemId: string, targetLaneId: string): Promise<void> {
@@ -291,14 +317,29 @@ export async function moveRoadmapItemLane(itemId: string, targetLaneId: string):
   const access = await getItemAccess(itemId, actor);
   if (!access.canModify) throw new Error("forbidden");
 
+  // Dropped on a week the database doesn't have yet (the empty one at the end of the row, or a gap): the server
+  // creates its lane, only now that the item is known to be the actor's to move, with the service role (lanes are
+  // the admin's to write). The id is checked there: a real Monday, not before this week, within the horizon.
+  const { data: existing, error: laneError } = await supabase.from("lanes").select("id").eq("id", targetLaneId).maybeSingle();
+  if (laneError) throw laneError;
+  const admin = createAdminClient();
+  const created = existing ? null : await ensureWeekLane(admin, targetLaneId);
+  const to = existing?.id ?? created!;
+
   const { data: moved, error } = await supabase
     .from("roadmap_items")
-    .update({ lane_id: targetLaneId, updated_at: new Date().toISOString() })
+    .update({ lane_id: to, updated_at: new Date().toISOString() })
     .eq("id", itemId)
     .select("id");
-  if (error) throw error;
-  if (!moved?.length) throw new Error("forbidden");
+  if (error || !moved?.length) {
+    if (created) await deleteFutureWeekIfEmpty(admin, created).catch(() => {});
+    if (error) throw error;
+    throw new Error("forbidden");
+  }
 
   // Both lanes, like every other move_lane: Frontlights writes the departure into the sprint the item left.
-  await queueChange(itemId, "move_lane", moveLanePayload({ from: access.item.lane_id, to: targetLaneId, title: access.item.title, origin: "app" }));
+  await queueChange(itemId, "move_lane", moveLanePayload({ from: access.item.lane_id, to, title: access.item.title, origin: "app" }));
+
+  // The future week it left, now empty, stops existing; the current week stays even when empty.
+  if (access.item.lane_id !== to) await dropFutureWeekIfEmpty(access.item.lane_id);
 }
