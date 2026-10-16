@@ -284,6 +284,17 @@ test("a tree read only in part is said so: the entry carries a line, `ignored` c
   assert.ok(!whole.entries[0].evidence.some((l) => /cortad/i.test(l)));
 });
 
+test("the open sub-issues GitHub counts, none of them read, are said to be sub-issues, never boxes", () => {
+  const out = facts({
+    issues: [issue(410, { subIssues: { total: 4, completed: 1 } })],
+    timelines: [timeline(410, { commits: [c("dddd444", "2026-03-09T10:00:00-03:00")] })],
+    projectItems: [board(410, "Open")],
+  });
+  const [e] = out.entries;
+  assert.ok(e.evidence.includes("Partes (as sub-issues abertas): 0 de 3 prontas"), e.evidence.join("|"));
+  assert.ok(!e.evidence.some((l) => /caixa/i.test(l)), e.evidence.join("|"));
+});
+
 test("an umbrella issue with every step merged takes the last merge as its delivery", () => {
   const out = facts({
     issues: [

@@ -424,14 +424,16 @@ export function buildFacts(input: FactsInput): ProgressFacts {
   // The parts of a delivery, by the rule the Dashboard counts with (src/lib/parts.ts, since 16/10/2026): the boxes of
   // its acceptance criteria, always, plus its direct sub-issues still open. A closed sub-issue (completed, not planned
   // or a duplicate) is no part. When none of its sub-issues was read, the ones GitHub counts as open stand for them.
-  type Counted = { total: number; done: number; boxed: Boxed | null; open: GhIssue[] };
+  // `open` lists the open sub-issues that were read; `openCount` counts every open one, the unread stand-ins too.
+  type Counted = { total: number; done: number; boxed: Boxed | null; open: GhIssue[]; openCount: number };
   const deliveryParts = (i: GhIssue): Counted => {
     const boxed = boxesOf(i);
     const kids = (childrenOf.get(i.number) ?? []).map((k) => issueOf.get(k)).filter((k): k is GhIssue => !!k);
     const unreadOpen = kids.length === 0 && i.subIssues ? Math.max(0, i.subIssues.total - i.subIssues.completed) : 0;
     const subs: (GhIssue | { state: "open" })[] = kids.length > 0 ? kids : Array.from({ length: unreadOpen }, () => ({ state: "open" as const }));
     const parts = partsOf(boxed?.boxes ?? [], subs);
-    return { total: parts.total, done: parts.done, boxed, open: parts.open.filter((s): s is GhIssue => "number" in s) };
+    const open = parts.open.filter((s): s is GhIssue => "number" in s);
+    return { total: parts.total, done: parts.done, boxed, open, openCount: parts.open.length };
   };
   const deliveredPart = (i: GhIssue): boolean => i.state === "closed" && !cancelled(i) && !!i.closedAt;
   const incomplete = (i: GhIssue): boolean => !!i.subIssues && i.subIssues.total > (childrenOf.get(i.number)?.length ?? 0);
@@ -636,7 +638,7 @@ export function buildFacts(input: FactsInput): ProgressFacts {
         windowEnd: input.window.end,
         subIssues,
         boxes: parts.boxed?.boxes.length ?? 0,
-        openSubIssues: parts.open.length,
+        openSubIssues: parts.openCount,
         ticked: tickDates.filter(inWindow),
         closedSubIssues: closingDates.filter(inWindow),
         cut: [issue, ...family].some(incomplete),
