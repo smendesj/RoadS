@@ -107,6 +107,15 @@ async function seedBoard() {
         return !!weeks && !!kanban && !!(weeks.compareDocumentPosition(kanban) & Node.DOCUMENT_POSITION_FOLLOWING) && getComputedStyle(weeks).position;
       });
       expect("kanban: it sits under the row of weeks, and on a wide screen the row stays at the top while the page scrolls (sticky)", below === "sticky", String(below));
+      // The tabs Open and Done are a phone's: on a wide screen both columns show, side by side, and no tab does.
+      const side = await page.evaluate(() => {
+        const o = document.querySelector('[data-kanban-column="open"]')?.getBoundingClientRect();
+        const d = document.querySelector('[data-kanban-column="done"]')?.getBoundingClientRect();
+        const tabs = [...document.querySelectorAll('[role="tab"]')].filter((el) => el.getClientRects().length > 0).length;
+        return o && d ? { sideBySide: d.left >= o.right && Math.abs(d.top - o.top) < 2, openW: o.width, doneW: d.width, tabs } : null;
+      });
+      expect("kanban: on a wide screen Open and Done are side by side, and no tab Open or Done shows",
+        !!side?.sideBySide && side.openW > 0 && side.doneW > 0 && side.tabs === 0, JSON.stringify(side));
       // From here on the window is as tall as the page: nothing slides under the row of weeks that stays at the top.
       await L.fitWholePage(page);
       // A planned item stays in Open, faded, with the week it is planned in.
@@ -482,6 +491,50 @@ async function seedBoard() {
       const widths = await phone.page.evaluate(() => [window.innerWidth, document.documentElement.scrollWidth]);
       expect("phone: the Roadmap is as wide as the phone, not zoomed out", widths[0] === 390 && widths[1] === 390, JSON.stringify(widths));
 
+      // The weeks slide sideways in their row, each 85% of the screen wide, so the next one shows at the edge.
+      const phoneOpen = phone.page.locator('[data-kanban-column="open"]');
+      const phoneDone = phone.page.locator('[data-kanban-column="done"]');
+      {
+        const ratios = await phone.page
+          .locator('[data-drag-scroll="x"] > [data-lane-id]')
+          .evaluateAll((els) => els.map((el) => Math.round((el.getBoundingClientRect().width / window.innerWidth) * 1000) / 1000));
+        expect("phone: every week is 85% of the screen wide", ratios.length > 1 && ratios.every((r) => Math.abs(r - 0.85) <= 0.01), JSON.stringify(ratios));
+        const rowScroll = await phone.page.locator('[data-drag-scroll="x"]').evaluate((el) => [getComputedStyle(el).overflowX, el.scrollWidth > el.clientWidth]);
+        expect("phone: the row of weeks scrolls sideways, inside itself", ["auto", "scroll"].includes(rowScroll[0]) && rowScroll[1] === true, JSON.stringify(rowScroll));
+      }
+
+      // Under the weeks, the Kanban shows one column at a time, picked by the tabs Open and Done; Open first.
+      {
+        const tab = (id) => phone.page.locator(`[role="tab"][data-kanban-tab="${id}"]`);
+        const state = async () => ({
+          tabs: await phone.page.locator('[role="tablist"] [role="tab"]').allInnerTexts(),
+          openTab: await tab("open").getAttribute("aria-selected").catch(() => null),
+          doneTab: await tab("done").getAttribute("aria-selected").catch(() => null),
+          open: await phoneOpen.isVisible(),
+          done: await phoneDone.isVisible(),
+        });
+        const first = await state();
+        expect("phone: the Kanban has two tabs, Open and Done, under the weeks; Open is picked and only its column shows",
+          first.tabs.length === 2 && /^Open/.test(first.tabs[0]) && /^Done/.test(first.tabs[1]) && first.openTab === "true" && first.doneTab === "false" && first.open && !first.done,
+          JSON.stringify(first));
+        const under = await phone.page.evaluate(() => {
+          const weeks = document.querySelector("[data-weeks]");
+          const list = document.querySelector('[role="tablist"]');
+          return !!weeks && !!list && !!(weeks.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING);
+        });
+        expect("phone: the tabs sit under the row of weeks", under);
+        await tab("done").click();
+        await sleep(300);
+        const onDone = await state();
+        expect("phone: the tab Done shows Done alone", onDone.doneTab === "true" && onDone.openTab === "false" && onDone.done && !onDone.open, JSON.stringify(onDone));
+        await tab("open").click();
+        await sleep(300);
+        const back = await state();
+        expect("phone: the tab Open brings Open back, alone", back.openTab === "true" && back.open && !back.done, JSON.stringify(back));
+        const narrow = await phone.page.evaluate(() => [window.innerWidth, document.documentElement.scrollWidth]);
+        expect("phone: with the tabs, the Roadmap is still as wide as the phone", narrow[0] === 390 && narrow[1] === 390, JSON.stringify(narrow));
+      }
+
       // Source and target on screen together: the phone's width, the page's height.
       await L.fitWholePage(phone.page);
       await phoneCard().scrollIntoViewIfNeeded();
@@ -567,6 +620,68 @@ async function seedBoard() {
           (await lane(created.id)) === "tipo-bug" && (q ?? []).length === 1 && q[0].payload?.from_lane_id === "zz-test-sprint" && q[0].payload?.lane_id === "tipo-bug" && q[0].payload?.origin === "app",
           JSON.stringify({ lane: await lane(created.id), q: (q ?? []).map((r) => r.payload) }));
         expect("phone: the unplanned card is in no week on the phone's screen", (await phoneCard().count()) === 0);
+      }
+
+      // On the phone's own screen, held in the Kanban's Open and carried up to the row of weeks: held at the row's right
+      // edge, the row slides by itself until the farthest week (the test week, the last of the row, off screen at first)
+      // is under the finger; over a card there the orange line shows, and the drop plans the item right before that
+      // card, its card staying in Open, faded and labelled with the week, as with the mouse.
+      {
+        await phone.page.setViewportSize({ width: 390, height: 844 });
+        await sleep(500);
+        const title = "[TESTE] criado e editado pelo SM";
+        const row = phone.page.locator('[data-drag-scroll="x"]');
+        const testWeekOnPhone = phone.page.locator('[data-lane-id="zz-test-sprint"]');
+        const openOne = () => phoneOpen.locator("div[draggable]", { hasText: title }).first();
+        await openOne().waitFor({ timeout: 15000 });
+        await row.evaluate((el) => {
+          el.scrollLeft = 0;
+        });
+        await sleep(300);
+        const farAway = await testWeekOnPhone.evaluate((el) => el.getBoundingClientRect().left >= window.innerWidth);
+        expect("phone (plan from Open): the test week starts off screen, to the right of the row", farAway);
+        // The card low on the screen, under the weeks.
+        const cardTop = await openOne().evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+        await phone.page.evaluate((y) => window.scrollTo(0, y), Math.max(0, cardTop - 680));
+        await sleep(300);
+        const since = new Date().toISOString();
+        const order0 = await weekOrder();
+        const targetId = order0[0].id;
+        from = await centre(openOne());
+        await holdTestCard(from);
+        // Up to the top of the screen, where the page scrolls by itself, until the page is at its top.
+        await glide(from, { x: from.x, y: 6 }, 10);
+        for (let i = 0; i < 60 && (await phone.page.evaluate(() => window.scrollY)) > 0; i++) await sleep(100);
+        // Onto the row, at its right edge, and held there until it stops at its end.
+        const rowBox = await row.boundingBox();
+        const atEdge = { x: 372, y: rowBox.y + 30 };
+        await glide({ x: from.x, y: 6 }, atEdge, 12);
+        const slid = async () => row.evaluate((el) => ({ left: el.scrollLeft, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 2 }));
+        for (let i = 0; i < 150 && !(await slid()).end; i++) await sleep(100);
+        const atEnd = await slid();
+        const overFar = await phone.page.locator('[data-lane-id="zz-test-sprint"][data-drop-target]').count();
+        expect("phone (plan from Open): held at the row's right edge, the row slides by itself to the farthest week, which lights up under the finger",
+          atEnd.end && atEnd.left > 0 && overFar === 1, JSON.stringify({ ...atEnd, overFar }));
+        // Onto the test week's first card: the orange line shows above it.
+        const onto = await centre(phone.page.locator(`[data-lane-id="zz-test-sprint"] [data-item-id="${targetId}"]`));
+        await glide(atEdge, onto, 12);
+        await sleep(200);
+        const lit = await lineOn(phone.page, targetId);
+        expect("phone (plan from Open): over a card of the far week, the orange line shows above it", lit === 1, `lines=${lit}`);
+        await touch("touchEnd");
+        await sleep(2500);
+        const order1 = await weekOrder();
+        expect("phone (plan from Open): dropped there, the item is saved in the test week, right before that card, the week numbered 0, 1, 2…",
+          (await lane(created.id)) === "zz-test-sprint" && at(order1, created.id) + 1 === at(order1, targetId) && numbered(order1), JSON.stringify({ order0, order1 }));
+        const { data: q } = await svc.from("roadmap_sync_queue").select("payload").eq("item_id", created.id).eq("action", "move_lane").gte("created_at", since);
+        expect("phone (plan from Open): one move_lane is queued, from the bug type lane to the test week",
+          (q ?? []).length === 1 && q[0].payload?.from_lane_id === "tipo-bug" && q[0].payload?.lane_id === "zz-test-sprint", JSON.stringify((q ?? []).map((r) => r.payload)));
+        const look = await openOne()
+          .evaluate((el) => ({ label: el.querySelector("[data-week-label]")?.textContent?.trim() ?? null, opacity: getComputedStyle(el).opacity }))
+          .catch(() => null);
+        expect("phone (plan from Open): the card stays in Open, at 70%, labelled '▸ Sprint 07/12'",
+          (await phoneOpen.locator("div[draggable]", { hasText: title }).count()) === 1 && look?.label === "▸ Sprint 07/12" && look?.opacity === "0.7", JSON.stringify(look));
+        expect("phone (plan from Open): no copy of the card is left following the finger", (await phone.page.locator("[data-touch-ghost]").count()) === 0);
       }
 
       expect("phone: no console errors while dragging", phone.problems.length === 0, phone.problems.slice(0, 3).join(" | "));
