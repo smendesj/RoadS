@@ -83,7 +83,7 @@ texto):
 - **Em andamento: N partes em K issues**: o que **falta** das capas da sprint. Uma capa é um item do Project
   (do repositório) com Status Development, epic ou não: o coletor conta as partes dela pela mesma regra das
   entregas (caixas mais sub-issues diretas abertas; um epic soma as entregas sob ele, e a entrega sem partes vale
-  uma) e soma as que ainda não estão prontas, então toda sub-issue aberta entra aí; uma capa sem filhas e sem caixas
+  uma) e soma as que ainda não estão prontas, então toda sub-issue direta aberta entra aí; uma capa sem filhas e sem caixas
   é a sua única parte. K é o número de capas com algo por fazer. Uma
   capa que está na sprint e já tem parte pronta conta nos dois números.
 

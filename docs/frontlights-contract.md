@@ -270,7 +270,7 @@ ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada en
   seção de critérios de aceitação** do corpo, sempre, mais as **sub-issues diretas ainda abertas**. `done` são as
   caixas marcadas; uma sub-issue aberta nunca está pronta. Sub-issue **fechada**, seja como concluída, não planejada
   ou duplicada, **não é parte**: fica fora de `total` e de `done`. Netas não contam, só os filhos diretos. Quando
-  nenhuma sub-issue da entrega foi lida, as que o GitHub conta como abertas valem por elas. Sem caixas e sem
+  nenhuma sub-issue da entrega foi lida, as que o GitHub informa como ainda não concluídas (`total − completed` do `subIssuesSummary`) valem por elas. Sem caixas e sem
   sub-issues abertas, `subIssues` é `null` (e a entrega conta 1 no `delivered`). O formato é o mesmo de sempre; o que
   ele conta mudou em 07/10, 13/10 e 16/10 (seção 8).
 - **As caixas** (desde 2026-10-13, quando o Frontlights deixou de criar sub-issues: issue #23 do plugin). As partes de
@@ -323,7 +323,7 @@ ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada en
   `subIssues`. Uma capa que não é epic conta como uma entrega: as caixas dos seus critérios de aceitação mais as
   sub-issues diretas abertas. Um epic com filhas soma as entregas sob ele, cada uma pela regra, e uma entrega sem
   partes vale 1, pronta quando fechada (um epic vazio dentro dele não conta). Uma capa sem filhas e sem caixas é a sua
-  única parte. Como sub-issue aberta nunca está pronta, toda sub-issue aberta entra em `remaining`, e uma capa cujas
+  única parte. Como sub-issue aberta nunca está pronta, toda sub-issue direta aberta entra em `remaining`, e uma capa cujas
   sub-issues já fecharam e que não tem caixas fica com `remaining` zero. Uma capa sem filhas tem `issues: { total: 1, done: 0 }` (capa é item aberto no fim do
   período, então nunca está fechada); `open` são as entregas ainda abertas,
   até 30. Só entram em `epics` as capas com `remaining` maior que zero, então `totals.covers` é o número delas (o K do
