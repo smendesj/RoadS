@@ -29,6 +29,13 @@ function parseWeekId(id: string): { start: string; weekday: number } | null {
   return { start, weekday: date.getUTCDay() };
 }
 
+/** The week a `sprint-DD-MM-AAAA` id names, Monday to Friday, or null unless it is a real Monday's id. */
+export function weekOfId(id: string): { start: string; end: string } | null {
+  const parsed = parseWeekId(id);
+  if (!parsed || parsed.weekday !== 1) return null;
+  return { start: parsed.start, end: addDays(parsed.start, 4) };
+}
+
 /** The lane to create for a week dropped on: a real Monday's id, not before the current week, within the horizon. */
 export function weekToCreate(id: string, today: string): { ok: true; lane: NewWeekLane } | { ok: false; reason: WeekRefusal } {
   const parsed = parseWeekId(id);
