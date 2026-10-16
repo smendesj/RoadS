@@ -93,15 +93,17 @@ O Roadmap como está agora, só leitura: não consome nada e nunca dá ack. É o
   `sprints[]` traz quantas semanas houver, na ordem da data de início, nunca do texto do id. Um sprint sem datas
   não aparece. A semana atual é a que contém hoje no fuso de `timezone` (no fim de semana, a que começa na segunda
   seguinte); não há campo para ela.
-- **Quais semanas.** `sprints[]` traz toda semana que tem lane no banco, a semana atual sempre (mesmo vazia e mesmo
-  sem lane) e toda semana citada por uma mudança ainda sem ack cuja lane já não existe: citar é ter o id em
-  `payload.lane_id` de um `add`, `remove` ou `move_lane`, ou em `payload.from_lane_id` de um `move_lane`. É o caso
-  da semana futura que perdeu o último item (a lane é apagada quando esvazia) e da semana que a virada encerrou e
-  apagou. Essas vêm com `items: []`, `sprintId` e `laneId` iguais ao id citado, `startDate` na segunda e `endDate`
-  na sexta tiradas do id e `title` pelas datas; depois do ack, a semana deixa de ser citada e some na resposta
-  seguinte. Só entra id `sprint-DD-MM-AAAA` de uma segunda-feira real (ids posicionais, lanes de tipo, grupos e
-  `zz-test-*` ficam de fora), e uma semana que já tem lane nunca vem duas vezes. As semanas vazias que só a tela
-  mostra (a do fim, para receber o próximo arraste, e os buracos no meio) nunca entram.
+- **Quais semanas.** `sprints[]` traz só: a semana atual, sempre (mesmo vazia e mesmo sem lane); toda lane de semana
+  com item, passada ou futura; e toda semana citada por uma mudança ainda sem ack, com a lane guardada vazia ou já
+  apagada. Citar é ter o id em `payload.lane_id` de um `add`, `remove` ou `move_lane`, ou em
+  `payload.from_lane_id` de um `move_lane`. Uma lane guardada vazia que não é a atual nem é citada fica de fora. A
+  semana citada cuja lane já não existe (a futura que perdeu o último item, porque a lane é apagada quando esvazia,
+  e a que a virada encerrou e apagou) vem com `items: []`, `sprintId` e `laneId` iguais ao id citado, `startDate`
+  na segunda e `endDate` na sexta tiradas do id e `title` pelas datas. Depois do ack, a semana deixa de ser citada
+  e some na resposta seguinte. Para semana sem lane, só entra id `sprint-DD-MM-AAAA` de uma segunda-feira real
+  (ids posicionais, lanes de tipo, grupos e `zz-test-*` ficam de fora), e uma semana que já tem lane nunca vem
+  duas vezes. As semanas vazias que só a tela mostra (a do fim, para receber o próximo arraste, e os buracos no
+  meio) nunca entram.
 - **Ordem dos itens.** `position` segue o `sort_order` gravado; no empate, o número da issue (item sem issue
   depois dos numerados) e, por fim, o id do item.
 - `removedPending[].laneId` de um item que saiu de uma sprint também vem como `sprint-DD-MM-AAAA`.
@@ -437,9 +439,10 @@ repositório, `roads-script/push` e `roads-script/attach`.
 - **2026-10-16 (mudança de sentido, `schemaVersion` segue 1):** as sprints viram semanas com id pela data. Em
   `roadmap-state`, `sprintId` e `laneId` passam a `sprint-DD-MM-AAAA` (a segunda-feira; antes, `sprintId` era
   `sprint-AAAA-MM-DD` e `laneId` era `atual`, `proxima` ou `terceira`), `title` passa a ser só as datas, e
-  `sprints[]` traz N semanas na ordem da data: as que têm lane, a atual sempre (mesmo vazia) e, com `items: []`,
-  toda semana já apagada que uma mudança sem ack ainda cita em `lane_id` ou `from_lane_id` (a futura que perdeu o
-  último item, a que a virada encerrou), até o ack; o `sprintId` de uma semana é fixo e não anda com a virada. A
+  `sprints[]` traz N semanas na ordem da data, e só estas: a atual sempre (mesmo vazia), toda lane de semana com
+  item e, até o ack, toda semana que uma mudança sem ack cita em `lane_id` ou `from_lane_id`, guardada vazia ou já
+  apagada (a futura que perdeu o último item, a que a virada encerrou; sem lane, vem com `items: []`); uma lane
+  vazia que não é a atual nem é citada fica de fora. O `sprintId` de uma semana é fixo e não anda com a virada. A
   ordem dos itens desempata pelo número da issue e depois pelo id. `removedPending[].laneId` de sprint e
   `lane_id`/`from_lane_id` na fila de `pending-changes` também vêm por data; a migração 0031 traduziu as mudanças
   ainda sem ack. Pela seção 2 isto seria uma quebra; **por decisão do usuário no rollout, a `schemaVersion`

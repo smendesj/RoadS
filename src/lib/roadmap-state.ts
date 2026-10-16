@@ -8,8 +8,9 @@
 // positional lane (`atual`…) is a week like the others, told by its dates. The weeks come in the order of their
 // start date. The e2e fixture lanes (`zz-test-*`) and what is in them never reach Frontlights.
 //
-// Which weeks: every stored one, the current week always (empty when it has no lane), and every week an unacked
-// change still names after its lane was deleted, empty, so Frontlights can write the departure into its file.
+// Which weeks: the current one always (empty when it has no lane), every stored week that holds an item, past or
+// future, and every week an unacked change names, stored empty or already deleted (then empty and dated by its id),
+// so Frontlights can write the departure into its file. A stored empty week that is none of these stays out.
 
 import { statusByUrl, type StatusKey } from "./board.ts";
 import { currentMonday, isTestLane, sprintIdFor, sprintLanesByDate, todayInSaoPaulo, weekTitle } from "./sprint-week.ts";
@@ -127,11 +128,26 @@ export function buildRoadmapState(input: {
 
   const lanes = input.lanes.filter((l) => !isTestLane(l.id));
   const sprintLanes = sprintLanesByDate(lanes.filter((l) => l.kind === "sprint"));
+  // The ids the unacked changes name: lane_id of an add, a remove or a move_lane, from_lane_id of a move_lane.
+  const cited = new Set<string>();
+  for (const change of input.pending) {
+    if (!CITING_ACTIONS.has(change.action)) continue;
+    for (const key of change.action === "move_lane" ? ["lane_id", "from_lane_id"] : ["lane_id"]) {
+      const id = change.payload?.[key];
+      if (typeof id === "string") cited.add(id);
+    }
+  }
+  const monday = currentMonday(todayInSaoPaulo(input.now));
+
+  // A stored week comes when it holds an item (past or future), when it is the current week, or when an unacked
+  // change names it (by its own id or by its date id); a stored week that is none of these stays out.
   const sprints: RoadmapState["sprints"] = [];
   for (const lane of sprintLanes) {
     // A sprint with no dates has nothing to name a folder or a file after, so it is left out.
     if (!lane.start_date || !lane.end_date) continue;
     const items = (itemsByLane.get(lane.id) ?? []).map(toItem);
+    const current = lane.start_date <= monday && monday <= lane.end_date;
+    if (!items.length && !current && !cited.has(lane.id) && !cited.has(sprintIdFor(lane.start_date))) continue;
     sprints.push({
       sprintId: sprintIdFor(lane.start_date),
       laneId: lane.id,
@@ -143,25 +159,18 @@ export function buildRoadmapState(input: {
   }
 
   // Weeks with no lane that still belong in the answer, empty, named and dated by their id: the current week,
-  // always, and every week an unacked change names (lane_id of an add, a remove or a move_lane, from_lane_id of a
-  // move_lane) once its lane is gone: the future week its last item left, the ended week the rotation deleted.
-  // After the ack the week is no longer named and is gone. A week a lane already holds (by its dates, so a
-  // positional lane too) is never added twice. The screen's empty weeks (the one at the end, the gaps) are in
-  // neither the lanes nor the queue, so they never get here.
+  // always, and every week an unacked change names once its lane is gone: the future week its last item left, the
+  // ended week the rotation deleted. After the ack the week is no longer named and is gone. Only a real Monday's
+  // `sprint-DD-MM-AAAA` is a week, and a week a lane already holds (by its dates, so a positional lane too) is never
+  // added twice. The screen's empty weeks (the one at the end, the gaps) are in neither the lanes nor the queue.
   const held = (start: string) => sprints.some((s) => s.startDate <= start && start <= s.endDate);
   const addWeek = (id: string) => {
     const week = weekOfId(id);
     if (!week || held(week.start)) return;
     sprints.push({ sprintId: id, laneId: id, title: weekTitle(week.start, week.end), startDate: week.start, endDate: week.end, items: [] });
   };
-  addWeek(sprintIdFor(currentMonday(todayInSaoPaulo(input.now))));
-  for (const change of input.pending) {
-    if (!CITING_ACTIONS.has(change.action)) continue;
-    for (const key of change.action === "move_lane" ? ["lane_id", "from_lane_id"] : ["lane_id"]) {
-      const id = change.payload?.[key];
-      if (typeof id === "string") addWeek(id);
-    }
-  }
+  addWeek(sprintIdFor(monday));
+  for (const id of cited) addWeek(id);
   sprints.sort((a, b) => (a.startDate < b.startDate ? -1 : a.startDate > b.startDate ? 1 : 0));
   const groups: RoadmapState["groups"] = [...lanes]
     .filter((l) => l.kind !== "sprint")

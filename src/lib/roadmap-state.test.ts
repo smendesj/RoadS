@@ -60,6 +60,7 @@ test("a sprint is titled by its dates only, never by its position", () => {
   const state = base({
     now: new Date("2026-09-29T12:00:00Z"),
     lanes: [{ ...lane("atual", "sprint", 1, "2026-09-28", "2026-10-02"), title: "Sprint atual" }, lane("sprint-05-10-2026", "sprint", 2, "2026-10-05", "2026-10-09")],
+    items: [item("a", "sprint-05-10-2026", 0)],
   });
   assert.deepEqual(state.sprints.map((s) => s.title), ["Sprint 28/09–02/10", "Sprint 05–09/10"]);
 });
@@ -71,6 +72,7 @@ test("the weeks come in the order of their start date, whatever their stored ord
       lane("sprint-05-01-2026", "sprint", 3, "2026-01-05", "2026-01-09"),
       lane("sprint-12-01-2026", "sprint", 2, "2026-01-12", "2026-01-16"),
     ],
+    items: [item("a", "sprint-19-01-2026", 0), item("b", "sprint-12-01-2026", 0)],
   });
   assert.deepEqual(state.sprints.map((s) => s.sprintId), ["sprint-05-01-2026", "sprint-12-01-2026", "sprint-19-01-2026"]);
 });
@@ -277,6 +279,33 @@ test("the current week is always there, empty when its lane is missing, the next
     items: [item("c", "sprint-26-10-2026", 0)],
   });
   assert.deepEqual(saturday.sprints.map((s) => [s.sprintId, s.items.length]), [["sprint-19-10-2026", 0], ["sprint-26-10-2026", 1]]);
+});
+
+test("a stored week lane with no item comes only when it is the current week or an unacked change names it", () => {
+  const state = base({
+    now: new Date("2026-10-14T12:00:00Z"),
+    lanes: [
+      lane("sprint-05-10-2026", "sprint", 1, "2026-10-05", "2026-10-09"), // ended, empty, not named
+      lane("sprint-12-10-2026", "sprint", 2, "2026-10-12", "2026-10-16"), // current, empty
+      lane("sprint-19-10-2026", "sprint", 3, "2026-10-19", "2026-10-23"), // future, empty, not named
+      lane("sprint-26-10-2026", "sprint", 4, "2026-10-26", "2026-10-30"), // future, empty, named by a move
+      lane("proxima", "sprint", 5, "2026-11-02", "2026-11-06"), // positional, empty, named by its own id
+      lane("sprint-09-11-2026", "sprint", 6, "2026-11-09", "2026-11-13"), // future, with an item
+      lane("sprint-28-09-2026", "sprint", 0, "2026-09-28", "2026-10-02"), // ended, with an item
+    ],
+    items: [item("a", "sprint-09-11-2026", 0), item("b", "sprint-28-09-2026", 0)],
+    pending: [
+      { id: "q1", item_id: "a", action: "move_lane", payload: { lane_id: "sprint-09-11-2026", from_lane_id: "sprint-26-10-2026" } },
+      { id: "q2", item_id: null, action: "remove", payload: { lane_id: "proxima", title: "Saiu" } },
+    ],
+  });
+  assert.deepEqual(state.sprints.map((s) => [s.sprintId, s.laneId, s.items.length]), [
+    ["sprint-28-09-2026", "sprint-28-09-2026", 1],
+    ["sprint-12-10-2026", "sprint-12-10-2026", 0],
+    ["sprint-26-10-2026", "sprint-26-10-2026", 0],
+    ["sprint-02-11-2026", "proxima", 0],
+    ["sprint-09-11-2026", "sprint-09-11-2026", 1],
+  ]);
 });
 
 test("the empty week at the end of the screen's row and the gaps are never in sprints[]", () => {
