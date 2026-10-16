@@ -97,9 +97,9 @@ async function loggedCalls(wanted) {
       ![...sprints, ...(state.json?.groups ?? [])].some((l) => String(l.laneId).startsWith("zz-test-")) &&
         !(state.json?.removedPending ?? []).some((r) => String(r.laneId ?? "").startsWith("zz-test-"))
     );
-    // Holds only after migration 0030 is pushed: before it the lanes are still atual/proxima/terceira.
+    // Holds only after migration 0031 is pushed: before it the lanes are still atual/proxima/terceira.
     expect(
-      "roadmap-state (after 0030): laneId is the same sprint-DD-MM-AAAA as sprintId",
+      "roadmap-state (after 0031): laneId is the same sprint-DD-MM-AAAA as sprintId",
       sprints.length > 0 && sprints.every((sp) => sp.laneId === sp.sprintId),
       JSON.stringify(sprints.map((sp) => [sp.laneId, sp.sprintId]))
     );

@@ -5,7 +5,7 @@
 // Monday (the rotation of the sprints turns the week on that same day).
 //
 // Lanes are told apart by kind and dates only, so the three positional lanes (`atual`, `proxima`, `terceira`)
-// that the database still holds until migration 0030 are weeks like any other. The e2e fixture (`zz-test-*`)
+// that the database still holds until migration 0031 are weeks like any other. The e2e fixture (`zz-test-*`)
 // lives in the real database and is never a week: it is left out of the current week, the rotation and the
 // state handed to Frontlights.
 

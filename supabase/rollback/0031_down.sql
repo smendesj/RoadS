@@ -1,10 +1,10 @@
--- The way back from supabase/migrations/0030_sprint_lanes_by_date.sql: the week lanes go back to the three
+-- The way back from supabase/migrations/0031_sprint_lanes_by_date.sql: the week lanes go back to the three
 -- positional ones. Kept outside supabase/migrations on purpose, so `db push` never runs it; it is run by hand
 -- (SQL editor or psql), and only together with going back to code that reads the positional lanes.
 --
 -- The earliest week becomes `atual`, the one 7 days later `proxima`, 14 days later `terceira` (each created with
 -- its dates when no week lane held it). It refuses, changing nothing, when a week lane falls outside those three
--- weeks: folding more weeks into three positions is a decision, not a rollback. Like 0030, in one statement, with
+-- weeks: folding more weeks into three positions is a decision, not a rollback. Like 0031, in one statement, with
 -- the same checks: items per week and in all, nothing left in a week lane, no unacked change naming one.
 -- Moves are not queued, because no item changes week. The e2e fixture lanes (`zz-test-*`) are not touched.
 
@@ -20,11 +20,11 @@ declare
   items_after bigint;
 begin
   if not exists (select 1 from public.lanes where id like 'sprint-__-__-____' and kind = 'sprint') then
-    raise notice '0030_down: no week lane, nothing to do';
+    raise notice '0031_down: no week lane, nothing to do';
     return;
   end if;
   if exists (select 1 from public.lanes where id like 'sprint-__-__-____' and (start_date is null or end_date is null)) then
-    raise exception '0030_down: a week lane has no dates; nothing was changed';
+    raise exception '0031_down: a week lane has no dates; nothing was changed';
   end if;
 
   select min(start_date) into first_monday from public.lanes where id like 'sprint-__-__-____' and kind = 'sprint';
@@ -33,7 +33,7 @@ begin
     where id like 'sprint-__-__-____' and kind = 'sprint'
       and start_date not in (first_monday, first_monday + 7, first_monday + 14)
   ) then
-    raise exception '0030_down: there are week lanes beyond three consecutive weeks from %; nothing was changed', first_monday;
+    raise exception '0031_down: there are week lanes beyond three consecutive weeks from %; nothing was changed', first_monday;
   end if;
 
   select coalesce(jsonb_object_agg(w.start_date, w.items), '{}'::jsonb) into weeks_before
@@ -77,21 +77,21 @@ begin
     and not exists (select 1 from public.roadmap_items i where i.lane_id = l.id);
 
   if exists (select 1 from public.roadmap_items i join public.lanes l on l.id = i.lane_id where l.id like 'sprint-__-__-____') then
-    raise exception '0030_down: an item is still in a week lane; everything was undone';
+    raise exception '0031_down: an item is still in a week lane; everything was undone';
   end if;
   if exists (select 1 from public.lanes where id like 'sprint-__-__-____' and kind = 'sprint') then
-    raise exception '0030_down: a week lane is left; everything was undone';
+    raise exception '0031_down: a week lane is left; everything was undone';
   end if;
   if exists (
     select 1 from public.roadmap_sync_queue
     where acked_at is null and (payload ->> 'lane_id' like 'sprint-__-__-____' or payload ->> 'from_lane_id' like 'sprint-__-__-____')
   ) then
-    raise exception '0030_down: an unacked change still names a week lane; everything was undone';
+    raise exception '0031_down: an unacked change still names a week lane; everything was undone';
   end if;
 
   select count(*) into items_after from public.roadmap_items;
   if items_after <> items_before then
-    raise exception '0030_down: % items before and % after; everything was undone', items_before, items_after;
+    raise exception '0031_down: % items before and % after; everything was undone', items_before, items_after;
   end if;
 
   select coalesce(jsonb_object_agg(w.start_date, w.items), '{}'::jsonb) into weeks_after
@@ -105,7 +105,7 @@ begin
   -- The positional lanes created for an empty week add a week with 0 items; only the weeks that had items must match.
   if (select coalesce(jsonb_object_agg(key, value), '{}'::jsonb) from jsonb_each(weeks_after) where value <> '0'::jsonb)
      <> (select coalesce(jsonb_object_agg(key, value), '{}'::jsonb) from jsonb_each(weeks_before) where value <> '0'::jsonb) then
-    raise exception '0030_down: items per week changed (before %, after %); everything was undone', weeks_before, weeks_after;
+    raise exception '0031_down: items per week changed (before %, after %); everything was undone', weeks_before, weeks_after;
   end if;
 end;
 $$;

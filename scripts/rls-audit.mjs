@@ -12,7 +12,8 @@
 // The model it encodes: anonymous reads nothing; a dev reads and can only set their own avatar; a
 // scrum_master writes items they own (plus priority/effort/lane on seeded ones) and notes as
 // scrum_master; an admin does everything except hand out or take away the admin role; lanes are
-// admin-only; only company e-mail domains can have an account.
+// admin-only (a week's lane is created and deleted by the server alone, migration 0030); only company e-mail
+// domains can have an account.
 //
 // The reports for the board (progress_reports) are read and edited by the admin, read by a scrum_master
 // only once sent, created and refreshed only by the ingest route (service role), and frozen once sent.
@@ -167,6 +168,21 @@ try {
     const r = await sm.c.from("lanes").delete().eq("id", "zz-test-cascade").select("id");
     const survives = (await svc.from("roadmap_items").select("id").eq("id", victim)).data.length === 1;
     return { ok: !r.error && r.data.length > 0, detail: `lane rows ${r.data?.length ?? 0}, admin's item survives: ${survives}` };
+  });
+  // A week's lane is deleted when it empties by one function (migration 0030), and only the server runs it, with
+  // the service role, after authorizing the item: nobody signed in may call it. The id names no lane, so a call
+  // that got through would only answer false; being let in at all is the hole.
+  const WEEK_FN = "delete_week_lane_if_empty";
+  const ran = (r) => ({ ok: !r.error, detail: r.error ? r.error.message.slice(0, 90) : `answered ${r.data}` });
+  for (const [who, c] of [["anon", anon], ["dev", dev.c], ["sm", sm.c]]) {
+    await check(who, `run ${WEEK_FN}`, "deny", async () => ran(await c.rpc(WEEK_FN, { p_lane_id: "sprint-01-01-2100" })));
+  }
+  await check("svc", `run ${WEEK_FN} (the server does)`, "allow", async () => ran(await svc.rpc(WEEK_FN, { p_lane_id: "sprint-01-01-2100" })));
+  // zz-test-b holds the seeded item moved there above: a lane that is no week, and not empty, is never deleted.
+  await check("svc", `${WEEK_FN} on a group lane with an item`, "deny", async () => {
+    const r = await svc.rpc(WEEK_FN, { p_lane_id: "zz-test-b" });
+    const left = (await svc.from("lanes").select("id").eq("id", "zz-test-b")).data?.length ?? 0;
+    return { ok: r.data === true || left === 0, detail: `answered ${r.data}, lane rows left ${left}` };
   });
   await check("sm", "read roadmap_sync_queue", "allow", async () => ({ ok: !(await sm.c.from("roadmap_sync_queue").select("id").limit(1)).error }));
   await check("sm", "insert sync_queue (what the actions do)", "allow", async () => rows(await sm.c.from("roadmap_sync_queue").insert({ item_id: M, action: "modify", payload: { zz_test: true } }).select("id")));

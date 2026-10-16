@@ -28,32 +28,37 @@ const { BASE, expect, sleep, svc } = L;
     expect("roadmap: subtitle offers 'defina o que entra e quando'", (await count(page.getByText(/defina o que entra e quando/))) === 1);
     expect("roadmap: 'Sincronizar' is available", (await count(page.getByRole("button", { name: /^Sincronizar$/ }))) === 1);
     const novoButtons = await count(page.getByRole("button", { name: "+ Novo item" }));
-    const sprintLaneCount = await count(page.locator('[data-drag-scroll="x"] > [data-lane-id]'));
-    expect("roadmap: a '+ Novo item' in every sprint lane (the real weeks + 1 test)", sprintLaneCount >= 2 && novoButtons === sprintLaneCount, `${novoButtons}/${sprintLaneCount}`);
+    const sprintLaneCount = await count(page.locator('[data-drag-scroll="x"] > [data-lane-id]:not([data-virtual])'));
+    const virtualNovo = await count(page.locator('[data-drag-scroll="x"] > [data-virtual]').getByRole("button", { name: "+ Novo item" }));
+    expect("roadmap: a '+ Novo item' in every stored sprint lane (the real weeks + 1 test), none in a week not stored", sprintLaneCount >= 2 && novoButtons === sprintLaneCount && virtualNovo === 0, `${novoButtons}/${sprintLaneCount}, virtual ${virtualNovo}`);
     expect("roadmap: no 'Config' for a Scrum Master", (await count(page.getByRole("link", { name: "Config", exact: true }))) === 0);
 
     // ------------------------------------------------ the sprints are weeks, titled by their dates, the current one tinted
+    // The row: every week stored, then from the current one on every week up to the last stored one (a gap shows,
+    // not stored), plus one empty week at the end; the e2e test week after them.
+    const W = await L.weeks();
     {
       const row = page.locator('[data-drag-scroll="x"] > [data-lane-id]');
-      const shown = await row.evaluateAll((lanes) => lanes.map((l) => ({ id: l.dataset.laneId, title: l.querySelector(":scope > div > div")?.textContent?.trim() ?? "", current: l.getAttribute("aria-current") })));
-      const { data: sprintRows } = await svc.from("lanes").select("id, start_date, end_date").eq("kind", "sprint");
-      const byDate = (sprintRows ?? []).filter((l) => l.start_date && l.end_date).sort((a, b) => a.start_date.localeCompare(b.start_date));
-      expect("weeks: the sprint row goes in the order of the weeks' start dates", JSON.stringify(shown.map((l) => l.id)) === JSON.stringify(byDate.map((l) => l.id)), JSON.stringify(shown.map((l) => l.id)));
+      const shown = await row.evaluateAll((lanes) => lanes.map((l) => ({ id: l.dataset.laneId, virtual: l.hasAttribute("data-virtual"), title: l.querySelector(":scope > div > div")?.textContent?.trim() ?? "", current: l.getAttribute("aria-current") })));
+      const expected = W.real.map((l) => ({ id: l.id, start: l.start_date, virtual: false }));
+      for (let m = W.monday; m <= W.trailing; m = L.addDays(m, 7)) if (!W.holds(m)) expected.push({ id: L.weekId(m), start: m, virtual: true });
+      expected.sort((a, b) => a.start.localeCompare(b.start));
+      expected.push({ id: "zz-test-sprint", virtual: false });
+      expect("weeks: the row is every stored week and every week from the current one to the empty one at the end, by date, then the test week",
+        JSON.stringify(shown.map((l) => [l.id, l.virtual])) === JSON.stringify(expected.map((l) => [l.id, l.virtual])), JSON.stringify(shown.map((l) => [l.id, l.virtual])));
+      expect("weeks: the last week of the row is an empty one the database doesn't have", shown.at(-2)?.id === L.weekId(W.trailing) && shown.at(-2)?.virtual === true, JSON.stringify(shown.at(-2)));
       expect("weeks: every sprint is titled by its dates only (\"Sprint 12–16/10\")", shown.every((l) => /^Sprint \d{2}(\/\d{2})?–\d{2}\/\d{2}$/.test(l.title)), JSON.stringify(shown.map((l) => l.title)));
       expect("weeks: the test week of 07 to 11/12 reads 'Sprint 07–11/12'", shown.find((l) => l.id === "zz-test-sprint")?.title === "Sprint 07–11/12");
       expect("weeks: no positional title is left on the Roadmap", (await count(page.getByText(/^(Sprint atual|Próxima sprint|Sprint seguinte)$/))) === 0);
       const current = shown.filter((l) => l.current === "date");
-      const lane = byDate.find((l) => l.id === current[0]?.id);
-      const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-      const daysAhead = lane ? (Date.parse(lane.start_date) - Date.parse(today)) / 86400000 : NaN;
-      // Holds today, or (on a Saturday or Sunday, when the week that ended is over) starts on the next Monday.
-      const holdsToday = !!lane && ((lane.start_date <= today && today <= lane.end_date) || (daysAhead >= 1 && daysAhead <= 2 && [0, 6].includes(new Date(`${today}T12:00:00Z`).getUTCDay())));
-      expect("weeks: exactly one week is tinted as the current one, and it is the week of today in São Paulo", current.length === 1 && holdsToday, JSON.stringify({ current, today }));
+      // The current week holds the current Monday (today's, or the next one on a weekend), stored or not.
+      const holdsMonday = current.length === 1 && (current[0].id === L.weekId(W.monday) || W.real.some((l) => l.id === current[0].id && l.start_date <= W.monday && W.monday <= l.end_date));
+      expect("weeks: exactly one week is tinted as the current one, and it is the week of today in São Paulo", holdsMonday, JSON.stringify({ current, today: W.today }));
       expect("weeks: the e2e test week is never the current one", !current.some((l) => l.id.startsWith("zz-test-")));
-      // Holds only after migration 0030 is pushed: before it the database still has atual/proxima/terceira.
-      const dateId = (l) => `sprint-${l.start_date.slice(8, 10)}-${l.start_date.slice(5, 7)}-${l.start_date.slice(0, 4)}`;
-      const realWeeks = byDate.filter((l) => !l.id.startsWith("zz-test-"));
-      expect("weeks (after 0030): every real sprint lane is named sprint-DD-MM-AAAA by its Monday", realWeeks.length > 0 && realWeeks.every((l) => l.id === dateId(l)), JSON.stringify(realWeeks.map((l) => l.id)));
+      const style = await page.locator('[data-drag-scroll="x"]').evaluate((el) => [getComputedStyle(el).display, getComputedStyle(el).overflowX]);
+      expect("weeks: on a wide screen the row is one line that scrolls sideways (no grid of three)", style[0] === "flex" && ["auto", "scroll"].includes(style[1]), JSON.stringify(style));
+      // Holds only after migration 0031 is pushed: before it the database still has atual/proxima/terceira.
+      expect("weeks (after 0031): every real sprint lane is named sprint-DD-MM-AAAA by its Monday", W.real.length > 0 && W.real.every((l) => l.id === L.weekId(l.start_date)), JSON.stringify(W.real.map((l) => l.id)));
     }
 
     const card = (title) => page.locator("div[draggable]", { hasText: title }).first();
@@ -161,6 +166,40 @@ const { BASE, expect, sleep, svc } = L;
     expect("move (select, phone width): own item goes back to the test sprint", movedBack.lane_id === "zz-test-sprint", movedBack.lane_id);
     await page.setViewportSize({ width: 1440, height: 900 });
     await sleep(500);
+
+    // ------------------------------------------------ a week is born when an item is dropped on it, and goes when it empties
+    {
+      const trailing = L.weekId(W.trailing);
+      const next = L.weekId(L.addDays(W.trailing, 7));
+      const laneRows = async (id) => (await svc.from("lanes").select("id, kind, start_date, end_date").eq("id", id)).data ?? [];
+      expect("new week: the empty week at the end is not in the database yet", (await laneRows(trailing)).length === 0, trailing);
+      L.createdWeeks.add(trailing);
+      await L.fitWholePage(page);
+      // Both lanes on screen together: the test week sits right after the empty one at the end of the row.
+      await page.locator('[data-lane-id="zz-test-sprint"]').scrollIntoViewIfNeeded();
+      await mouseDrag(card("[TESTE] criado e editado pelo SM"), page.locator(`[data-lane-id="${trailing}"]`));
+      await sleep(2500);
+      const born = await laneRows(trailing);
+      const { data: inWeek } = await svc.from("roadmap_items").select("lane_id").eq("id", created.id).single();
+      expect("new week: dropped on the empty week, the item is saved there and the week's lane exists, dated by its Monday",
+        inWeek.lane_id === trailing && born.length === 1 && born[0].kind === "sprint" && born[0].start_date === W.trailing && born[0].end_date === L.addDays(W.trailing, 4),
+        JSON.stringify({ lane: inWeek.lane_id, born }));
+      await page.locator(`[data-lane-id="${next}"][data-virtual]`).waitFor({ timeout: 15000 }).catch(() => {});
+      expect("new week: the week shows as stored, and a new empty week follows it at the end",
+        (await count(page.locator(`[data-lane-id="${trailing}"]:not([data-virtual])`))) === 1 && (await count(page.locator(`[data-lane-id="${next}"][data-virtual]`))) === 1);
+
+      await page.setViewportSize({ width: 800, height: 1000 });
+      await sleep(800);
+      await page.locator("div[draggable]", { hasText: "[TESTE] criado e editado pelo SM" }).first().locator('select[aria-label="Mover para"]').selectOption("zz-test-sprint");
+      await sleep(2500);
+      const { data: outOfWeek } = await svc.from("roadmap_items").select("lane_id").eq("id", created.id).single();
+      expect("empty week: its only item moved out, the future week's lane is deleted", outOfWeek.lane_id === "zz-test-sprint" && (await laneRows(trailing)).length === 0, outOfWeek.lane_id);
+      await page.locator(`[data-lane-id="${next}"]`).waitFor({ state: "detached", timeout: 15000 }).catch(() => {});
+      expect("empty week: the row ends again with that week, empty and not stored",
+        (await count(page.locator(`[data-lane-id="${trailing}"][data-virtual]`))) === 1 && (await count(page.locator(`[data-lane-id="${next}"]`))) === 0);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await sleep(500);
+    }
 
     // ------------------------------------------------ move on a phone: hold the card, then drag it with the finger
     {

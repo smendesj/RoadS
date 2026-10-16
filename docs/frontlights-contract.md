@@ -88,7 +88,7 @@ O Roadmap como está agora, só leitura: não consome nada e nunca dá ack. É o
   `overLimit`: `true` do quinto item em diante (`maxSprintItems` é 4).
 - **Cada sprint é uma semana.** `sprintId` é `sprint-` mais a segunda-feira em `DD-MM-AAAA`
   (`sprint-02-03-2026`) e não muda quando a semana vira. `laneId` é o id da lane, que é o mesmo `sprint-DD-MM-AAAA`
-  (enquanto o banco ainda tiver as lanes posicionais de antes da migração 0030, `laneId` é o id dela, `atual`,
+  (enquanto o banco ainda tiver as lanes posicionais de antes da migração 0031, `laneId` é o id dela, `atual`,
   `proxima` ou `terceira`, e o `sprintId` já vem pela data). `title` são só as datas (`"Sprint 02–06/03"`).
   `sprints[]` traz quantas semanas houver, na ordem da data de início, nunca do texto do id. Um sprint sem datas
   não aparece. A semana atual é a que contém hoje no fuso de `timezone` (no fim de semana, a que começa na segunda
@@ -123,7 +123,7 @@ O que mudou e ainda não foi escrito nos arquivos. Quem monta: `src/lib/frontlig
   mantém o sprint atual e o Project em acordo é só o RoadS (seção 4, `sync-board`).
 - Um `add` pode nomear a semana atual (`sprint-DD-MM-AAAA`) em `lane_id`: é a issue que já estava em Development no
   Project quando entrou no Roadmap, e entra direto no sprint atual. `lane_id` e `from_lane_id` de uma sprint vêm
-  sempre por data; os que ainda estavam sem ack quando a migração 0030 rodou foram traduzidos por ela.
+  sempre por data; os que ainda estavam sem ack quando a migração 0031 rodou foram traduzidos por ela.
 - Um `modify` pode trazer `title` e `reason` `"title follows the issue on GitHub"`: a issue foi renomeada no GitHub
   e o título do item no Roadmap a acompanhou. É o `title` de `item` que vale para escrever o arquivo. O RoadS só
   acompanha uma **renomeação** (o título da issue mudou desde a última sincronização); um título que uma pessoa
@@ -427,8 +427,8 @@ repositório, `roads-script/push` e `roads-script/attach`.
   `roadmap-state`, `sprintId` e `laneId` passam a `sprint-DD-MM-AAAA` (a segunda-feira; antes, `sprintId` era
   `sprint-AAAA-MM-DD` e `laneId` era `atual`, `proxima` ou `terceira`), `title` passa a ser só as datas, e
   `sprints[]` traz N semanas na ordem da data. `removedPending[].laneId` de sprint e `lane_id`/`from_lane_id` na
-  fila de `pending-changes` também vêm por data; a migração 0030 traduziu as mudanças ainda sem ack. Pela seção 2
+  fila de `pending-changes` também vêm por data; a migração 0031 traduziu as mudanças ainda sem ack. Pela seção 2
   isto seria uma quebra; **por decisão do usuário no rollout, a `schemaVersion` continua 1** em `roadmap-state`,
   `pending-changes` e `ack`, porque o Frontlights publicou antes a versão que aceita as duas formas (ids
-  posicionais e por data). O RoadS faz o `db push` da 0030 e o deploy depois disso. Nenhum campo foi tirado ou
+  posicionais e por data). O RoadS faz o `db push` da 0031 e o deploy depois disso. Nenhum campo foi tirado ou
   renomeado.

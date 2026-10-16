@@ -105,6 +105,16 @@ async function call(ctx, id, args, pagePath) {
       const r = await call(dev.context, id, args, p);
       expect(`dev -> ${name}: refused`, r.kind === "error", `${r.kind} ${r.status}`);
     }
+    // A week that is not in the database (the empty one at the end of the Roadmap's row) is created only for an
+    // item its mover may move: a Dev is refused before any lane is written.
+    const W = await L.weeks();
+    const trailing = L.weekId(W.trailing);
+    const laneExists = async (id) => ((await svc.from("lanes").select("id").eq("id", id)).data ?? []).length === 1;
+    expect("weeks: the empty week at the end is not in the database before the run", !(await laneExists(trailing)), trailing);
+    L.createdWeeks.add(trailing);
+    const devWeek = await call(dev.context, A.moveRoadmapItemLane, [L.ids.smItem, trailing], "/roadmap");
+    expect("dev -> moveRoadmapItemLane into a week not in the database: refused, and no lane is created",
+      devWeek.kind === "error" && !(await laneExists(trailing)) && (await itemRow(L.ids.smItem)).lane_id === lane, `${devWeek.kind} ${trailing}`);
     expect("dev -> nothing changed: no item created, SM item untouched, admin item still there, role still dev",
       (await svc.from("roadmap_items").select("id").eq("created_by", L.ids.dev)).data.length === 0 &&
         (await itemRow(L.ids.smItem)).prioridade === "Medium" && (await itemRow(L.ids.adminItem)) && (await profileRole(L.ids.dev)) === "dev");
@@ -182,6 +192,45 @@ async function call(ctx, id, args, pagePath) {
     expect("scrum master -> nothing changed on the admin's and seeded items",
       (await itemRow(L.ids.adminItem)).prioridade === "Medium" && (await itemRow(L.ids.adminItem)).lane_id === lane &&
         (await itemRow(L.ids.seeded)).title === "[TESTE] item semeado (sem dono)" && (await profileRole(L.ids.dev)) === "dev");
+    // ---- weeks: the scrum master plans an item into a week that is not in the database yet
+    {
+      const pastFree = [1, 2, 3, 4, 5, 6, 7, 8].map((k) => L.addDays(W.monday, -7 * k)).find((m) => !W.holds(m)) ?? L.addDays(W.monday, -7 * 30);
+      const refusedWeeks = [
+        ["a date that does not exist", "sprint-31-02-2027"],
+        ["not a Monday", L.weekId(L.addDays(W.trailing, 1))],
+        ["a week before the current one", L.weekId(pastFree)],
+        ["beyond 52 weeks", L.weekId(L.addDays(W.monday, 7 * 53))],
+        ["not a week id", "zz-test-nope"],
+      ];
+      for (const [why, id] of refusedWeeks) {
+        L.createdWeeks.add(id);
+        const r = await call(sm.context, A.moveRoadmapItemLane, [L.ids.seeded, id], "/roadmap");
+        expect(`scrum master -> moveRoadmapItemLane into ${why} (${id}): refused, no lane, the item stays`,
+          r.kind === "error" && !(await laneExists(id)) && (await itemRow(L.ids.seeded)).lane_id === lane, r.kind);
+      }
+      const adminWeek = await call(sm.context, A.moveRoadmapItemLane, [L.ids.adminItem, trailing], "/roadmap");
+      expect("scrum master -> the admin's item into a new week: refused before the week is created",
+        adminWeek.kind === "error" && !(await laneExists(trailing)) && (await itemRow(L.ids.adminItem)).lane_id === lane, adminWeek.kind);
+
+      const into = await call(sm.context, A.moveRoadmapItemLane, [L.ids.seeded, trailing], "/roadmap");
+      const { data: born } = await svc.from("lanes").select("id, title, kind, start_date, end_date").eq("id", trailing);
+      const end = L.addDays(W.trailing, 4);
+      const title = `Sprint ${W.trailing.slice(5, 7) === end.slice(5, 7) ? W.trailing.slice(8, 10) : `${W.trailing.slice(8, 10)}/${W.trailing.slice(5, 7)}`}–${end.slice(8, 10)}/${end.slice(5, 7)}`;
+      expect("scrum master -> the seeded item dropped on the empty week: the week's lane is created by its Monday, titled and dated by it",
+        into.kind === "ok" && born?.length === 1 && born[0].kind === "sprint" && born[0].start_date === W.trailing && born[0].end_date === end && born[0].title === title && (await itemRow(L.ids.seeded)).lane_id === trailing,
+        `${into.kind} ${JSON.stringify(born)}`);
+      const { data: q } = await svc.from("roadmap_sync_queue").select("payload").eq("item_id", L.ids.seeded).eq("action", "move_lane").gte("created_at", t0);
+      expect("scrum master -> the move into the new week is queued with both lanes", (q ?? []).some((r) => r.payload?.lane_id === trailing && r.payload?.from_lane_id === lane));
+
+      const back = await call(sm.context, A.moveRoadmapItemLane, [L.ids.seeded, lane], "/roadmap");
+      expect("scrum master -> moving the only item out of that future week deletes its lane",
+        back.kind === "ok" && (await itemRow(L.ids.seeded)).lane_id === lane && !(await laneExists(trailing)), back.kind);
+
+      // Deleting the last item of a future week deletes the week too (checked at the delete of the SM's own item below).
+      const ownInto = await call(sm.context, A.moveRoadmapItemLane, [L.ids.smItem, trailing], "/roadmap");
+      expect("scrum master -> own item into the empty week: the lane is created again", ownInto.kind === "ok" && (await laneExists(trailing)), ownInto.kind);
+    }
+
     const smOk = [
       ["saveRoadmapItemEdit (own item)", A.saveRoadmapItemEdit, [L.ids.smItem, edit({ prioridade: "High", note: "[TESTE] nota com activeView=dev forjado" })], "/roadmap"],
       ["saveRoadmapItemEdit (seeded: priority + note)", A.saveRoadmapItemEdit, [L.ids.seeded, edit({ prioridade: "High" })], "/roadmap"],
@@ -198,6 +247,7 @@ async function call(ctx, id, args, pagePath) {
     expect("scrum master -> the created item belongs to the Scrum Master", created.length === 1);
     const delOwn = await call(sm.context, A.deleteRoadmapItem, [L.ids.smItem], "/roadmap");
     expect("scrum master -> deleteRoadmapItem (own item): allowed", delOwn.kind === "ok" && (await itemRow(L.ids.smItem)) === undefined, `${delOwn.kind}`);
+    expect("scrum master -> deleting the only item of a future week deletes its lane", !(await laneExists(trailing)), trailing);
 
     // ------------------------------------------------------------------ ADMIN
     const adminRoleBefore = await profileRole(L.ids.admin);

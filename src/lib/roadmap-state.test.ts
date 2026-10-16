@@ -50,7 +50,7 @@ test("a sprint is a week: its id is sprint- and its Monday as DD-MM-AAAA, and la
   assert.deepEqual(state.groups.map((g) => g.laneId), ["g1"]);
 });
 
-test("a positional lane still in the database (before migration 0030) is a week too: the sprintId comes from its date", () => {
+test("a positional lane still in the database (before migration 0031) is a week too: the sprintId comes from its date", () => {
   const state = base({ lanes: [lane("proxima", "sprint", 2, "2026-01-05", "2026-01-09")] });
   assert.deepEqual(state.sprints.map((s) => [s.sprintId, s.laneId]), [["sprint-05-01-2026", "proxima"]]);
 });
