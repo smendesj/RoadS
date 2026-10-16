@@ -12,6 +12,7 @@ import { newestIssueFirst } from "@/lib/issue-order";
 import type { SyncColumn } from "@/lib/board-sync";
 import { sliceBlocks, type SliceBlock, type SliceGroup } from "@/lib/slices";
 import { brakeMessage, roadmapChanged, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
+import { currentSprintLane } from "@/lib/current-sprint";
 import { createClient } from "@/lib/supabase/server";
 import type { Tone } from "@/lib/tones";
 
@@ -32,13 +33,13 @@ const STATUS_LABEL: Record<string, { status: string; tone: Tone }> = {
 };
 const NO_ISSUE = { status: "SEM ISSUE", tone: "neutral" as Tone };
 
-// Weekly branch name from the current sprint lane's raw dates: SPRINT-28_09-02_10.
+// Weekly branch name from the current week's raw dates (the lane whose dates hold today): SPRINT-28_09-02_10.
 async function currentSprintBranch(): Promise<string> {
   const supabase = await createClient();
-  const { data } = await supabase.from("lanes").select("start_date, end_date").eq("id", "atual").maybeSingle();
-  if (!data?.start_date || !data?.end_date) return "—";
-  const [, sm, sd] = (data.start_date as string).split("-");
-  const [, em, ed] = (data.end_date as string).split("-");
+  const data = await currentSprintLane(supabase).catch(() => null);
+  if (!data) return "—";
+  const [, sm, sd] = data.start_date.split("-");
+  const [, em, ed] = data.end_date.split("-");
   return `SPRINT-${sd}_${sm}-${ed}_${em}`;
 }
 
@@ -48,7 +49,7 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null, sl
   // Issue URL -> Kanban status key, from the snapshot (every issue, per status).
   const statusOf = statusByUrl(columns);
 
-  const atual = lanes.find((l) => l.id === "atual");
+  const atual = lanes.find((l) => l.current);
   const sprintItems = newestIssueFirst(atual?.items ?? [], (it) => it.number);
 
   const entregas = sprintItems.map((it) => {
@@ -70,10 +71,9 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null, sl
   const done = countStatus("done");
   const sprintBlocked = countStatus("blocker");
   const boardBlockers = columns.find((c) => c.key === "blocker")?.count ?? 0;
-  const dates = atual?.dates ?? "";
 
   const kpis: DashboardModel["kpis"] = [
-    { label: "Development", value: String(inDev), hint: `Sprint atual · ${dates}`, tone: "neutral" },
+    { label: "Development", value: String(inDev), hint: atual?.title ?? "Nenhuma sprint nesta semana", tone: "neutral" },
     {
       label: "Concluídas",
       value: `${done} de ${sprintItems.length}`,

@@ -7,9 +7,10 @@ const GH = "https://github.com/Essencis-Labs/GeoCloudAI/issues/";
 export function getLanes(): Lane[] {
   return [
     {
-      id: "atual",
-      title: "Sprint atual",
+      id: "sprint-21-09-2026",
+      title: "Sprint 21–25/09",
       dates: "21–25/09",
+      current: true,
       items: [
         {
           id: "715",
@@ -51,8 +52,8 @@ export function getLanes(): Lane[] {
       ],
     },
     {
-      id: "proxima",
-      title: "Próxima sprint",
+      id: "sprint-28-09-2026",
+      title: "Sprint 28/09–02/10",
       dates: "28/09–02/10",
       items: [
         {
@@ -79,8 +80,8 @@ export function getLanes(): Lane[] {
       ],
     },
     {
-      id: "terceira",
-      title: "Sprint seguinte",
+      id: "sprint-05-10-2026",
+      title: "Sprint 05–09/10",
       dates: "05–09/10",
       items: [
         { id: "s5-1", title: "Marcações em colunas verticais", produto: "GeoCloud", prioridade: "Medium", effort: "Medium", desc: "A parte de Single View sem bloqueio externo.", url: null, notes: [] },
@@ -141,7 +142,7 @@ export function getRoadmapGroups(): RoadmapGroup[] {
 export const dashboardData = {
   branch: "SPRINT-21_09-25_09",
   kpis: [
-    { label: "Development", value: "3", hint: "Sprint atual · 21–25/09", tone: "neutral" as const },
+    { label: "Development", value: "3", hint: "Sprint 21–25/09", tone: "neutral" as const },
     { label: "Concluídas", value: "0 de 3", hint: "Comprometidas esta semana", tone: "green" as const },
     { label: "Bloqueios", value: "0", hint: "Nenhum agora", tone: "green" as const },
   ],
