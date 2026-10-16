@@ -4,7 +4,7 @@
 // belong to /pending-changes and /ack, and this stays read-only.
 //
 // A sprint is a week (src/lib/sprint-week.ts): its sprintId is `sprint-DD-MM-AAAA`, from its Monday, and its title
-// is its dates. laneId is the lane's own id, the same once migration 0030 has renamed the lanes; until then a
+// is its dates. laneId is the lane's own id, the same once migration 0031 has renamed the lanes; until then a
 // positional lane (`atual`…) is a week like the others, told by its dates. The weeks come in the order of their
 // start date. The e2e fixture lanes (`zz-test-*`) and what is in them never reach Frontlights.
 

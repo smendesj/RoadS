@@ -261,7 +261,7 @@ async function runBoardSync(): Promise<SyncResult> {
 // Moves the three sprints up a step once the current one's last day has passed (see sprint-rotation.ts).
 // The guarded update of "atual" claims the rotation, so the cron and a button sync running together
 // can't rotate twice. Every removal and move is queued so FrontlightS mirrors it.
-// It only works on the three positional lanes, which exist until migration 0030 turns them into weeks named by
+// It only works on the three positional lanes, which exist until migration 0031 turns them into weeks named by
 // their date; after it, it finds none of them and does nothing, and it never creates a lane. The week-by-date
 // rotation (only the week that ended moves) replaces it in the next slice.
 async function rotateSprints(doneUrls: Set<string>): Promise<void> {

@@ -12,7 +12,7 @@
 // The model it encodes: anonymous reads nothing; a dev reads and can only set their own avatar; a
 // scrum_master writes items they own (plus priority/effort/lane on seeded ones) and notes as
 // scrum_master; an admin does everything except hand out or take away the admin role; lanes are
-// admin-only (a week's lane is created and deleted by the server alone, migration 0031); only company e-mail
+// admin-only (a week's lane is created and deleted by the server alone, migration 0030); only company e-mail
 // domains can have an account.
 //
 // The reports for the board (progress_reports) are read and edited by the admin, read by a scrum_master
@@ -169,7 +169,7 @@ try {
     const survives = (await svc.from("roadmap_items").select("id").eq("id", victim)).data.length === 1;
     return { ok: !r.error && r.data.length > 0, detail: `lane rows ${r.data?.length ?? 0}, admin's item survives: ${survives}` };
   });
-  // A week's lane is deleted when it empties by one function (migration 0031), and only the server runs it, with
+  // A week's lane is deleted when it empties by one function (migration 0030), and only the server runs it, with
   // the service role, after authorizing the item: nobody signed in may call it. The id names no lane, so a call
   // that got through would only answer false; being let in at all is the hole.
   const WEEK_FN = "delete_week_lane_if_empty";

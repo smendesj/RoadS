@@ -14,7 +14,7 @@ import { weekFate, weekToCreate } from "@/lib/week-plan";
  * with one lane. Refused (throws "invalid_week") unless `weekId` is a real Monday's `sprint-DD-MM-AAAA`, not before
  * the current week (the current one passes) and within the 52-week horizon; the title and dates are derived from
  * the id, never taken from the caller. A sprint lane that already holds that Monday (a positional one, before
- * migration 0030) is the week, and its id is returned instead.
+ * migration 0031) is the week, and its id is returned instead.
  */
 export async function ensureWeekLane(admin: SupabaseClient, weekId: string, now = new Date()): Promise<string> {
   const plan = weekToCreate(weekId, todayInSaoPaulo(now));
@@ -38,7 +38,7 @@ export async function ensureWeekLane(admin: SupabaseClient, weekId: string, now 
 
 /**
  * Deletes a sprint lane when it holds no item, whatever its week (the rotation deletes the one that ended this way),
- * positional lanes included; never a group lane nor the e2e fixture. One call (migration 0031): the lane goes only
+ * positional lanes included; never a group lane nor the e2e fixture. One call (migration 0030): the lane goes only
  * if it is still empty, never with an item in it. Answers whether it was deleted.
  */
 export async function deleteWeekIfEmpty(admin: SupabaseClient, laneId: string): Promise<boolean> {
