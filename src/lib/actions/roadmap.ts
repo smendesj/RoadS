@@ -7,6 +7,7 @@ import { createGeoCloudIssue, readIssueLabels } from "@/lib/github";
 import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
 import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
+import { mayGetIssue } from "@/lib/test-data";
 import { currentSprintLane } from "@/lib/current-sprint";
 import { sprintLanesByDate, todayInSaoPaulo, weekDates, weekLanes, weekTitle } from "@/lib/sprint-week";
 import { weekRow } from "@/lib/week-plan";
@@ -274,7 +275,8 @@ export async function saveRoadmapItemEdit(
 }
 
 // Every Roadmap item is a GitHub issue. A GeoCloud item saved without one (a "+ Novo item" once it
-// has a real title) gets its issue here, Open on Project #7 (Development if it is in the current sprint). A failure doesn't fail the save: the
+// has a real title) gets its issue here, Open on Project #7 (Development if it is in the current sprint); test data
+// (src/lib/test-data.ts) never does. A failure doesn't fail the save: the
 // next board sync retries it.
 async function ensureIssue(
   itemId: string,
@@ -282,7 +284,7 @@ async function ensureIssue(
   status: "Open" | "Development"
 ): Promise<{ url: string; number: number } | null> {
   const token = process.env.GITHUB_TOKEN;
-  if (item.github_issue_url || item.title === NEW_ITEM_TITLE || !token) return null;
+  if (!mayGetIssue(item) || !token) return null;
   try {
     const issue = await createGeoCloudIssue(token, item, status);
     // Linking is bookkeeping, not a content edit, so it goes through the admin client: the

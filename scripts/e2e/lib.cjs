@@ -149,16 +149,51 @@ async function cleanupCalls() {
   await svc.from("frontlights_calls").delete().like("user_agent", `${E2E_UA}%`);
 }
 
+// The ids of the items a run may have created: in a test lane, titled "[TESTE]" or owned by a test account.
+async function testItemIds() {
+  const inLanes = (await svc.from("roadmap_items").select("id").like("lane_id", "zz-test-%")).data ?? [];
+  const titled = (await svc.from("roadmap_items").select("id").like("title", "[TESTE]%")).data ?? [];
+  const byOwner = (await svc.from("roadmap_items").select("id").in("created_by", [ids.admin, ids.sm].filter(Boolean))).data ?? [];
+  return new Set([...inLanes, ...titled, ...byOwner].map((r) => r.id));
+}
+
+// Test data never reaches GitHub (src/lib/test-data.ts): checked at the end of every suite that creates items, before
+// the cleanup removes them. No "[TESTE]" item has an issue (a save that creates one links it on the item), and since
+// `since` the queue has no "issue linked" modify for a test item (what the board sync queues when it creates one).
+// The suites also seed "[TESTE]" items linked on purpose to made-up issues, numbered from SYNTHETIC_ISSUE_MIN up, far
+// above any real issue; those don't count. A "[TESTE]" item linked to any other issue (a real number) fails the check.
+const TEST_TITLE = /^\s*\[TESTE\]/;
+const SYNTHETIC_ISSUE_MIN = 990000;
+const ISSUE_NUMBER = /\/issues\/(\d+)/;
+async function expectNoTestIssues(since) {
+  try {
+    const { data: withUrl, error } = await svc
+      .from("roadmap_items")
+      .select("id, github_issue_url, github_issue_number")
+      .like("title", "[TESTE]%")
+      .not("github_issue_url", "is", null);
+    if (error) throw error;
+    const linked = withUrl.filter((r) => !(Number(r.github_issue_number ?? r.github_issue_url.match(ISSUE_NUMBER)?.[1]) >= SYNTHETIC_ISSUE_MIN));
+    expect("test data: no [TESTE] item has a GitHub issue", linked.length === 0, linked.map((r) => r.id).join(","));
+    const testIds = await testItemIds();
+    const { data: rows, error: qError } = await svc.from("roadmap_sync_queue").select("id, item_id, payload").eq("action", "modify").gte("created_at", since);
+    if (qError) throw qError;
+    const issueLinked = (rows ?? []).filter(
+      (r) => r.payload?.reason === "issue linked" && ((r.item_id && testIds.has(r.item_id)) || TEST_TITLE.test(r.payload?.title ?? ""))
+    );
+    expect("test data: the queue has no \"issue linked\" modify for a [TESTE] item", issueLinked.length === 0, issueLinked.map((r) => r.id).join(","));
+  } catch (e) {
+    expect("test data: checked that no [TESTE] item got a GitHub issue", false, scrub(e && e.message ? e.message : e).slice(0, 300));
+  }
+}
+
 // Removes everything a run can create and puts the test accounts back as they were.
 async function cleanup(since) {
   await cleanupCalls();
   // Queue rows first, while the items they point to still exist: a row for an item that is already gone
   // (item_id null) can only be told apart by its action, so those orphans are removed too.
   if (since) {
-    const inLanes = (await svc.from("roadmap_items").select("id").like("lane_id", "zz-test-%")).data ?? [];
-    const titled = (await svc.from("roadmap_items").select("id").like("title", "[TESTE]%")).data ?? [];
-    const byOwner = (await svc.from("roadmap_items").select("id").in("created_by", [ids.admin, ids.sm].filter(Boolean))).data ?? [];
-    const testIds = new Set([...inLanes, ...titled, ...byOwner].map((r) => r.id));
+    const testIds = await testItemIds();
     const { data: rows } = await svc.from("roadmap_sync_queue").select("id, item_id, action, payload").gte("created_at", since);
     const mine = (rows ?? []).filter(
       (r) =>
@@ -191,4 +226,4 @@ async function ageSnapshot() {
 }
 
 module.exports = {
-  ageSnapshot, addDays, createdWeeks, weekId, weeks, E2E_UA, cleanupCalls, BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, scrub, fitWholePage };
+  ageSnapshot, addDays, createdWeeks, weekId, weeks, E2E_UA, cleanupCalls, BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, expectNoTestIssues, SYNTHETIC_ISSUE_MIN, scrub, fitWholePage };

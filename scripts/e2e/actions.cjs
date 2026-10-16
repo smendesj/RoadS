@@ -318,6 +318,7 @@ async function call(ctx, id, args, pagePath) {
     expect("run completed without an exception", false, L.scrub(e && e.message ? e.message : e).slice(0, 300));
   } finally {
     await browser.close();
+    await L.expectNoTestIssues(t0);
     await L.cleanup(t0);
   }
   process.exit(L.summary("SERVER ACTIONS") ? 1 : 0);
