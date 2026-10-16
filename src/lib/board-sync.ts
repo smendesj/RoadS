@@ -1,6 +1,6 @@
 import "server-only";
 
-// Live sync for the Dashboard's Kanban section, pulled straight from
+// Live sync for the Roadmap's Kanban (Open and Done) and the Dashboard's Sprint block, pulled straight from
 // Essencis-Labs GitHub Project #7's "Status" field (Open/Development/Blocker/Done). The same
 // sync also keeps the Roadmap in step with the repo's open issues (reconcileRoadmapWithIssues).
 // Requires GITHUB_TOKEN (server-only) — a classic PAT with `repo`+`read:org`+`project`,
@@ -8,8 +8,9 @@ import "server-only";
 // fine-grained PAT from the wrong account reads back as "no_access", not an error).
 // Without a token at all, this reports "not_configured" instead of faking success.
 //
-// Each column lists its cards in the order of the Project's "Kanban" view (kanbanSort in board.ts), and counts the
-// ELIMS cards it leaves out, so the Dashboard can say why its totals are smaller than GitHub's.
+// Each column lists its cards in the order of the Project's "Kanban" view (kanbanSort in board.ts), each card with
+// when its Status last changed (the Roadmap's Done shows the last 14 days of it), and counts the ELIMS cards it
+// leaves out, so the Roadmap can say why its totals are smaller than GitHub's.
 //
 // Runs from two places: the Dashboard and the Roadmap (via syncBoardAsViewer in actions/sync.ts, which checks
 // the caller has a real session first): their buttons, the pages keeping themselves in step on their own, and a
@@ -30,7 +31,7 @@ import "server-only";
 // session) and writes with the admin client.
 
 import { createGeoCloudIssue, GEOCLOUD_REPO, setProjectStatus } from "@/lib/github";
-import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
+import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
 import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
@@ -58,7 +59,8 @@ export type SyncColumn = {
   title: string;
   tone: "neutral" | "brand" | "red" | "green";
   count: number;
-  items: { title: string; ref: string; url: string }[];
+  /** Each card with `statusAt`, when its Status last changed on the Project (absent in a snapshot older than 16/10/2026). */
+  items: BoardCard[];
   /** Cards of this Status on Project #7 from other repositories (ELIMS), which the board never shows: only counted. */
   elims?: number;
 };
@@ -167,7 +169,7 @@ async function runBoardSync(): Promise<SyncResult> {
         };
       }
 
-      // The order of the Kanban view on GitHub, so the Dashboard lists each column the same way.
+      // The order of the Kanban view on GitHub, so the Roadmap's Kanban lists each column the same way.
       if (page === 0) sort = kanbanSort(project.views?.nodes);
       for (const [status, n] of otherRepoCounts(project.items.nodes)) elims.set(status, (elims.get(status) ?? 0) + n);
 
@@ -215,7 +217,7 @@ async function runBoardSync(): Promise<SyncResult> {
       try {
         const run = await syncSprintWithProject(token, cards, await readOpen());
         sprint = run.summary;
-        // What was written to the Project shows on the Dashboard now, not only after the next sync.
+        // What was written to the Project shows on the Roadmap and the Dashboard now, not only after the next sync.
         // A card moved by a write takes its place by the view's sort (with no sort, it stays last: GitHub's manual order
         // can't be known for it until the next sync).
         columns = withStatusWrites(columns, run.written).map((c) => ({
