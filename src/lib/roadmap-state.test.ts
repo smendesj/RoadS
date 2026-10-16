@@ -318,19 +318,19 @@ test("the empty week at the end of the screen's row and the gaps are never in sp
   assert.deepEqual(state.sprints.map((s) => s.sprintId), ["sprint-12-10-2026", "sprint-26-10-2026"]);
 });
 
-test("items with the same sort_order go by issue number, then by id; an item with no issue after the numbered ones", () => {
+test("items with the same sort_order go by id, as the Roadmap and the Dashboard read them, whatever their issue number", () => {
   const state = base({
     lanes: [lane("sprint-05-01-2026", "sprint", 1, "2026-01-05", "2026-01-09"), lane("g1", "group", 2)],
     items: [
-      item("d", "sprint-05-01-2026", 0, null),
-      item("c", "sprint-05-01-2026", 0, 30),
-      item("b", "sprint-05-01-2026", 0, 12),
-      item("a", "sprint-05-01-2026", 0, 12),
+      item("d", "sprint-05-01-2026", 0, 5),
+      item("c", "sprint-05-01-2026", 0, null),
+      item("b", "sprint-05-01-2026", 0, 30),
+      item("a", "sprint-05-01-2026", 0, 40),
       item("z", "sprint-05-01-2026", -1, 99),
       item("h", "g1", 3, 8),
       item("k", "g1", 3, 7),
     ],
   });
   assert.deepEqual(state.sprints[0].items.map((i) => [i.id, i.position]), [["z", 1], ["a", 2], ["b", 3], ["c", 4], ["d", 5]]);
-  assert.deepEqual(state.groups[0].items.map((i) => i.id), ["k", "h"]);
+  assert.deepEqual(state.groups[0].items.map((i) => i.id), ["h", "k"]);
 });
