@@ -34,7 +34,7 @@ import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCa
 import { isStack, isTipo } from "@/lib/issue-fields";
 import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
-import { planRotation, SPRINT_IDS, type SprintDates, type SprintId } from "@/lib/sprint-rotation";
+import { planPositionalRotation, SPRINT_IDS, type SprintDates, type SprintId } from "@/lib/sprint-rotation";
 import { parseSlices, slicesQuery } from "@/lib/slices";
 import { planTitleFollow, type TitleCandidate } from "@/lib/title-follow";
 import { currentSprintIn, currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
@@ -280,7 +280,7 @@ async function rotateSprints(doneUrls: Set<string>): Promise<void> {
   }
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-  const plan = planRotation({
+  const plan = planPositionalRotation({
     today,
     dates,
     items: (items ?? []).map((it) => ({ id: it.id, laneId: it.lane_id, url: it.github_issue_url })),

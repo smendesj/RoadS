@@ -25,8 +25,11 @@ function addDays(date: string, days: number): string {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
-/** A sprint "ends" at the end of its last day: it is over from the day after. */
-export function planRotation(input: {
+/**
+ * The positional rotation, still what the sync runs on the three positional lanes. A sprint "ends" at the end of
+ * its last day: it is over from the day after. It goes once the sync runs planRotation (the week that ended only).
+ */
+export function planPositionalRotation(input: {
   today: string;
   dates: Record<SprintId, SprintDates>;
   items: RotationItem[];

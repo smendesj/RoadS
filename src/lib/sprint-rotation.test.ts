@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planRotation, type SprintDates, type SprintId } from "./sprint-rotation.ts";
+import { planPositionalRotation, type SprintDates, type SprintId } from "./sprint-rotation.ts";
 
 const DATES: Record<SprintId, SprintDates> = {
   atual: { start: "2026-03-02", end: "2026-03-06" },
@@ -12,7 +12,7 @@ const ITEMS = [item("a1", "atual"), item("a2", "atual"), item("a3", "atual", nul
 
 test("nothing rotates until the current sprint's last day has passed", () => {
   for (const today of ["2026-03-04", "2026-03-06"]) {
-    const plan = planRotation({ today, dates: DATES, items: ITEMS, doneUrls: new Set() });
+    const plan = planPositionalRotation({ today, dates: DATES, items: ITEMS, doneUrls: new Set() });
     assert.equal(plan.rotations, 0);
     assert.deepEqual(plan.placements, []);
     assert.deepEqual(plan.finished, []);
@@ -21,7 +21,7 @@ test("nothing rotates until the current sprint's last day has passed", () => {
 });
 
 test("the week after, the sprints move up one step and a new third one opens a week later", () => {
-  const plan = planRotation({ today: "2026-03-07", dates: DATES, items: ITEMS, doneUrls: new Set() });
+  const plan = planPositionalRotation({ today: "2026-03-07", dates: DATES, items: ITEMS, doneUrls: new Set() });
   assert.equal(plan.rotations, 1);
   assert.deepEqual(plan.dates, {
     atual: DATES.proxima,
@@ -31,7 +31,7 @@ test("the week after, the sprints move up one step and a new third one opens a w
 });
 
 test("finished items leave; the rest carry over ahead of the planned ones", () => {
-  const plan = planRotation({ today: "2026-03-09", dates: DATES, items: ITEMS, doneUrls: new Set(["https://example.test/issues/a1"]) });
+  const plan = planPositionalRotation({ today: "2026-03-09", dates: DATES, items: ITEMS, doneUrls: new Set(["https://example.test/issues/a1"]) });
   assert.deepEqual(plan.finished, ["a1"]);
   assert.deepEqual(plan.placements, [
     { id: "a2", from: "atual", to: "atual", sortOrder: 0 },
@@ -42,7 +42,7 @@ test("finished items leave; the rest carry over ahead of the planned ones", () =
 });
 
 test("weeks nobody synced in are all rotated through", () => {
-  const plan = planRotation({ today: "2026-03-17", dates: DATES, items: ITEMS, doneUrls: new Set() });
+  const plan = planPositionalRotation({ today: "2026-03-17", dates: DATES, items: ITEMS, doneUrls: new Set() });
   assert.equal(plan.rotations, 2);
   assert.deepEqual(plan.dates.atual, DATES.terceira);
   assert.deepEqual(
@@ -52,6 +52,6 @@ test("weeks nobody synced in are all rotated through", () => {
 });
 
 test("items outside the three sprints are ignored", () => {
-  const plan = planRotation({ today: "2026-03-09", dates: DATES, items: [item("g1", "triagem"), item("a1", "atual")], doneUrls: new Set() });
+  const plan = planPositionalRotation({ today: "2026-03-09", dates: DATES, items: [item("g1", "triagem"), item("a1", "atual")], doneUrls: new Set() });
   assert.deepEqual(plan.placements.map((p) => p.id), ["a1"]);
 });
