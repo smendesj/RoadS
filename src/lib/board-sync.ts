@@ -391,7 +391,8 @@ async function followIssueTitles(open: OpenIssue[]): Promise<number> {
   return done;
 }
 
-// The Dashboard's Slices: every sub-issue of the issues in the current sprint, stored with the board snapshot.
+// The parts of the issues in the current sprint (the boxes of their acceptance criteria and their open sub-issues),
+// stored with the board snapshot for the Dashboard's Sprint block.
 async function syncSlices(token: string): Promise<void> {
   const admin = createAdminClient();
   const current = await currentSprintLane(admin);

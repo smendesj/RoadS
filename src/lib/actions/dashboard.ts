@@ -9,7 +9,7 @@ import { getRoadmapBoard } from "@/lib/actions/roadmap";
 import { getLatestBoardSnapshot, syncBoardAsViewer } from "@/lib/actions/sync";
 import { statusByUrl } from "@/lib/board";
 import type { SyncColumn } from "@/lib/board-sync";
-import { sliceBlocks, type SliceBlock, type SliceGroup } from "@/lib/slices";
+import { partsByIssue, type IssuePartRows, type SliceGroup } from "@/lib/slices";
 import { brakeMessage, roadmapChanged, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
 import { currentSprintLane } from "@/lib/current-sprint";
 import { createClient } from "@/lib/supabase/server";
@@ -18,8 +18,8 @@ import type { Tone } from "@/lib/tones";
 export type DashboardModel = {
   branch: string;
   kpis: { label: string; value: string; hint: string; tone: Tone }[];
-  entregas: { title: string; status: string; tone: Tone; effort: string; ref: string; url: string | null }[];
-  slices: SliceBlock[];
+  /** The issues of the current sprint, each with its parts (boxes of its acceptance criteria and open sub-issues). */
+  entregas: { title: string; status: string; tone: Tone; effort: string; ref: string; url: string | null; parts: IssuePartRows | null }[];
   columns: SyncColumn[];
   syncedAt: string | null;
 };
@@ -51,6 +51,8 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null, sl
   // In the order the week was given on the Roadmap (sort_order), the same as the week and roadmap-state's position.
   const atual = lanes.find((l) => l.current);
   const sprintItems = atual?.items ?? [];
+  // The parts of each issue, read with the board snapshot (board-sync.ts, syncSlices).
+  const partsByNumber = partsByIssue(slices, statusOf);
 
   const entregas = sprintItems.map((it) => {
     const key = it.url ? statusOf.get(it.url) : undefined;
@@ -62,6 +64,7 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null, sl
       effort: it.effort,
       ref: it.url ? `#${it.url.split("/").pop()}` : "—",
       url: it.url,
+      parts: it.number ? partsByNumber.get(it.number) ?? null : null,
     };
   });
 
@@ -92,7 +95,6 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null, sl
     branch,
     kpis,
     entregas,
-    slices: sliceBlocks(slices, statusOf),
     columns,
     syncedAt,
   };
@@ -115,7 +117,7 @@ export async function syncDashboard(opts?: { auto?: boolean }): Promise<{ model:
   const result = await syncBoardAsViewer({ auto });
   if (result.ok) {
     const error = result.roadmap.error ? `Kanban atualizado, mas o Roadmap não: ${result.roadmap.error}` : null;
-    // The sync stored the sub-issues of the sprint with the board; read them back from there.
+    // The sync stored the parts of the sprint's issues with the board; read them back from there.
     const stored = await getLatestBoardSnapshot();
     const quiet = auto && (result.cached || !roadmapChanged(result.roadmap));
     return {
