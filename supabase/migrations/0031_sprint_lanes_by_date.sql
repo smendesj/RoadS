@@ -7,9 +7,14 @@
 -- São Paulo (src/lib/sprint-week.ts). The code already reads both forms by kind and dates, so it can be deployed
 -- before or after this migration.
 --
+-- Before writing anything it refuses, changing nothing, when a positional lane is not a dated sprint, when two of
+-- them start on the same day, or when one does not start on a Monday.
+--
 -- In one statement, so all of it or none of it:
 --   1. each positional lane gets its week lane (same dates and order) and hands it its items, same sort_order;
---      no move is queued, because no item changed week;
+--      no move is queued, because no item changed week. An empty one too: the code never deletes a positional lane
+--      (mayDeleteEmptyWeek in src/lib/week-plan.ts), so one the turn of the week or a move emptied is still here,
+--      named by queued changes, and gets its week lane like the others;
 --   2. the changes Frontlights has not acked yet are translated: `lane_id` and `from_lane_id` of their payload
 --      name the week instead of the position (the acked ones are history and stay as they were);
 --   3. the positional lanes are deleted, only when empty (roadmap_items.lane_id is on delete cascade);
@@ -45,6 +50,11 @@ begin
   if (select count(distinct start_date) from public.lanes where id = any (positional))
      <> (select count(*) from public.lanes where id = any (positional)) then
     raise exception '0031: two positional lanes start on the same day; nothing was changed';
+  end if;
+
+  -- A week is named by its Monday: a lane starting on another day would get an id no week has (weekOfId refuses it).
+  if exists (select 1 from public.lanes where id = any (positional) and extract(isodow from start_date) <> 1) then
+    raise exception '0031: a positional lane does not start on a Monday, so it cannot be named by its week; nothing was changed';
   end if;
 
   -- What must hold after: the items of every week (the sprint lanes outside the e2e fixture, by start date) and
