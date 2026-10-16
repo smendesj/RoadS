@@ -33,12 +33,13 @@ import "server-only";
 import { createGeoCloudIssue, GEOCLOUD_REPO, setProjectStatus } from "@/lib/github";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
-import { laneForLabels, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
+import { laneForLabels, releaseLane, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { planRotation, rotationIsIdle } from "@/lib/sprint-rotation";
 import { todayInSaoPaulo, weekLanes } from "@/lib/sprint-week";
 import { parseSlices, slicesQuery } from "@/lib/slices";
 import { planTitleFollow, type TitleCandidate } from "@/lib/title-follow";
+import { CLOSED_BEFORE_WEEK, closedBeforeTheirWeek } from "@/lib/closed-before-week";
 import { currentSprintIn, currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
 import { EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintSyncDeps, type SprintSyncSummary } from "@/lib/sprint-status-sync";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -459,8 +460,8 @@ async function syncSprintWithProject(
     const card = cards.get(number);
     const issue = openByNumber.get(number);
     if (!number || !card || !issue) continue;
-    // Back to the block of its type label, or of the type it is stored with.
-    const releaseTo = [laneForLabels(issue.labels), item.tipo ? `tipo-${item.tipo}` : null].find((lane) => lane && groupIds.has(lane)) ?? null;
+    // Back to the block of its type label, or of the type it is stored with (the same rule a drop on the Kanban uses).
+    const releaseTo = releaseLane(issue.labels, item.tipo, groupIds);
     byId.set(item.id, { laneId: item.lane_id, sortOrder: item.sort_order, title: item.title, url: item.github_issue_url!, number });
     candidates.push({
       id: item.id,
@@ -532,8 +533,9 @@ async function syncSprintWithProject(
 // Roadmap, ready to be dragged into a sprint. A GeoCloud item without an issue (its creation on save
 // failed) gets one now, Open on Project #7. An open issue
 // the Roadmap doesn't have yet lands in the group of its type label (laneForLabels). A Roadmap item whose issue is
-// no longer open, or no longer on the project, leaves the Roadmap, but only from the groups: an item already in a sprint stays
-// there as delivered. Items without an issue, or with an issue from another repo, are left alone.
+// no longer open, or no longer on the project, leaves the Roadmap from the groups; one whose issue was closed before its
+// week came leaves that week too (src/lib/closed-before-week.ts); in the current week or one that ended it stays as
+// delivered. Items without an issue, or with an issue from another repo, are left alone.
 // Each add/remove is queued in roadmap_sync_queue so FrontlightS writes it into ROADMAP.md.
 const ISSUE_URL = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
 
@@ -639,6 +641,10 @@ async function reconcileRoadmapWithIssues(
     if (error) throw error;
   }
 
+  // An issue closed before its week came leaves that week (src/lib/closed-before-week.ts); the current week keeps its
+  // closed ones until the turn of the week takes them out as done.
+  const leftEarly = await removeClosedBeforeTheirWeek(admin, lanes ?? [], items ?? [], openNumbers, onProject);
+
   // Items in a type block follow their issue's type label to the block it names (an item the scrum
   // master dragged into any other group is left where it was put).
   for (const item of items ?? []) {
@@ -690,5 +696,55 @@ async function reconcileRoadmapWithIssues(
     );
   }
 
-  return { added: missing.length, removed: closed.length, issuesCreated, untyped: notYet.length - missing.length };
+  return { added: missing.length, removed: closed.length + leftEarly, issuesCreated, untyped: notYet.length - missing.length };
+}
+
+// Takes out of the weeks to come the items whose issue was closed, in the order the rotation's remove keeps: the
+// change is queued first, with item_id null since the row is about to go and the payload carrying it all; then the
+// delete, only of the item still in the week this sync saw it in; when it fails or finds nothing (another sync took
+// it), the change just queued is withdrawn. A week to come that this left empty goes (src/lib/week-lanes.ts); a
+// failure there keeps the week, empty. Answers how many items left.
+async function removeClosedBeforeTheirWeek(
+  admin: Admin,
+  lanes: { id: string; kind: string; start_date: string | null; end_date: string | null }[],
+  items: { id: string; lane_id: string; title: string; github_issue_url: string | null }[],
+  open: Set<number>,
+  onProject: Set<number>
+): Promise<number> {
+  const byId = new Map(items.map((it) => [it.id, it]));
+  const leaving = closedBeforeTheirWeek({
+    today: todayInSaoPaulo(new Date()),
+    lanes,
+    items: items.map((it) => ({ id: it.id, laneId: it.lane_id, number: Number(it.github_issue_url?.match(ISSUE_URL)?.[1]) || null })),
+    open,
+    onProject,
+  });
+
+  let left = 0;
+  const emptied = new Set<string>();
+  for (const { id, laneId } of leaving) {
+    const item = byId.get(id)!;
+    const { data: queued, error: queueError } = await admin
+      .from("roadmap_sync_queue")
+      .insert({
+        item_id: null,
+        action: "remove",
+        payload: { item_id: id, lane_id: laneId, title: item.title, github_issue_url: item.github_issue_url, reason: CLOSED_BEFORE_WEEK },
+      })
+      .select("id")
+      .single();
+    if (queueError) throw queueError;
+    const { data: removed, error } = await admin.from("roadmap_items").delete().eq("id", id).eq("lane_id", laneId).select("id");
+    if (error || !removed?.length) {
+      await admin.from("roadmap_sync_queue").delete().eq("id", queued.id);
+      if (error) throw error;
+      continue;
+    }
+    left++;
+    emptied.add(laneId);
+  }
+  for (const laneId of emptied) {
+    await deleteFutureWeekIfEmpty(admin, laneId).catch((e) => console.error("deleteFutureWeekIfEmpty failed; the empty week stays", e));
+  }
+  return left;
 }

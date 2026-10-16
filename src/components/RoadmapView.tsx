@@ -11,7 +11,7 @@ import type { SyncColumn } from "@/lib/board-sync";
 import { useAutoSync } from "@/lib/use-auto-sync";
 import { useTouchDrag } from "@/lib/use-touch-drag";
 import { isStack } from "@/lib/issue-fields";
-import { NEW_ITEM_LANE } from "@/lib/issue-lane";
+import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { DONE_WINDOW_DAYS, kanbanColumns, type KanbanIssue } from "@/lib/kanban";
 import { moveItem } from "@/lib/roadmap-move";
 import { brakeMessage, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
@@ -120,6 +120,8 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   const laneOf = (itemId: string) => [...lanes, ...groups].find((l) => l.items.some((it) => it.id === itemId))?.id;
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // Where the card being dragged (mouse or finger) was taken from: only a card taken out of a week unplans on the Kanban.
+  const [dragFrom, setDragFrom] = useState<Place | null>(null);
   // The card of a week a mouse drag is over: the dragged card goes right before it, where an orange line shows.
   const [dropBefore, setDropBefore] = useState<string | null>(null);
   // A finger holds a card and drags it (src/lib/use-touch-drag.ts); the drop is the same move as the desktop's.
@@ -136,16 +138,23 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   // In a week the item goes right before the card it was dropped on (`beforeId`), else last (src/lib/roadmap-move.ts).
   // A card of the Kanban's Open is its item, wherever that is: dropped on a week, the item is planned there (or moved
   // there from the week it was planned in), and its card stays in Open, labelled with the week.
+  // A card taken out of a week and dropped on the Kanban's Open (KANBAN) unplans the item: the server puts it in a type
+  // lane of its choosing, so the screen shows it there at once by the item's stored type and then reads the board again.
+  // Its own card in Open dropped back on Open is no unplanning: nothing changes.
   function moveToLane(targetLaneId: string, itemId: string | null = draggingId, beforeId: string | null = null) {
     setDropBefore(null);
+    const taken = dragFrom;
+    setDragFrom(null);
     if (!itemId) return;
     setDraggingId(null);
+    const unplan = targetLaneId === KANBAN;
+    if (unplan && taken !== "week") return;
     const before = lanes.some((l) => l.id === targetLaneId) ? beforeId : null;
     const from = laneOf(itemId);
     // The row of weeks changes shape when a week is born (dropped on one the database lacks) or a week empties (the
     // server deletes a future one): the board is read again once the move is saved.
     const reshapes = !!lanes.find((l) => l.id === targetLaneId)?.virtual || lanes.find((l) => l.id === from)?.items.length === 1;
-    const next = moveItem({ lanes, groups }, itemId, targetLaneId, before);
+    const next = unplan ? unplanOnScreen(itemId) : moveItem({ lanes, groups }, itemId, targetLaneId, before);
     if (!next) return;
     setLanes(next.lanes);
     setGroups(next.groups);
@@ -157,13 +166,23 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
       .then(() => {
         counters.inFlight--;
         if (from && touchesCurrentSprint(from, targetLaneId, currentWeek)) syncAfterMove();
-        else if (reshapes) reloadBoard();
+        else if (reshapes || unplan) reloadBoard();
       })
       .catch((e) => {
         counters.inFlight--;
         console.error("moveRoadmapItemLane failed, reloading board", e);
         reloadBoard();
       });
+  }
+
+  // The board right after an item of a week is dropped on the Kanban, until the server's answer is read: the item out of
+  // its week, in the type lane of its stored type. Null for an item in no week.
+  function unplanOnScreen(itemId: string): { lanes: Lane[]; groups: RoadmapGroup[] } | null {
+    const item = lanes.flatMap((l) => l.items).find((it) => it.id === itemId);
+    if (!item) return null;
+    const to = unplanLane([], item.tipo ?? null, new Set(groups.map((g) => g.id)));
+    const withLane = groups.some((g) => g.id === to) ? groups : [...groups, { id: to, title: to, items: [] }];
+    return moveItem({ lanes, groups: withLane }, itemId, to);
   }
 
   // The week whose dates hold today (the server tells which); null when the board has no lane for it.
@@ -247,14 +266,21 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
       onMoveTo: (target: string) => moveToLane(target, item.id),
       isEditing,
       editDraft: isEditing ? editDraft : null,
-      onDragStart: (e: React.DragEvent<HTMLDivElement>) => (touchDrag.touchOwnsDrag() ? e.preventDefault() : setDraggingId(item.id)),
+      onDragStart: (e: React.DragEvent<HTMLDivElement>) => {
+        if (touchDrag.touchOwnsDrag()) return e.preventDefault();
+        setDraggingId(item.id);
+        setDragFrom(place);
+      },
       onDragEnd: () => {
         setDraggingId(null);
+        setDragFrom(null);
         setDropBefore(null);
       },
       onTouchDragStart: (e: React.TouchEvent<HTMLDivElement>) => {
         const from = laneOf(item.id);
-        if (from) touchDrag.start(e, item.id, from);
+        if (!from) return;
+        setDragFrom(place);
+        touchDrag.start(e, item.id, from);
       },
       lifted: touchDrag.lifted === item.id,
       canDelete: canDeleteItem(item),
@@ -268,6 +294,8 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   };
 
   const kanban = kanbanColumns(columns, { lanes, groups }, readAt);
+  // A finger carrying a card taken out of a week is over the Kanban's Open.
+  const unplanOver = touchDrag.over === KANBAN && dragFrom === "week";
   const done = allDone ? kanban.done.all : kanban.done.recent;
   const elims = columns.reduce((sum, c) => sum + (c.elims ?? 0), 0);
 
@@ -377,15 +405,32 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
             {canEdit && (
               <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
                 Arraste um card do Open para uma semana para planejá-lo; ele continua no Open com a semana marcada. Numa semana, solte
-                sobre um card para pôr o item antes dele. No celular, segure o card e arraste.
+                sobre um card para pôr o item antes dele. Para desplanejar, arraste o card da semana de volta ao Open. No celular,
+                segure o card e arraste.
               </div>
             )}
 
-            {/* The Kanban (src/lib/kanban.ts): Open, to plan, and Done, to look at. Blocker and Development stay out. Unlike
-                the weeks, it is no scrolling area: a long word or link in a title or a description (an issue's body) breaks
-                anywhere, or it would widen the whole page on a narrow phone. */}
+            {/* The Kanban (src/lib/kanban.ts): Open, to plan, and Done, to look at. Blocker and Development stay out. Open is
+                where a card taken out of a week is dropped to unplan it (data-unplan-target, for a finger too); it is no
+                lane (no data-lane-id), and the server picks the type lane the item goes to. Unlike the weeks, it is no
+                scrolling area: a long word or link in a title or a description (an issue's body) breaks anywhere, or it
+                would widen the whole page on a narrow phone. */}
             <div data-kanban className="grid grid-cols-1 items-start gap-4 [overflow-wrap:anywhere] lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] lg:gap-5">
-              <section data-kanban-column="open" className="flex min-w-0 flex-col gap-3 rounded-2xl border border-rs-border bg-rs-lane p-4">
+              <section
+                data-kanban-column="open"
+                data-unplan-target
+                data-drop-target={unplanOver ? "" : undefined}
+                onDragOver={(e) => {
+                  if (!draggingId || dragFrom !== "week") return;
+                  e.preventDefault();
+                  setDropBefore(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  moveToLane(KANBAN);
+                }}
+                className={`flex min-w-0 flex-col gap-3 rounded-2xl border bg-rs-lane p-4 ${unplanOver ? "border-rs-brand" : "border-rs-border"}`}
+              >
                 <div className="flex items-center justify-between">
                   <span className={badgeClass("neutral")}>Open</span>
                   <span className="text-[13px] font-bold text-rs-text-faint">{kanban.open.length}</span>

@@ -95,6 +95,7 @@ async function call(ctx, id, args, pagePath) {
       ["createRoadmapItem", A.createRoadmapItem, [], "/roadmap"],
       ["deleteRoadmapItem (admin's item)", A.deleteRoadmapItem, [L.ids.adminItem], "/roadmap"],
       ["moveRoadmapItemLane (SM's item)", A.moveRoadmapItemLane, [L.ids.smItem, "zz-test-b"], "/roadmap"],
+      ["moveRoadmapItemLane to the Kanban, unplanning it (SM's item)", A.moveRoadmapItemLane, [L.ids.smItem, "kanban"], "/roadmap"],
       ["saveRoadmapItemEdit (SM's item)", A.saveRoadmapItemEdit, [L.ids.smItem, edit({ prioridade: "Critical" })], "/roadmap"],
       ["saveRoadmapItemEdit + note", A.saveRoadmapItemEdit, [L.ids.smItem, edit({ note: "[TESTE] nota de dev" })], "/roadmap"],
       ["listUsersForConfig", A.listUsersForConfig, [], "/config"],
@@ -179,6 +180,7 @@ async function call(ctx, id, args, pagePath) {
     const smDenied = [
       ["deleteRoadmapItem (admin's item)", A.deleteRoadmapItem, [L.ids.adminItem], "/roadmap"],
       ["moveRoadmapItemLane (admin's item)", A.moveRoadmapItemLane, [L.ids.adminItem, "zz-test-b"], "/roadmap"],
+      ["moveRoadmapItemLane to the Kanban, unplanning it (admin's item)", A.moveRoadmapItemLane, [L.ids.adminItem, "kanban"], "/roadmap"],
       ["saveRoadmapItemEdit (admin's item)", A.saveRoadmapItemEdit, [L.ids.adminItem, edit({ prioridade: "Critical" })], "/roadmap"],
       ["saveRoadmapItemEdit (rename a seeded item)", A.saveRoadmapItemEdit, [L.ids.seeded, edit({ content: { title: "[TESTE] hack", description: "x", produto: "GeoCloud" } })], "/roadmap"],
       ["deleteRoadmapItem (seeded item)", A.deleteRoadmapItem, [L.ids.seeded], "/roadmap"],
