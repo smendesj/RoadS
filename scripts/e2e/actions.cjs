@@ -208,6 +208,31 @@ async function call(ctx, id, args, pagePath) {
         expect(`scrum master -> moveRoadmapItemLane into ${why} (${id}): refused, no lane, the item stays`,
           r.kind === "error" && !(await laneExists(id)) && (await itemRow(L.ids.seeded)).lane_id === lane, r.kind);
       }
+      // The card to go before must be an item of the target week: not one of a group, nor of a week not created yet.
+      const refusedBefore = [
+        ["a group, before an item", [L.ids.seeded, "zz-test-b", L.ids.adminItem], null],
+        ["a week not created yet, before an item of another week", [L.ids.seeded, trailing, L.ids.adminItem], trailing],
+        ["its own week, before an item of no week", [L.ids.seeded, lane, "00000000-0000-0000-0000-000000000000"], null],
+      ];
+      for (const [why, args, week] of refusedBefore) {
+        const r = await call(sm.context, A.moveRoadmapItemLane, args, "/roadmap");
+        expect(`scrum master -> moveRoadmapItemLane into ${why}: refused, the item stays${week ? ", no lane" : ""}`,
+          r.kind === "error" && (await itemRow(L.ids.seeded)).lane_id === lane && !(week && (await laneExists(week))), r.kind);
+      }
+      // Before an item of its own week: the server renumbers the week, the admin's item too (out of the scrum master's
+      // own reach), and queues nothing, since the item stays in its week.
+      {
+        await svc.from("roadmap_items").update({ sort_order: 5 }).in("id", [L.ids.adminItem, L.ids.smItem]);
+        await svc.from("roadmap_items").update({ sort_order: 9 }).eq("id", L.ids.seeded);
+        const since = new Date().toISOString();
+        const r = await call(sm.context, A.moveRoadmapItemLane, [L.ids.seeded, lane, L.ids.adminItem], "/roadmap");
+        const order = (await svc.from("roadmap_items").select("id, sort_order").eq("lane_id", lane).order("sort_order").order("id")).data ?? [];
+        const at = (id) => order.findIndex((o) => o.id === id);
+        const { data: q } = await svc.from("roadmap_sync_queue").select("id").eq("item_id", L.ids.seeded).gte("created_at", since);
+        expect("scrum master -> the seeded item before the admin's, in its own week: saved right before it, the week numbered 0, 1, 2…, nothing queued",
+          r.kind === "ok" && at(L.ids.seeded) >= 0 && at(L.ids.seeded) + 1 === at(L.ids.adminItem) && order.every((o, i) => o.sort_order === i) && (q ?? []).length === 0,
+          `${r.kind} ${JSON.stringify(order)} queued=${(q ?? []).length}`);
+      }
       const adminWeek = await call(sm.context, A.moveRoadmapItemLane, [L.ids.adminItem, trailing], "/roadmap");
       expect("scrum master -> the admin's item into a new week: refused before the week is created",
         adminWeek.kind === "error" && !(await laneExists(trailing)) && (await itemRow(L.ids.adminItem)).lane_id === lane, adminWeek.kind);

@@ -30,6 +30,9 @@ export function ItemCard({
   onDragEnd,
   onTouchDragStart,
   lifted = false,
+  onDragOverCard,
+  onDropOnCard,
+  dropLine = false,
   onStartEdit,
   onDraftChange,
   onSaveEdit,
@@ -53,6 +56,11 @@ export function ItemCard({
   onTouchDragStart?: (e: React.TouchEvent<HTMLDivElement>) => void;
   /** The card is being dragged by a finger: its copy follows the finger, this one stays faded in place. */
   lifted?: boolean;
+  /** A card of a week: another card dragged over it, and dropped, goes right before it. */
+  onDragOverCard?: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDropOnCard?: (e: React.DragEvent<HTMLDivElement>) => void;
+  /** The orange line above the card: where the card being dragged goes if dropped now. */
+  dropLine?: boolean;
   onStartEdit: () => void;
   onDraftChange: (draft: EditDraft) => void;
   onSaveEdit: () => void;
@@ -66,9 +74,12 @@ export function ItemCard({
 
   return (
     <div
+      data-item-id={item.id}
       draggable={canDrag && !isEditing}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
+      onDragOver={onDragOverCard}
+      onDrop={onDropOnCard}
       onTouchStart={canDrag && !isEditing ? onTouchDragStart : undefined}
       // On a touch screen a long press drags the card: no text selection, no link menu getting in the way.
       // `relative` keeps the screen-reader-only select inside the card (it is absolute): loose, it widened the page.
@@ -77,6 +88,7 @@ export function ItemCard({
         compact ? "p-2.5" : "p-3.5"
       }`}
     >
+      {dropLine && <div data-drop-line aria-hidden="true" className="pointer-events-none absolute -top-2 left-0 right-0 h-1 -translate-y-1/2 rounded-full bg-rs-brand" />}
       {item.url ? (
         <a href={item.url} target="_blank" rel="noreferrer" className={`font-bold text-rs-text ${compact ? "text-xs" : "text-sm"}`}>
           {item.number ? `#${item.number} ` : ""}

@@ -104,6 +104,27 @@ async function loggedCalls(wanted) {
       JSON.stringify(sprints.map((sp) => [sp.laneId, sp.sprintId]))
     );
 
+    // ---- position (#15-S4): each week's items at 1, 2, 3… in the order the scrum master gave it on the Roadmap
+    // (roadmap_items.sort_order), the same order the Roadmap's week and the Dashboard's Sprint show.
+    {
+      const laneIds = sprints.map((sp) => sp.laneId);
+      const rows = (await svc.from("roadmap_items").select("id, lane_id, sort_order").in("lane_id", laneIds.length ? laneIds : ["-"])).data ?? [];
+      const stored = new Map(rows.map((r) => [r.id, r]));
+      const wrong = sprints.filter((sp) => {
+        const items = sp.items ?? [];
+        const inLane = rows.filter((r) => r.lane_id === sp.laneId).length;
+        return (
+          items.length !== inLane ||
+          items.some((it, i) => it.position !== i + 1 || stored.get(it.id)?.lane_id !== sp.laneId || (i > 0 && stored.get(it.id).sort_order < stored.get(items[i - 1].id).sort_order))
+        );
+      });
+      expect(
+        "roadmap-state: each week's items are its items in the database, at position 1, 2, 3… in the order of their sort_order",
+        sprints.some((sp) => (sp.items ?? []).length > 1) && wrong.length === 0,
+        JSON.stringify(wrong.map((sp) => [sp.sprintId, (sp.items ?? []).map((it) => [it.position, stored.get(it.id)?.sort_order ?? null])]))
+      );
+    }
+
     const pending = await call("GET", "/pending-changes");
     expect(
       "pending-changes: 200, version 1, a list of changes and an asOf that is null or a timestamp",

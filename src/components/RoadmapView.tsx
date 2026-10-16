@@ -117,8 +117,10 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   }
 
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // The card of a week a mouse drag is over: the dragged card goes right before it, where an orange line shows.
+  const [dropBefore, setDropBefore] = useState<string | null>(null);
   // A finger holds a card and drags it (src/lib/use-touch-drag.ts); the drop is the same move as the desktop's.
-  const touchDrag = useTouchDrag((itemId, toLane) => moveToLane(toLane, itemId));
+  const touchDrag = useTouchDrag((itemId, toLane, beforeId) => moveToLane(toLane, itemId, beforeId));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
 
@@ -133,14 +135,18 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   // Drop targets call this with the dragged item; the "Mover para" select on each card (touch
   // screens have no HTML drag and drop) passes its item directly. Moving into a full sprint is
   // allowed on purpose: the sprint shows n/4 and a warning until the overflow is moved out.
-  function moveToLane(targetLaneId: string, itemId: string | null = draggingId) {
+  // In a week the item goes right before the card it was dropped on (`beforeId`), else last (src/lib/roadmap-move.ts);
+  // a group keeps its own order, so a card there is no place.
+  function moveToLane(targetLaneId: string, itemId: string | null = draggingId, beforeId: string | null = null) {
+    setDropBefore(null);
     if (!itemId) return;
     setDraggingId(null);
+    const before = lanes.some((l) => l.id === targetLaneId) ? beforeId : null;
     const from = [...lanes, ...groups].find((l) => l.items.some((it) => it.id === itemId))?.id;
     // The row of weeks changes shape when a week is born (dropped on one the database lacks) or a week empties (the
     // server deletes a future one): the board is read again once the move is saved.
     const reshapes = !!lanes.find((l) => l.id === targetLaneId)?.virtual || lanes.find((l) => l.id === from)?.items.length === 1;
-    const next = moveItem({ lanes, groups }, itemId, targetLaneId);
+    const next = moveItem({ lanes, groups }, itemId, targetLaneId, before);
     if (!next) return;
     setLanes(next.lanes);
     setGroups(next.groups);
@@ -148,7 +154,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
     const counters = moves.current;
     counters.inFlight++;
     counters.generation++;
-    moveRoadmapItemLane(itemId, targetLaneId)
+    moveRoadmapItemLane(itemId, targetLaneId, before)
       .then(() => {
         counters.inFlight--;
         if (from && touchesCurrentSprint(from, targetLaneId, currentWeek)) syncAfterMove();
@@ -266,7 +272,10 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                   data-virtual={lane.virtual ? "" : undefined}
                   aria-current={lane.current ? "date" : undefined}
                   data-drop-target={touchDrag.over === lane.id ? "" : undefined}
-                  onDragOver={(e) => e.preventDefault()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDropBefore(null);
+                  }}
                   onDrop={(e) => {
                     e.preventDefault();
                     moveToLane(lane.id);
@@ -288,7 +297,8 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                     </span>
                   </div>
 
-                  {newestIssueFirst(lane.items, (i) => i.number).map((item) => (
+                  {/* A week keeps the order it was given (sort_order), the one the Dashboard and Frontlights read too. */}
+                  {lane.items.map((item) => (
                     <ItemCard
                       key={item.id}
                       item={item}
@@ -299,7 +309,25 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                       isEditing={editingId === item.id}
                       editDraft={editingId === item.id ? editDraft : null}
                       onDragStart={(e) => (touchDrag.touchOwnsDrag() ? e.preventDefault() : setDraggingId(item.id))}
-                      onDragEnd={() => setDraggingId(null)}
+                      onDragEnd={() => {
+                        setDraggingId(null);
+                        setDropBefore(null);
+                      }}
+                      // A card dragged over this one goes right before it; over itself, it stays where it is.
+                      onDragOverCard={(e) => {
+                        if (!draggingId) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDropBefore(item.id === draggingId ? null : item.id);
+                      }}
+                      onDropOnCard={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (item.id !== draggingId) return moveToLane(lane.id, draggingId, item.id);
+                        setDropBefore(null);
+                        setDraggingId(null);
+                      }}
+                      dropLine={dropBefore === item.id || (touchDrag.before === item.id && touchDrag.over === lane.id && touchDrag.lifted !== item.id)}
                       onTouchDragStart={(e) => touchDrag.start(e, item.id, lane.id)}
                       lifted={touchDrag.lifted === item.id}
                       canDelete={canDeleteItem(item)}
@@ -334,7 +362,8 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
 
             {canEdit && (
               <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
-                Você pode criar novos itens e arrastar itens entre as Sprints e o Roadmap. No celular, segure o card e arraste.
+                Você pode criar novos itens e arrastar itens entre as Sprints e o Roadmap. Numa sprint, solte sobre um card para pôr o
+                item antes dele. No celular, segure o card e arraste.
               </div>
             )}
 
@@ -355,7 +384,10 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                         key={g.id}
                         data-lane-id={g.id}
                         data-drop-target={touchDrag.over === g.id ? "" : undefined}
-                        onDragOver={(e) => e.preventDefault()}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setDropBefore(null);
+                        }}
                         onDrop={(e) => {
                           e.preventDefault();
                           moveToLane(g.id);
@@ -380,7 +412,10 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                               isEditing={false}
                               editDraft={null}
                               onDragStart={(e) => (touchDrag.touchOwnsDrag() ? e.preventDefault() : setDraggingId(item.id))}
-                              onDragEnd={() => setDraggingId(null)}
+                              onDragEnd={() => {
+                                setDraggingId(null);
+                                setDropBefore(null);
+                              }}
                               onTouchDragStart={(e) => touchDrag.start(e, item.id, g.id)}
                               lifted={touchDrag.lifted === item.id}
                               canDelete={canDeleteItem(item)}

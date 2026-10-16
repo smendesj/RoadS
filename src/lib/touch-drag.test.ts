@@ -33,11 +33,17 @@ test("near an edge the area scrolls toward it, faster the closer the finger; in 
   assert.equal(edgeScrollSpeed(450, 0, 400), 18);
 });
 
-test("dropping on another sprint or group moves the card; on its own, or on nothing, it goes back and nothing is saved", () => {
-  assert.deepEqual(dropMove("atual", "proxima"), { from: "atual", to: "proxima" });
-  assert.deepEqual(dropMove("tipo-feature", "atual"), { from: "tipo-feature", to: "atual" });
-  assert.equal(dropMove("atual", "atual"), null);
-  assert.equal(dropMove("atual", null), null);
+test("dropping on another sprint or group moves the card; on its own card, or on nothing, it goes back and nothing is saved", () => {
+  assert.deepEqual(dropMove("a1", "atual", "proxima", null), { from: "atual", to: "proxima", before: null });
+  assert.deepEqual(dropMove("g1a", "tipo-feature", "atual", null), { from: "tipo-feature", to: "atual", before: null });
+  assert.equal(dropMove("a1", "atual", "atual", "a1"), null, "held over its own card: back in place");
+  assert.equal(dropMove("a1", "atual", null, null), null);
+});
+
+test("dropped on a card, the card goes before it, in another week or in its own; on the empty part of its own week, last", () => {
+  assert.deepEqual(dropMove("g1a", "tipo-feature", "atual", "a2"), { from: "tipo-feature", to: "atual", before: "a2" });
+  assert.deepEqual(dropMove("a2", "atual", "atual", "a1"), { from: "atual", to: "atual", before: "a1" });
+  assert.deepEqual(dropMove("a1", "atual", "atual", null), { from: "atual", to: "atual", before: null });
 });
 
 test("a browser drag that starts right after a finger held the card is the browser's long press, and gives way", () => {
