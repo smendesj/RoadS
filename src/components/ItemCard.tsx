@@ -20,7 +20,7 @@ export function ItemCard({
   canDrag,
   isEditing,
   editDraft,
-  compact = false,
+  weekLabel = null,
   canDelete = false,
   canEditContent = false,
   laneId,
@@ -43,7 +43,8 @@ export function ItemCard({
   canDrag: boolean;
   isEditing: boolean;
   editDraft: EditDraft | null;
-  compact?: boolean;
+  /** A card of the Kanban's Open whose item is planned in a week: it says which ("▸ Sprint 19/10") and fades to 70%. */
+  weekLabel?: string | null;
   canDelete?: boolean;
   canEditContent?: boolean;
   /** The lane the card is in and every lane it can go to — drive the "Mover para" select. */
@@ -84,25 +85,31 @@ export function ItemCard({
       // On a touch screen a long press drags the card: no text selection, no link menu getting in the way.
       // `relative` keeps the screen-reader-only select inside the card (it is absolute): loose, it widened the page.
       style={canDrag && !isEditing ? { WebkitTouchCallout: "none" } : undefined}
-      className={`flex ${canDrag ? "cursor-move pointer-coarse:select-none pointer-coarse:[-webkit-user-drag:none]" : ""} ${lifted ? "opacity-40" : ""} relative flex-col gap-2.5 rounded-xl border border-rs-border bg-rs-card ${
-        compact ? "p-2.5" : "p-3.5"
-      }`}
+      data-planned={weekLabel ? "" : undefined}
+      className={`flex ${canDrag ? "cursor-move pointer-coarse:select-none pointer-coarse:[-webkit-user-drag:none]" : ""} ${
+        lifted ? "opacity-40" : weekLabel ? "opacity-70" : ""
+      } relative flex-col gap-2.5 rounded-xl border border-rs-border bg-rs-card p-3.5`}
     >
       {dropLine && <div data-drop-line aria-hidden="true" className="pointer-events-none absolute -top-2 left-0 right-0 h-1 -translate-y-1/2 rounded-full bg-rs-brand" />}
       {item.url ? (
-        <a href={item.url} target="_blank" rel="noreferrer" className={`font-bold text-rs-text ${compact ? "text-xs" : "text-sm"}`}>
+        <a href={item.url} target="_blank" rel="noreferrer" className="text-sm font-bold text-rs-text">
           {item.number ? `#${item.number} ` : ""}
           {item.title} ↗
         </a>
       ) : (
-        <span className={`font-bold text-rs-text ${compact ? "text-xs" : "text-sm"}`}>{item.title}</span>
+        <span className="text-sm font-bold text-rs-text">{item.title}</span>
       )}
 
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className={badgeClass(produtoTone(item.produto)) + (compact ? " !text-[9px] !px-1.5" : "")}>{item.produto}</span>
-        <span className={badgeClass(prioridadeTone(item.prioridade)) + (compact ? " !text-[9px] !px-1.5" : "")}>{item.prioridade}</span>
-        <span className={badgeClass(effortTone(item.effort)) + (compact ? " !text-[9px] !px-1.5" : "")}>{item.effort}</span>
-        {item.status === "done" && <span className={badgeClass("green") + (compact ? " !text-[9px] !px-1.5" : "")}>Concluído</span>}
+        {weekLabel && (
+          <span data-week-label className={badgeClass("brand")}>
+            {weekLabel}
+          </span>
+        )}
+        <span className={badgeClass(produtoTone(item.produto))}>{item.produto}</span>
+        <span className={badgeClass(prioridadeTone(item.prioridade))}>{item.prioridade}</span>
+        <span className={badgeClass(effortTone(item.effort))}>{item.effort}</span>
+        {item.status === "done" && <span className={badgeClass("green")}>Concluído</span>}
       </div>
 
       {item.desc && <p className="text-[13px] leading-snug text-rs-text-soft">{item.desc}</p>}
@@ -115,7 +122,7 @@ export function ItemCard({
         </div>
       ))}
 
-      {isEditing && editDraft && !compact && (
+      {isEditing && editDraft && (
         <div className="flex flex-col gap-2 rounded-lg bg-rs-lane p-2.5">
           {content && (
             <>
@@ -221,11 +228,9 @@ export function ItemCard({
 
       {canDrag && !isEditing && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          {!compact && (
-            <button onClick={onStartEdit} className="py-1 text-xs font-bold text-rs-brand-text">
-              {canEditContent ? "Editar" : "+ nota"}
-            </button>
-          )}
+          <button onClick={onStartEdit} className="py-1 text-xs font-bold text-rs-brand-text">
+            {canEditContent ? "Editar" : "+ nota"}
+          </button>
           {canDelete && (
             <button
               onClick={() => {

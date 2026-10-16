@@ -2,8 +2,10 @@
 
 import { getLatestBoardSnapshot } from "@/lib/actions/sync";
 import { withIssueStatus } from "@/lib/board";
+import type { SyncColumn } from "@/lib/board-sync";
 import { createGeoCloudIssue } from "@/lib/github";
 import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
+import { NEW_ITEM_LANE } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { currentSprintLane } from "@/lib/current-sprint";
 import { sprintLanesByDate, todayInSaoPaulo, weekDates, weekLanes, weekTitle } from "@/lib/sprint-week";
@@ -26,6 +28,7 @@ type ItemRow = {
   tipo?: RoadmapItem["tipo"];
   stack?: string | null;
   created_by: string | null;
+  created_at?: string;
   notes: { id: string; author_role: string; created_at: string; body: string }[];
 };
 
@@ -42,6 +45,7 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
     tipo: row.tipo ?? null,
     stack: row.stack ?? null,
     createdBy: row.created_by,
+    ...(row.created_at ? { createdAt: row.created_at } : {}),
     notes: row.notes
       .slice()
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
@@ -54,7 +58,10 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
   };
 }
 
-export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: RoadmapGroup[] }> {
+// The Roadmap: its weeks, the type lanes (where an item with no week sits: no screen shows them as such, they feed
+// the Kanban's Open), and the Project #7 snapshot's columns with the ELIMS cards counted, which the Kanban is built
+// from on the screen (src/lib/kanban.ts), so a card dragged to a week is labelled with it at once.
+export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: RoadmapGroup[]; columns: SyncColumn[] }> {
   const supabase = await createServerSupabase();
 
   const { data: lanes, error: lanesError } = await supabase
@@ -65,7 +72,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
 
   const { data: items, error: itemsError } = await supabase
     .from("roadmap_items")
-    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, notes:item_notes(id, author_role, created_at, body)")
+    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, created_at, notes:item_notes(id, author_role, created_at, body)")
     .order("sort_order")
     .order("id");
   if (itemsError) throw itemsError;
@@ -87,6 +94,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
     id: week.id,
     title: weekTitle(week.start, week.end),
     dates: weekDates(week.start, week.end),
+    start: week.start,
     current: week.current,
     ...(week.virtual ? { virtual: true } : {}),
     items: (byLane.get(week.id) ?? []).map(toRoadmapItem),
@@ -95,6 +103,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
     id: lane.id,
     title: lane.start_date && lane.end_date ? weekTitle(lane.start_date, lane.end_date) : lane.title,
     dates: lane.start_date && lane.end_date ? weekDates(lane.start_date, lane.end_date) : "",
+    ...(lane.start_date ? { start: lane.start_date } : {}),
     current: false,
     items: (byLane.get(lane.id) ?? []).map(toRoadmapItem),
   }));
@@ -103,9 +112,10 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
     .filter((lane) => lane.kind !== "sprint")
     .map((lane) => ({ id: lane.id, title: lane.title, items: (byLane.get(lane.id) ?? []).map(toRoadmapItem) }));
 
-  // The sprints show which items are already delivered, from the same Project #7 snapshot the Dashboard reads.
+  // The sprints show which items are already delivered, from the same Project #7 snapshot the Kanban and the Dashboard read.
   const snapshot = await getLatestBoardSnapshot();
-  return { lanes: withIssueStatus(sprintLanes, snapshot?.columns ?? []), groups };
+  const columns = snapshot?.columns ?? [];
+  return { lanes: withIssueStatus(sprintLanes, columns), groups, columns };
 }
 
 async function requireScrumMasterActor(): Promise<{ userId: string; realRole: "scrum_master" | "admin" }> {
@@ -127,11 +137,13 @@ async function queueChange(itemId: string | null, action: "add" | "modify" | "re
   await supabase.from("roadmap_sync_queue").insert({ item_id: itemId, action, payload });
 }
 
-export async function createRoadmapItem(laneId: string): Promise<RoadmapItem> {
+// "+ Novo item", in the Kanban's Open: the one place an item is born, with no week, in a type lane (NEW_ITEM_LANE). The
+// lane is the server's to choose, never the caller's; planning it is dragging it to a week afterwards.
+export async function createRoadmapItem(): Promise<RoadmapItem> {
   const { userId } = await requireScrumMasterActor();
   const supabase = await createServerSupabase();
 
-  // A new item goes last in its week, where the screen shows it.
+  const laneId = NEW_ITEM_LANE;
   const sortOrder = await nextOrderIn(supabase, laneId);
   const { data, error } = await supabase
     .from("roadmap_items")
@@ -145,7 +157,7 @@ export async function createRoadmapItem(laneId: string): Promise<RoadmapItem> {
       effort: "Medium",
       created_by: userId,
     })
-    .select("id, lane_id, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by")
+    .select("id, lane_id, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, created_at")
     .single();
   if (error) throw error;
 
