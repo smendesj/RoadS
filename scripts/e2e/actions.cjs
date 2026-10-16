@@ -75,7 +75,7 @@ async function call(ctx, id, args, pagePath) {
 
     // ------------------------------------------------------------------ nobody signed in
     for (const [name, id, args, p] of [
-      ["createRoadmapItem", A.createRoadmapItem, [lane], "/roadmap"],
+      ["createRoadmapItem", A.createRoadmapItem, [], "/roadmap"],
       ["deleteRoadmapItem", A.deleteRoadmapItem, [L.ids.adminItem], "/roadmap"],
       ["updateUserRole", A.updateUserRole, [L.ids.dev, "scrum_master"], "/config"],
       ["listUsersForConfig", A.listUsersForConfig, [], "/config"],
@@ -85,13 +85,14 @@ async function call(ctx, id, args, pagePath) {
       const r = await call(anon, id, args, p);
       expect(`nobody signed in -> ${name}: stopped at the door (${r.kind} ${r.status})`, r.kind === "redirect");
     }
-    const viaLogin = await call(anon, A.createRoadmapItem, [lane], "/login");
+    const viaLogin = await call(anon, A.createRoadmapItem, [], "/login");
     expect("nobody signed in -> an action posted to the PUBLIC /login page does nothing", viaLogin.kind !== "ok" || !/"id"/.test(viaLogin.returned), `${viaLogin.kind} ${viaLogin.returned.slice(0, 50)}`);
-    expect("nobody signed in -> no item was created", (await svc.from("roadmap_items").select("id").eq("lane_id", lane).not("created_by", "is", null).neq("created_by", L.ids.admin).neq("created_by", L.ids.sm)).data.length === 0);
+    // "+ Novo item" puts an item in a type lane, never a week: no item of this run, in any lane, comes from nobody.
+    expect("nobody signed in -> no item was created", (await svc.from("roadmap_items").select("id").gte("created_at", t0).not("created_by", "in", `(${L.ids.admin},${L.ids.sm})`)).data.length === 0);
 
     // ------------------------------------------------------------------ DEV
     const devDenied = [
-      ["createRoadmapItem", A.createRoadmapItem, [lane], "/roadmap"],
+      ["createRoadmapItem", A.createRoadmapItem, [], "/roadmap"],
       ["deleteRoadmapItem (admin's item)", A.deleteRoadmapItem, [L.ids.adminItem], "/roadmap"],
       ["moveRoadmapItemLane (SM's item)", A.moveRoadmapItemLane, [L.ids.smItem, "zz-test-b"], "/roadmap"],
       ["saveRoadmapItemEdit (SM's item)", A.saveRoadmapItemEdit, [L.ids.smItem, edit({ prioridade: "Critical" })], "/roadmap"],
@@ -260,6 +261,7 @@ async function call(ctx, id, args, pagePath) {
       ["saveRoadmapItemEdit (own item)", A.saveRoadmapItemEdit, [L.ids.smItem, edit({ prioridade: "High", note: "[TESTE] nota com activeView=dev forjado" })], "/roadmap"],
       ["saveRoadmapItemEdit (seeded: priority + note)", A.saveRoadmapItemEdit, [L.ids.seeded, edit({ prioridade: "High" })], "/roadmap"],
       ["moveRoadmapItemLane (seeded item)", A.moveRoadmapItemLane, [L.ids.seeded, "zz-test-b"], "/roadmap"],
+      // Sent a week, on purpose: the server picks the lane of a new item, never the caller.
       ["createRoadmapItem", A.createRoadmapItem, [lane], "/roadmap"],
     ];
     for (const [name, id, args, p] of smOk) {
@@ -268,8 +270,10 @@ async function call(ctx, id, args, pagePath) {
     }
     const spoof = (await svc.from("item_notes").select("author_role, author_id").eq("item_id", L.ids.smItem)).data;
     expect("scrum master -> a note sent with activeView='dev' is still stored as scrum_master (role can't be spoofed)", spoof.length === 1 && spoof[0].author_role === "scrum_master" && spoof[0].author_id === L.ids.sm, JSON.stringify(spoof));
-    const created = (await svc.from("roadmap_items").select("created_by").eq("created_by", L.ids.sm).neq("id", L.ids.smItem)).data;
+    const created = (await svc.from("roadmap_items").select("created_by, lane_id").eq("created_by", L.ids.sm).neq("id", L.ids.smItem)).data;
     expect("scrum master -> the created item belongs to the Scrum Master", created.length === 1);
+    expect("scrum master -> the created item is born in the feature type lane, with no week, though a week was sent (the Kanban's Open)",
+      created.length === 1 && created[0].lane_id === "tipo-feature", JSON.stringify(created.map((r) => r.lane_id)));
     const delOwn = await call(sm.context, A.deleteRoadmapItem, [L.ids.smItem], "/roadmap");
     expect("scrum master -> deleteRoadmapItem (own item): allowed", delOwn.kind === "ok" && (await itemRow(L.ids.smItem)) === undefined, `${delOwn.kind}`);
     expect("scrum master -> deleting the only item of a future week deletes its lane", !(await laneExists(trailing)), trailing);
@@ -296,10 +300,10 @@ async function call(ctx, id, args, pagePath) {
 
     // an account flagged for a password change is refused by the privileged actions until it has changed it
     await svc.from("profiles").update({ must_reset_password: true }).eq("id", L.ids.sm);
-    const flaggedSm = await call(sm.context, A.createRoadmapItem, [lane], "/roadmap");
+    const flaggedSm = await call(sm.context, A.createRoadmapItem, [], "/roadmap");
     expect("flagged Scrum Master -> createRoadmapItem is refused until the password is changed", flaggedSm.kind === "error", flaggedSm.kind);
     await svc.from("profiles").update({ must_reset_password: false }).eq("id", L.ids.sm);
-    const unflaggedSm = await call(sm.context, A.createRoadmapItem, [lane], "/roadmap");
+    const unflaggedSm = await call(sm.context, A.createRoadmapItem, [], "/roadmap");
     expect("…and works again once the flag is gone", unflaggedSm.kind === "ok", unflaggedSm.kind);
     await svc.from("profiles").update({ must_reset_password: true }).eq("id", L.ids.admin);
     const flaggedAdmin = await call(adm.context, A.listUsersForConfig, [], "/config");

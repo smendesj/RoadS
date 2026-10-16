@@ -31,7 +31,8 @@ export function withIssueStatus<L extends { items: { url: string | null; status?
 }
 
 export type BoardStatus = (typeof BOARD_STATUSES)[number];
-export type BoardCard = { title: string; ref: string; url: string };
+/** `statusAt` is when the card's Status last changed on the Project: the Roadmap's Done counts its 14 days from it. */
+export type BoardCard = { title: string; ref: string; url: string; statusAt?: string };
 
 type ProjectNode = {
   /** The card's own id on the Project (what a Status is written to), not the issue's. */
@@ -46,9 +47,10 @@ export function boardCard(node: ProjectNode): { status: BoardStatus; card: Board
   const status = node.fieldValueByName?.name;
   if (!content?.number || content.repository?.nameWithOwner !== BOARD_REPO) return null;
   if (!status || !(BOARD_STATUSES as readonly string[]).includes(status)) return null;
+  const statusAt = node.fieldValueByName?.updatedAt;
   return {
     status: status as BoardStatus,
-    card: { title: content.title ?? "", ref: `#${content.number}`, url: content.url ?? "" },
+    card: { title: content.title ?? "", ref: `#${content.number}`, url: content.url ?? "", ...(statusAt ? { statusAt } : {}) },
   };
 }
 

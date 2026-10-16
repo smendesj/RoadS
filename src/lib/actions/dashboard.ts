@@ -1,6 +1,6 @@
 "use server";
 
-// Everything on the Dashboard above the Kanban is derived from the Roadmap (lanes + items in
+// Everything on the Dashboard is derived from the Roadmap (lanes + items in
 // Supabase), crossed with the last GitHub Project #7 snapshot for each item's issue status. So a
 // Scrum Master's change on /roadmap shows up here on the next "Sincronizar" (or page load), with
 // no hand-kept data in between.
@@ -20,7 +20,6 @@ export type DashboardModel = {
   kpis: { label: string; value: string; hint: string; tone: Tone }[];
   /** The issues of the current sprint, each with its parts (boxes of its acceptance criteria and open sub-issues). */
   entregas: { title: string; status: string; tone: Tone; effort: string; ref: string; url: string | null; parts: IssuePartRows | null }[];
-  columns: SyncColumn[];
   syncedAt: string | null;
 };
 
@@ -95,7 +94,6 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null, sl
     branch,
     kpis,
     entregas,
-    columns,
     syncedAt,
   };
 }
@@ -116,7 +114,7 @@ export async function syncDashboard(opts?: { auto?: boolean }): Promise<{ model:
   const auto = opts != null && typeof opts === "object" && opts.auto === true;
   const result = await syncBoardAsViewer({ auto });
   if (result.ok) {
-    const error = result.roadmap.error ? `Kanban atualizado, mas o Roadmap não: ${result.roadmap.error}` : null;
+    const error = result.roadmap.error ? `Project #7 lido, mas o Roadmap não foi atualizado: ${result.roadmap.error}` : null;
     // The sync stored the parts of the sprint's issues with the board; read them back from there.
     const stored = await getLatestBoardSnapshot();
     const quiet = auto && (result.cached || !roadmapChanged(result.roadmap));

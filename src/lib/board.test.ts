@@ -14,6 +14,14 @@ test("a GeoCloud issue with a status becomes a card in that column", () => {
   });
 });
 
+test("a card keeps when its Status last changed on the Project, the moment the Roadmap's Done counts its 14 days from", () => {
+  const moved = { ...node("Essencis-Labs/GeoCloudAI", "Done", 7), fieldValueByName: { name: "Done", updatedAt: "2026-10-09T14:30:00Z" } };
+  assert.deepEqual(boardCard(moved), {
+    status: "Done",
+    card: { title: "Issue 7", ref: "#7", url: "https://github.com/Essencis-Labs/GeoCloudAI/issues/7", statusAt: "2026-10-09T14:30:00Z" },
+  });
+});
+
 test("ELIMS issues on Project #7 never reach the RoadS board, whatever their status", () => {
   for (const status of ["Open", "Development", "Blocker", "Done"]) {
     assert.equal(boardCard(node("Essencis-Labs/ELIMS", status)), null);
