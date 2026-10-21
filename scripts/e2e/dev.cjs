@@ -210,6 +210,10 @@ async function seedSprintIssue() {
       JSON.stringify(weekOrders)
     );
     const count = (loc) => loc.count();
+    // #22: the card's text is the issue's title as it is, with the issue number after it.
+    const seededLink = (await page.locator(`a[href="${GEOCLOUD}${SEED.number}"]`).first().innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+    expect("roadmap: an item with an issue reads 'Title #number ↗', the title first and the number after it",
+      seededLink === `${SEED.title} #${SEED.number} ↗`, seededLink);
     expect("roadmap: dev can READ the board: a fixture item shows in its week and in the Kanban's Open",
       (await count(page.locator('[data-lane-id="zz-test-sprint"]').getByText("[TESTE] item do scrum master"))) === 1 &&
         (await count(page.locator('[data-kanban-column="open"]').getByText("[TESTE] item do scrum master"))) === 1);

@@ -30,22 +30,34 @@ export function roadmapSyncMessage(roadmap: {
   error?: string;
   sprint?: SprintSyncSummary;
   retitled?: number;
+  fields?: { pulled: number; pushed: number; failed: number; error?: string };
 }): string {
   if (roadmap.error) return roadmap.error;
   return (
     `${roadmap.added} issue(s) adicionada(s), ${roadmap.removed} encerrada(s) ou fora do Project removida(s)` +
     (roadmap.issuesCreated ? `, ${roadmap.issuesCreated} issue(s) criada(s) para itens sem issue.` : ".") +
     (roadmap.untyped ? ` ${roadmap.untyped} issue(s) aberta(s) sem label type:* ficaram de fora até ganharem tipo.` : "") +
-    (roadmap.retitled ? ` ${roadmap.retitled} título(s) do Roadmap acompanharam a renomeação da issue no GitHub.` : "") +
+    (roadmap.fields ? fieldsLine(roadmap.fields) : roadmap.retitled ? ` ${roadmap.retitled} título(s) do Roadmap acompanharam a renomeação da issue no GitHub.` : "") +
     (roadmap.sprint ? sprintLine(roadmap.sprint) : "")
   );
+}
+
+// The two-way sync of Title and Description (issue #22): what came from GitHub, what went there, what failed.
+function fieldsLine(fields: { pulled: number; pushed: number; failed: number; error?: string }): string {
+  if (fields.error) return ` Os campos das issues não sincronizaram: ${fields.error}.`;
+  const parts = [
+    fields.pulled ? `${fields.pulled} campo(s) trazido(s) do GitHub` : "",
+    fields.pushed ? `${fields.pushed} campo(s) gravado(s) no GitHub` : "",
+    fields.failed ? `${fields.failed} item(ns) falharam` : "",
+  ].filter(Boolean);
+  return parts.length ? ` Campos das issues: ${parts.join(", ")}.` : "";
 }
 
 // Whether a sync did anything worth telling: a page that syncs by itself every few minutes says nothing otherwise.
 export function roadmapChanged(roadmap: Parameters<typeof roadmapSyncMessage>[0]): boolean {
   const s = roadmap.sprint;
   return Boolean(
-    roadmap.error || roadmap.added || roadmap.removed || roadmap.issuesCreated || roadmap.retitled ||
+    roadmap.error || roadmap.added || roadmap.removed || roadmap.issuesCreated || roadmap.retitled || roadmap.fields ||
       (s && (s.error || s.pulled || s.released || s.written || s.wouldWrite || s.failed || s.stuck))
   );
 }

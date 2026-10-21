@@ -94,8 +94,8 @@ export function ItemCard({
       {dropLine && <div data-drop-line aria-hidden="true" className="pointer-events-none absolute -top-2 left-0 right-0 h-1 -translate-y-1/2 rounded-full bg-rs-brand" />}
       {item.url ? (
         <a href={item.url} target="_blank" rel="noreferrer" className="text-sm font-bold text-rs-text">
-          {item.number ? `#${item.number} ` : ""}
-          {item.title} ↗
+          {item.title}
+          {item.number ? ` #${item.number}` : ""} ↗
         </a>
       ) : (
         <span className="text-sm font-bold text-rs-text">{item.title}</span>
