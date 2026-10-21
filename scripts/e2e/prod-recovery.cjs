@@ -43,15 +43,15 @@ const redirectOf = (link) => new URL(link).searchParams.get("redirect_to");
 
     const chosen = `Producao-${Date.now()}-z5`;
     await page.locator('input[type="password"]').fill(chosen);
-    await page.getByRole("button", { name: /Salvar e continuar/ }).click();
+    await page.getByRole("button", { name: /Save and continue/ }).click();
     await page.waitForURL("**/dashboard", { timeout: 45000 });
     expect("link: choosing a new password opens the production dashboard", new URL(page.url()).origin === BASE && page.url().endsWith("/dashboard"), page.url());
     expect("link: the new password works and the old one stopped", (await canLogin(chosen)) && !(await canLogin(devPassword)));
     await L.menuButton(page).waitFor({ timeout: 30000 });
     await L.menuButton(page).click();
-    await page.getByRole("button", { name: "Sair" }).click();
+    await page.getByRole("button", { name: "Sign out" }).click();
     await page.waitForURL("**/login");
-    expect("link: Sair works on the account that just came in through the link", page.url().endsWith("/login"));
+    expect("link: Sign out works on the account that just came in through the link", page.url().endsWith("/login"));
     await recipient.close();
     const noise = problems.filter((p) => !/auth\/v1\/(token|user)|Failed to load resource|ERR_FAILED/.test(p));
     expect("no console or hydration errors on the way", noise.length === 0, noise.slice(0, 3).join(" | "));

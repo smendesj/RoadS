@@ -87,7 +87,11 @@ async function login(session, { expectOk = true, password } = {}) {
   else await sleep(2500);
 }
 
-const menuButton = (page) => page.locator('button[aria-label="Menu do usuário"]');
+const menuButton = (page) => page.locator('button[aria-label="User menu"]');
+// A Roadmap card's own button (Edit, Delete, + Comment, Save, Cancel), never one of its Comments' buttons: since #23
+// both say Edit, Delete, Save and Cancel, the names GitHub uses.
+const cardButton = (scope, name) =>
+  scope.getByRole("button", { name, exact: true }).and(scope.page().locator("button:not([data-comment-id] button)"));
 const scrub = (text) => {
   let out = String(text);
   for (const r of Object.keys(PREFIX)) out = out.split(cred(`${PREFIX[r]}_PASSWORD`)).join("<hidden>");
@@ -226,4 +230,4 @@ async function ageSnapshot() {
 }
 
 module.exports = {
-  ageSnapshot, addDays, createdWeeks, weekId, weeks, E2E_UA, cleanupCalls, BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, ids, ensureFixtures, cleanup, expectNoTestIssues, SYNTHETIC_ISSUE_MIN, scrub, fitWholePage };
+  ageSnapshot, addDays, createdWeeks, weekId, weeks, E2E_UA, cleanupCalls, BASE, LABEL, PREFIX, cred, svc, sleep, expect, summary, results, launch, newSession, login, menuButton, cardButton, ids, ensureFixtures, cleanup, expectNoTestIssues, SYNTHETIC_ISSUE_MIN, scrub, fitWholePage };

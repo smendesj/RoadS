@@ -360,7 +360,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     await smPage.goto(BASE + "/resumo", { waitUntil: "load" });
     expect("scrum master -> /resumo opens", new URL(smPage.url()).pathname === "/resumo", smPage.url());
     expect("scrum master -> /resumo: nothing to edit, check, copy or send", (await smPage.locator(reviewControls).count()) === 0 && (await noReviewButtons(smPage)));
-    const smEmpty = await smPage.getByText("Nenhum resumo enviado ainda.").count();
+    const smEmpty = await smPage.getByText("No report sent yet.").count();
     const smFrames = await smPage.locator('iframe[title="Prévia"]').count();
     expect("scrum master -> /resumo shows the last sent e-mail, or says none was sent yet", smEmpty + smFrames === 1, `empty=${smEmpty} frames=${smFrames}`);
 
@@ -415,23 +415,23 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       );
       expect("scrum master -> the print of a delivery sits under it", (await smPage.locator('[data-entry="9001"] [data-print]').count()) === 1);
       expect(
-        "scrum master -> the week opens with two chips in words (what was delivered, what is left of the sprint) and no 'Em validação' one",
-        /^Concluído: \d+ partes? em \d+ issues?$/.test(await smPage.locator('[data-chip="concluido"]').innerText()) &&
-          (await smPage.locator('[data-chip="em_andamento"]').innerText()) === "Em andamento: 3 partes em 1 issue" &&
+        "scrum master -> the week opens with two chips in words (what was delivered, what is left of the sprint) and no 'In validation' one",
+        /^Done: \d+ parts? in \d+ issues?$/.test(await smPage.locator('[data-chip="concluido"]').innerText()) &&
+          (await smPage.locator('[data-chip="em_andamento"]').innerText()) === "In progress: 3 parts in 1 issue" &&
           (await smPage.locator('[data-chip="em_validacao"]').count()) === 0
       );
       const sprintText = await smPage.locator('[data-cover="9100"]').innerText();
       expect(
         "scrum master -> the sprint block shows the cover, its sentence, how far its parts have come and what is left",
-        sprintText.includes("Capa de teste") && sprintText.includes("Uma frase simples de teste da capa.") && sprintText.includes("5 de 8 partes") && sprintText.includes("Restam: ") && sprintText.includes("Entrega aberta de teste")
+        sprintText.includes("Capa de teste") && sprintText.includes("Uma frase simples de teste da capa.") && sprintText.includes("5 of 8 parts") && sprintText.includes("Left: ") && sprintText.includes("Entrega aberta de teste")
       );
       expect(
         "scrum master -> each delivery says how many of its parts are ready, in plain words and with no issue number",
-        (await smPage.locator('[data-entry="9001"] [data-parts]').innerText()) === "2 de 2 partes prontas" && (await smPage.locator('[data-entry="9003"] [data-parts]').innerText()) === "1 de 2 partes prontas"
+        (await smPage.locator('[data-entry="9001"] [data-parts]').innerText()) === "2 of 2 parts ready" && (await smPage.locator('[data-entry="9003"] [data-parts]').innerText()) === "1 of 2 parts ready"
       );
       expect(
         "scrum master -> a general print added after the send shows among the other prints, with its caption",
-        (await smPage.locator('section[aria-label="Outros prints"]').innerText()).includes(GENERAL_CAPTION)
+        (await smPage.locator('section[aria-label="Other screenshots"]').innerText()).includes(GENERAL_CAPTION)
       );
       const fridaySrc = (await smPage.locator('[data-entry="9003"] [data-print] img').getAttribute("src")) ?? "";
       expect("scrum master -> a print of the Friday report comes by that report's own link", Boolean(fridayToken) && fridaySrc.includes(`/api/progress-report/${fridayToken}/`), fridaySrc);
@@ -444,10 +444,10 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
         await smPage.screenshot({ path: path.join(process.env.E2E_SCREENSHOTS, "semana-inteira.png"), fullPage: true });
       }
       expect("scrum master -> no navigation bar, nothing to check, edit, copy or send", (await smPage.locator(reviewControls).count()) === 0 && (await noReviewButtons(smPage)) && (await smPage.locator("[data-conference-table]").count()) === 0 && (await smPage.getByRole("link", { name: "Config", exact: true }).count()) === 0);
-      expect("scrum master -> a 'Tela cheia' button and an index of the sections", (await smPage.getByRole("button", { name: "Tela cheia" }).count()) === 1 && (await smPage.getByRole("navigation", { name: "Seções da semana" }).locator('a[href^="#"]').count()) >= 4);
+      expect("scrum master -> a 'Full screen' button and an index of the sections", (await smPage.getByRole("button", { name: "Full screen" }).count()) === 1 && (await smPage.getByRole("navigation", { name: "Week sections" }).locator('a[href^="#"]').count()) >= 4);
       await smPage.locator('[data-entry="9001"] [data-print]').click();
       expect("scrum master -> a print opens large over everything", await smPage.locator("[data-zoom]").isVisible());
-      expect("scrum master -> the focus goes to its 'Fechar' button", await smPage.evaluate(() => document.activeElement?.textContent === "Fechar"));
+      expect("scrum master -> the focus goes to its 'Close' button", await smPage.evaluate(() => document.activeElement?.textContent === "Close"));
       if (process.env.E2E_SCREENSHOTS) await smPage.screenshot({ path: path.join(process.env.E2E_SCREENSHOTS, "semana-print-ampliado.png") });
       await smPage.keyboard.press("Escape");
       await smPage.locator("[data-zoom]").waitFor({ state: "detached" });
@@ -681,7 +681,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     expect("admin -> a sent report's preview is titled just 'Prévia' too", (await page.getByRole("heading", { name: "Prévia", exact: true }).count()) === 1 && (await page.getByRole("region", { name: "Prévia", exact: true }).count()) === 1);
     expect("admin -> an older sent report opens read-only, with its seal", (await page.locator('[data-seal="sent"]').count()) === 1 && !(await field("entry:gc-9001:summary").isEditable()) && (await sendButton.count()) === 0);
 
-    // ---- the Enviados list in weeks (the real GeoCloud list, only read) and the week's presentation
+    // ---- the Sent list in weeks (the real GeoCloud list, only read) and the week's presentation
     {
       await page.goto(BASE + "/resumo", { waitUntil: "load" });
       const groups = await page.locator("[data-week-group]").evaluateAll((els) =>
@@ -691,7 +691,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
         })
       );
       expect(
-        "admin -> each week of Enviados has one 'Apresentar a semana', centred between its reports",
+        "admin -> each week of Sent has one 'Present the week', centred between its reports",
         groups.length > 0 && groups.every((g) => g.links === 1 && g.at === Math.ceil(g.items / 2)),
         JSON.stringify(groups.slice(0, 4))
       );
@@ -711,5 +711,5 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       console.log(`cleanup of the synthetic reports failed: ${L.scrub(e && e.message ? e.message : e).slice(0, 120)}`);
     }
   }
-  process.exit(L.summary("PROGRESS REPORT (Resumo para a diretoria)") ? 1 : 0);
+  process.exit(L.summary("PROGRESS REPORT (Board report)") ? 1 : 0);
 })();

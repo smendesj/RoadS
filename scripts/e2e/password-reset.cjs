@@ -1,4 +1,4 @@
-// Forced password reset, the admin's "Resetar senha", and the recovery link opened in a clean browser.
+// Forced password reset, the admin's "Reset password", and the recovery link opened in a clean browser.
 // Part 2 sends ONE real e-mail (to the Dev test account's plus-address, the owner's own mailbox).
 const { createClient } = require("@supabase/supabase-js");
 const L = require("./lib.cjs");
@@ -23,7 +23,7 @@ const fresh = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.e
     const { page } = dev;
     await L.login(dev);
     expect("flagged account: login sends the Dev to /redefinir-senha", page.url().endsWith("/redefinir-senha"), page.url());
-    expect("the page explains the reset", (await page.getByText(/senha foi resetada/).count()) === 1);
+    expect("the page explains the reset", (await page.getByText(/an admin reset your password/).count()) === 1);
 
     for (const target of ["/dashboard", "/roadmap"]) {
       await page.goto(BASE + target, { waitUntil: "load" });
@@ -40,12 +40,12 @@ const fresh = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.e
 
     await page.goto(BASE + "/redefinir-senha", { waitUntil: "load" });
     await page.locator('input[type="password"]').fill("abc");
-    await page.getByRole("button", { name: /Salvar e continuar/ }).click();
-    await page.getByText(/Mínimo 8 caracteres/).first().waitFor();
+    await page.getByRole("button", { name: /Save and continue/ }).click();
+    await page.getByText(/At least 8 characters/).first().waitFor();
     expect("reset form: a weak password is refused with the rule", page.url().endsWith("/redefinir-senha"));
     const newPassword = `Nova-${Date.now()}-x9`;
     await page.locator('input[type="password"]').fill(newPassword);
-    await page.getByRole("button", { name: /Salvar e continuar/ }).click();
+    await page.getByRole("button", { name: /Save and continue/ }).click();
     await page.waitForURL("**/dashboard", { timeout: 30000 });
     expect("reset form: a good password finishes the reset and opens the dashboard", page.url().endsWith("/dashboard"));
     expect("reset form: the flag is cleared by the server", (await flag()) === false);
@@ -53,10 +53,10 @@ const fresh = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.e
     await setPassword(devPassword);
     await svc.from("profiles").update({ must_reset_password: false }).eq("id", L.ids.dev);
 
-    // ================================================= part 2: the admin's "Resetar senha"
+    // ================================================= part 2: the admin's "Reset password"
     let adm = { problems: [] };
     if (process.env.E2E_NO_EMAIL === "1") {
-      console.log("   (part 2, the admin's Resetar senha, skipped: E2E_NO_EMAIL=1)");
+      console.log("   (part 2, the admin's Reset password, skipped: E2E_NO_EMAIL=1)");
     } else {
       adm = await L.newSession(browser, "admin");
       await L.login(adm);
@@ -64,24 +64,24 @@ const fresh = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.e
       await adm.page.locator("tbody tr").first().waitFor({ timeout: 30000 });
       const row = adm.page.locator("tbody tr", { hasText: "RoadS Tester Dev" });
 
-      await row.getByRole("button", { name: "Resetar senha" }).click();
-      await adm.page.getByText(/Resetar a senha de/).waitFor();
-      await adm.page.getByRole("button", { name: "Cancelar" }).click();
+      await row.getByRole("button", { name: "Reset password" }).click();
+      await adm.page.getByText(/Reset the password of/).waitFor();
+      await adm.page.getByRole("button", { name: "Cancel" }).click();
       await sleep(800);
-      expect("config: Cancelar changes nothing (flag off, old password works)", (await flag()) === false && (await canLogin(devPassword)));
+      expect("config: Cancel changes nothing (flag off, old password works)", (await flag()) === false && (await canLogin(devPassword)));
 
-      await row.getByRole("button", { name: "Resetar senha" }).click();
-      await adm.page.getByRole("button", { name: "Confirmar reset" }).click();
+      await row.getByRole("button", { name: "Reset password" }).click();
+      await adm.page.getByRole("button", { name: "Confirm reset" }).click();
       // Supabase may refuse (its e-mail cap is tiny on the default sender); both outcomes must be handled honestly.
       const outcome = await Promise.race([
-        adm.page.getByText(/E-mail de redefinição enviado/).waitFor({ timeout: 30000 }).then(() => "sent"),
-        adm.page.getByText(/uma vez por minuto|limite de e-mails/).waitFor({ timeout: 30000 }).then(() => "refused"),
+        adm.page.getByText(/Password reset email sent/).waitFor({ timeout: 30000 }).then(() => "sent"),
+        adm.page.getByText(/once a minute|email limit was reached/).waitFor({ timeout: 30000 }).then(() => "refused"),
       ]).catch(() => "none");
       await sleep(1500);
       if (outcome === "sent") {
-        expect("config: Confirmar reset shows the 'e-mail enviado' notice", true);
+        expect("config: Confirm reset shows the 'reset email sent' notice", true);
         expect("config: the Dev account is flagged and the old password stopped working", (await flag()) === true && !(await canLogin(devPassword)));
-        expect("config: the row says the person needs a new password", (await row.getByText("Precisa criar nova senha").count()) === 1);
+        expect("config: the row says the person needs a new password", (await row.getByText("Needs a new password").count()) === 1);
       } else {
         expect("config: e-mail refused by Supabase -> the screen says so and NOTHING was changed (flag off, old password works)", outcome === "refused" && (await flag()) === false && (await canLogin(devPassword)), `outcome=${outcome}`);
         console.log("   (success path of the reset NOT exercised this run: Supabase refused to send. Re-run once its e-mail cap has reset.)");
@@ -89,11 +89,11 @@ const fresh = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.e
 
       // a second reset right after: refused or throttled by Supabase. The screen must say so, and change nothing.
       const before = await updatedAt();
-      await row.getByRole("button", { name: "Resetar senha" }).click();
-      await adm.page.getByRole("button", { name: "Confirmar reset" }).click();
-      await adm.page.getByText(/uma vez por minuto|limite de e-mails/).waitFor({ timeout: 30000 }).catch(() => {});
+      await row.getByRole("button", { name: "Reset password" }).click();
+      await adm.page.getByRole("button", { name: "Confirm reset" }).click();
+      await adm.page.getByText(/once a minute|email limit was reached/).waitFor({ timeout: 30000 }).catch(() => {});
       await sleep(1000);
-      expect("config: a refused e-mail is reported as such, never as 'enviado'", (await adm.page.getByText(/uma vez por minuto|limite de e-mails/).count()) === 1 && (await adm.page.getByText(/E-mail de redefinição enviado/).count()) === 0);
+      expect("config: a refused e-mail is reported as such, never as 'sent'", (await adm.page.getByText(/once a minute|email limit was reached/).count()) === 1 && (await adm.page.getByText(/Password reset email sent/).count()) === 0);
       expect("config: and the failed attempt left the account untouched (the old password is not thrown away)", (await updatedAt()) === before);
     }
 
@@ -120,7 +120,7 @@ const fresh = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.e
     expect("recovery link: a session exists in this clean browser", (await recipient.cookies()).some((c) => c.name.startsWith("sb-") && /auth-token/.test(c.name)));
     const chosen = `Escolhida-${Date.now()}-y7`;
     await rp.locator('input[type="password"]').fill(chosen);
-    await rp.getByRole("button", { name: /Salvar e continuar/ }).click();
+    await rp.getByRole("button", { name: /Save and continue/ }).click();
     await rp.waitForURL("**/dashboard", { timeout: 30000 });
     expect("recovery link: choosing a new password finishes the reset (dashboard opens)", rp.url().endsWith("/dashboard"));
     expect("recovery link: flag cleared, new password works", (await flag()) === false && (await canLogin(chosen)));
@@ -132,8 +132,8 @@ const fresh = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.e
     await dp.goto(`${BASE}/redefinir-senha#access_token=invalido&refresh_token=invalido&type=recovery`, { waitUntil: "load" });
     await sleep(2500);
     await dp.locator('input[type="password"]').fill("Qualquer-senha-9");
-    await dp.getByRole("button", { name: /Salvar e continuar/ }).click();
-    const deadMsg = await dp.getByText(/expirou ou já foi usado/).first().waitFor({ timeout: 15000 }).then(() => true, () => false);
+    await dp.getByRole("button", { name: /Save and continue/ }).click();
+    const deadMsg = await dp.getByText(/has expired or was already used/).first().waitFor({ timeout: 15000 }).then(() => true, () => false);
     expect("recovery link: an expired or invalid link says so", deadMsg);
     expect("recovery link: ...and the address bar no longer shows the bad tokens", new URL(dp.url()).hash === "");
     await dead.close();
