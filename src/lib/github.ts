@@ -92,6 +92,17 @@ export async function readBoardLayout(token: string, port: GitHubPort = {}): Pro
 
 /** The board's fields, each with its options' ids and names (null for a field without options). */
 export async function readBoardOptions(token: string, port: GitHubPort = {}): Promise<Map<string, Map<string, string> | null>> {
+  return (await readBoardFields(token, port)).options;
+}
+
+/**
+ * The board's fields: each one's options (as readBoardOptions) and each field's id by its name, for a field the board
+ * gets once by hand and whose id RoadS can't know beforehand (Week, issue #22).
+ */
+export async function readBoardFields(
+  token: string,
+  port: GitHubPort = {}
+): Promise<{ options: Map<string, Map<string, string> | null>; byName: Map<string, string> }> {
   const json = await github(
     token,
     "/graphql",
@@ -107,11 +118,14 @@ export async function readBoardOptions(token: string, port: GitHubPort = {}): Pr
     },
     port
   );
-  const nodes: { id?: string; options?: { id: string; name: string }[] }[] = json?.data?.node?.fields?.nodes ?? [];
-  return new Map(nodes.filter((n) => n.id).map((n) => [n.id!, n.options ? new Map(n.options.map((o) => [o.id, o.name])) : null]));
+  const nodes: { id?: string; name?: string; options?: { id: string; name: string }[] }[] = (json?.data?.node?.fields?.nodes ?? []).filter((n: { id?: string }) => n.id);
+  return {
+    options: new Map(nodes.map((n) => [n.id!, n.options ? new Map(n.options.map((o) => [o.id, o.name])) : null])),
+    byName: new Map(nodes.filter((n) => n.name).map((n) => [n.name!, n.id!])),
+  };
 }
 
-type FieldValue = { singleSelectOptionId: string } | { text: string };
+type FieldValue = { singleSelectOptionId: string } | { text: string } | { date: string };
 
 /**
  * Opens the issue with its labels and puts it on Project #7 with every field it can fill: Status (Open
@@ -255,6 +269,29 @@ export async function setProjectStatus(token: string, projectItemId: string, sta
 /** Writes one single-select field of a card on Project #7, field and option by id (Stack, Priority, Effort). */
 export async function setProjectOption(token: string, projectItemId: string, field: string, optionId: string, port: GitHubPort = {}): Promise<void> {
   await setField(token, projectItemId, field, { singleSelectOptionId: optionId }, port);
+}
+
+/** Writes a date field of a card on Project #7 (the Week: the Monday of the item's week). */
+export async function setProjectDate(token: string, projectItemId: string, field: string, date: string, port: GitHubPort = {}): Promise<void> {
+  await setField(token, projectItemId, field, { date }, port);
+}
+
+/** Empties a field of a card on Project #7 (the Week of an item taken out of its week). */
+export async function clearProjectField(token: string, projectItemId: string, field: string, port: GitHubPort = {}): Promise<void> {
+  await github(
+    token,
+    "/graphql",
+    {
+      method: "POST",
+      body: {
+        query: `mutation($project: ID!, $item: ID!, $field: ID!) {
+        clearProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field }) { projectV2Item { id } }
+      }`,
+        variables: { project: PROJECT_ID, item: projectItemId, field },
+      },
+    },
+    port
+  );
 }
 
 function setField(token: string, item: string, field: string, value: FieldValue, port: GitHubPort = {}) {

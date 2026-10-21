@@ -14,6 +14,9 @@ import {
   statusWrites,
   storedStatus,
   tipoOfLabels,
+  weekOfIssue,
+  weekOfLane,
+  weekPull,
 } from "./bilateral-sync.ts";
 
 const at = (h: number) => `2026-10-21T${String(h).padStart(2, "0")}:00:00Z`;
@@ -168,4 +171,26 @@ test("choosing Development or Open stores Open and moves the item into or out of
 test("the Comment of a Delete says who deleted the item and that the issue was closed as not planned", () => {
   assert.equal(deletionComment("admin"), "Deleted in RoadS by an admin: this issue was closed as not planned.");
   assert.equal(deletionComment("scrum_master"), "Deleted in RoadS by a scrum master: this issue was closed as not planned.");
+});
+
+// ---- Week (S5): the Monday of the item's week, the board's date field Week
+
+test("an item's Week is the Monday of its week lane, and nothing when it sits in a block", () => {
+  assert.equal(weekOfLane({ kind: "sprint", start_date: "2026-10-19" }), "2026-10-19");
+  assert.equal(weekOfLane({ kind: "group", start_date: null }), "");
+  assert.equal(weekOfLane(undefined), "");
+});
+
+test("the issue's Week reads as the Monday of the date on the card, a weekend as the next Monday, an empty one as nothing", () => {
+  assert.equal(weekOfIssue("2026-10-22"), "2026-10-19");
+  assert.equal(weekOfIssue("2026-10-19"), "2026-10-19");
+  assert.equal(weekOfIssue("2026-10-25"), "2026-10-26");
+  assert.equal(weekOfIssue(null), "");
+});
+
+test("a Week brought from GitHub moves the item into that week, an empty one back to its block, and a week gone by nowhere", () => {
+  assert.deepEqual(weekPull("2026-10-26", "2026-10-21"), { to: "week", monday: "2026-10-26" });
+  assert.deepEqual(weekPull("2026-10-19", "2026-10-21"), { to: "week", monday: "2026-10-19" });
+  assert.deepEqual(weekPull("", "2026-10-21"), { to: "block" });
+  assert.equal(weekPull("2026-10-12", "2026-10-21"), null);
 });

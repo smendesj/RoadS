@@ -197,3 +197,8 @@ test("kanbanSort follows the views exactly as GitHub returned them for Project #
   ];
   assert.deepEqual(kanbanSort(recorded), [{ field: "Created", direction: "DESC" }]);
 });
+
+test("projectCard keeps each date value of the card by its field's id, with since when", () => {
+  const node = { ...cardNode(), fieldValues: { nodes: [{ date: "2026-10-26", updatedAt: "2026-10-21T10:00:00Z", field: { id: "PVTF_week" } }] } };
+  assert.deepEqual(projectCard(node)?.dates, { PVTF_week: { date: "2026-10-26", updatedAt: "2026-10-21T10:00:00Z" } });
+});

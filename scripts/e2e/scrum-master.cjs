@@ -270,8 +270,14 @@ async function seedBoard() {
       await labelled(panel, "Status").selectOption(status);
       await btn(panel, "Salvar").click();
       await panel.waitFor({ state: "detached", timeout: 15000 });
+      // The save lands after the panel closes: wait for it (up to 15 s), then for the board it reloads.
+      let data = null;
+      for (let i = 0; i < 30; i++) {
+        ({ data } = await svc.from("roadmap_items").select("status, lane_id, field_changed_at").eq("id", created.id).single());
+        if (data?.status === status || (status === "Development" && data?.status === "Open")) break;
+        await sleep(500);
+      }
       await sleep(1500);
-      const { data } = await svc.from("roadmap_items").select("status, lane_id, field_changed_at").eq("id", created.id).single();
       return { offered, row: data };
     };
     {
@@ -809,6 +815,9 @@ async function seedBoard() {
       const moves = (q ?? []).map((r) => r.payload);
       expect("unplan (Mover para): one move_lane is queued, from the test week to the bug type lane, from the app",
         moves.length === 1 && moves[0]?.from_lane_id === "zz-test-sprint" && moves[0]?.lane_id === "tipo-bug" && moves[0]?.origin === "app", JSON.stringify(moves));
+      // Leaving its week changes the item's Week (issue #22): the time of that edit is kept for the two-way sync.
+      const { data: stamped } = await svc.from("roadmap_items").select("field_changed_at").eq("id", created.id).single();
+      expect("unplan (Mover para): the Week's edit time is kept, at this move", (stamped?.field_changed_at?.week ?? "") >= since, JSON.stringify(stamped));
       await openCard(title).waitFor({ timeout: 15000 });
       const shown = await inOpen(title);
       expect("unplan (Mover para): the card is in Open with no week label, and in no week",

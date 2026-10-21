@@ -422,7 +422,7 @@ export async function moveRoadmapItemLane(itemId: string, targetLaneId: string, 
 
   const { data: moved, error } = await supabase
     .from("roadmap_items")
-    .update({ lane_id: to, ...(place ? { sort_order: place.sortOrder } : {}), updated_at: new Date().toISOString() })
+    .update({ lane_id: to, ...(place ? { sort_order: place.sortOrder } : {}), ...weekEdited(access.item.field_changed_at), updated_at: new Date().toISOString() })
     .eq("id", itemId)
     .select("id");
   if (error || !moved?.length) {
@@ -451,7 +451,15 @@ const GEOCLOUD_ISSUE = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
 // in no week stays. Queued like any move, with both lanes; the future week it left, now empty, goes. Leaving the
 // current week, the Project goes back to Open through the sprint sync (only with its write switch on); leaving a week
 // to come, nothing changes on the Project.
-async function unplanItem(itemId: string, item: { lane_id: string; title: string; github_issue_url: string | null; tipo: Tipo | null }): Promise<void> {
+// A move changes the item's Week (issue #22): its time is kept for the two-way sync, as a saved field's is.
+function weekEdited(changedAt: Record<string, string> | null): { field_changed_at: Record<string, string> } {
+  return { field_changed_at: { ...(changedAt ?? {}), week: new Date().toISOString() } };
+}
+
+async function unplanItem(
+  itemId: string,
+  item: { lane_id: string; title: string; github_issue_url: string | null; tipo: Tipo | null; field_changed_at: Record<string, string> | null }
+): Promise<void> {
   const supabase = await createServerSupabase();
   const { data: lanes, error: lanesError } = await supabase.from("lanes").select("id, kind");
   if (lanesError) throw lanesError;
@@ -473,7 +481,7 @@ async function unplanItem(itemId: string, item: { lane_id: string; title: string
 
   const { data: moved, error } = await supabase
     .from("roadmap_items")
-    .update({ lane_id: to, sort_order: sortOrder, updated_at: new Date().toISOString() })
+    .update({ lane_id: to, sort_order: sortOrder, ...weekEdited(item.field_changed_at), updated_at: new Date().toISOString() })
     .eq("id", itemId)
     .eq("lane_id", from)
     .select("id");

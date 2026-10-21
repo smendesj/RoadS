@@ -12,7 +12,7 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
-const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState } =
+const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState, setProjectDate, clearProjectField, readBoardFields } =
   await import("./github.ts");
 
 test("closing and reopening an issue sends its state and the reason in the same edit", async () => {
@@ -222,4 +222,26 @@ test("the labels are read from the issue, strings or objects", async () => {
   }) as typeof fetch;
   assert.deepEqual(await readIssueLabels("token-sintetico", 900001, { fetch: github }), ["type:bug", "stack:web"]);
   assert.match(asked, /\/issues\/900001$/);
+});
+
+// ---- Week (S5): a date field of the card
+
+test("a Week is written to the card's date field by its id, and cleared when the item leaves its week", async () => {
+  const gh = recordingGitHub();
+  await setProjectDate("token-sintetico", "PVTI_card", "PVTF_week", "2026-10-26", { fetch: gh.fetch });
+  await clearProjectField("token-sintetico", "PVTI_card", "PVTF_week", { fetch: gh.fetch });
+  const [set, clear] = gh.calls.map((c) => c.body as { query: string; variables: Record<string, unknown> });
+  assert.deepEqual({ item: set.variables.item, field: set.variables.field, value: set.variables.value }, { item: "PVTI_card", field: "PVTF_week", value: { date: "2026-10-26" } });
+  assert.match(clear.query, /clearProjectV2ItemFieldValue/);
+  assert.deepEqual({ item: clear.variables.item, field: clear.variables.field }, { item: "PVTI_card", field: "PVTF_week" });
+});
+
+test("the board's fields are read with their names, so a field created on the board (Week) is found by its name", async () => {
+  const gh = recordingGitHub(() => ({
+    data: { node: { fields: { nodes: [{ id: "PVTF_week", name: "Week", dataType: "DATE" }, { id: "PVTSSF_x", name: "Stack", dataType: "SINGLE_SELECT", options: [{ id: "o1", name: "Backend" }] }] } } },
+  }));
+  const fields = await readBoardFields("token-sintetico", { fetch: gh.fetch });
+  assert.equal(fields.byName.get("Week"), "PVTF_week");
+  assert.deepEqual([...(fields.options.get("PVTSSF_x") ?? [])], [["o1", "Backend"]]);
+  assert.equal(fields.options.get("PVTF_week"), null);
 });
