@@ -6,7 +6,7 @@ type Board = { lanes: Lane[]; groups: RoadmapGroup[] };
 // can be a sprint lane (a week) or a Roadmap group; the item must land in either, never just leave its old lane.
 //
 // A week keeps the order it is given: dropped on a card (`beforeId`), the item goes right before it, also within the
-// week it is already in; dropped anywhere else in a week ("Mover para" too), it goes last. A group keeps its own
+// week it is already in; dropped anywhere else in a week ("Move to" too), it goes last. A group keeps its own
 // order (by issue number on the screen), so a drop on the group it is already in changes nothing.
 //
 // Nothing changes for an unknown item or lane, a card that is not in the target, the item dropped on itself, or a

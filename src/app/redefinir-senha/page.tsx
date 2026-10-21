@@ -6,10 +6,12 @@ import { BrandMark } from "@/components/BrandMark";
 import { SessionGuard } from "@/components/SessionGuard";
 import { completePasswordReset } from "@/lib/actions/account";
 import { createClient } from "@/lib/supabase/client";
+import { ACTION } from "@/lib/text/common";
+import { AUTH, RESET } from "@/lib/text/account";
 import { useLogout } from "@/lib/use-logout";
 import { isValidPassword, PASSWORD_HINT } from "@/lib/validation";
 
-const LINK_ERROR = "Esse link expirou ou já foi usado. Peça um novo ao admin.";
+const LINK_ERROR = RESET.linkExpired;
 
 export default function RedefinirSenhaPage() {
   const router = useRouter();
@@ -71,12 +73,12 @@ export default function RedefinirSenhaPage() {
         <BrandMark />
 
         <p className="text-sm text-rs-text">
-          Este é o seu primeiro acesso, ou a sua senha foi resetada por um admin. Crie uma senha nova para continuar.
+          {RESET.intro}
         </p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">
-            <span className="text-[13px] font-semibold text-rs-text-soft">Nova senha</span>
+            <span className="text-[13px] font-semibold text-rs-text-soft">{AUTH.newPassword}</span>
             <input
               type="password"
               required
@@ -94,12 +96,12 @@ export default function RedefinirSenhaPage() {
             disabled={loading}
             className="rounded-lg bg-rs-brand py-2.5 text-sm font-bold text-white disabled:opacity-60"
           >
-            {loading ? "Salvando..." : "Salvar e continuar"}
+            {loading ? ACTION.saving : RESET.saveAndContinue}
           </button>
         </form>
 
         <button type="button" onClick={logout} className="text-center text-[13px] font-bold text-rs-brand-text">
-          Sair
+          {AUTH.signOut}
         </button>
       </div>
     </div>

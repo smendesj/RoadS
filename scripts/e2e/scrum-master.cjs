@@ -80,17 +80,17 @@ async function seedBoard() {
 
     // ------------------------------------------------ roadmap, editor view
     await page.goto(BASE + "/roadmap", { waitUntil: "load" });
-    await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+    await page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
     // Each item of the test week shows twice: in the week, and in the Kanban's Open with the week's label.
     await page.getByText("[TESTE] item do scrum master").first().waitFor();
     const count = (loc) => loc.count();
     const open = page.locator('[data-kanban-column="open"]');
     const done = page.locator('[data-kanban-column="done"]');
-    expect("roadmap: subtitle offers 'defina o que entra e quando'", (await count(page.getByText(/defina o que entra e quando/))) === 1);
-    expect("roadmap: 'Sincronizar' is available", (await count(page.getByRole("button", { name: /^Sincronizar$/ }))) === 1);
-    expect("roadmap: one '+ Novo item', in the Kanban's Open, none in any week",
-      (await count(page.getByRole("button", { name: "+ Novo item" }))) === 1 && (await count(open.getByRole("button", { name: "+ Novo item" }))) === 1 &&
-        (await count(page.locator("[data-lane-id]").getByRole("button", { name: "+ Novo item" }))) === 0);
+    expect("roadmap: subtitle offers 'decide what goes in and when'", (await count(page.getByText(/decide what goes in and when/))) === 1);
+    expect("roadmap: 'Sync' is available", (await count(page.getByRole("button", { name: /^Sync$/ }))) === 1);
+    expect("roadmap: one '+ New item', in the Kanban's Open, none in any week",
+      (await count(page.getByRole("button", { name: "+ New item" }))) === 1 && (await count(open.getByRole("button", { name: "+ New item" }))) === 1 &&
+        (await count(page.locator("[data-lane-id]").getByRole("button", { name: "+ New item" }))) === 0);
     expect("roadmap: no 'Config' for a Scrum Master", (await count(page.getByRole("link", { name: "Config", exact: true }))) === 0);
 
     // ------------------------------------------------ the Kanban under the weeks, in place of the Roadmap section
@@ -137,7 +137,7 @@ async function seedBoard() {
         (await count(orphan)) === 1 && (await orphan.getAttribute("href")) === GEOCLOUD + BOARD.orphan.number);
       expect("kanban: an issue in Development is not in Open (its item neither)",
         (await count(open.getByText(BOARD.dev.title))) === 0 && (await count(open.locator(`[data-item-id="${board.ids.dev}"]`))) === 0);
-      // Done: what went to Done in the last 14 days, counted from when the Status changed; "Ver todas" shows the rest.
+      // Done: what went to Done in the last 14 days, counted from when the Status changed; "Show all" shows the rest.
       const { data: snap } = await svc.from("board_sync_state").select("columns").eq("id", true).single();
       const doneCards = (snap.columns ?? []).find((c) => c.key === "done")?.items ?? [];
       const recent = doneCards.filter((c) => c.statusAt && Date.now() - Date.parse(c.statusAt) <= 14 * DAY).length;
@@ -145,10 +145,10 @@ async function seedBoard() {
       expect("done: the cards that went to Done in the last 14 days, the one of yesterday in, the one of 30 days ago out",
         (await shownDone()) === recent && (await count(done.getByText(BOARD.doneRecent.title))) === 1 && (await count(done.getByText(BOARD.doneOld.title))) === 0,
         `${await shownDone()} of ${recent}`);
-      expect("done: only to look at (nothing to drag, no button but 'Ver todas')",
+      expect("done: only to look at (nothing to drag, no button but 'Show all')",
         (await count(done.locator("[draggable]"))) === 0 && (await count(done.getByRole("button"))) === 1);
-      await done.getByRole("button", { name: /^Ver todas/ }).click();
-      expect("done: 'Ver todas' shows every Done card of the snapshot right there, the one of 30 days ago too",
+      await done.getByRole("button", { name: /^Show all/ }).click();
+      expect("done: 'Show all' shows every Done card of the snapshot right there, the one of 30 days ago too",
         (await shownDone()) === doneCards.length && (await count(done.getByText(BOARD.doneOld.title))) === 1, `${await shownDone()} of ${doneCards.length}`);
       // The ELIMS cards are only counted, now under the Kanban.
       const elims = (snap.columns ?? []).reduce((sum, c) => sum + (c.elims ?? 0), 0);
@@ -188,7 +188,8 @@ async function seedBoard() {
     // A card in the test week, and the same item's card in the Kanban's Open.
     const card = (title) => page.locator('[data-lane-id="zz-test-sprint"] div[draggable]', { hasText: title }).first();
     const openCard = (title) => open.locator("div[draggable]", { hasText: title }).first();
-    const btn = (c, name) => c.getByRole("button", { name, exact: true });
+    const btn = L.cardButton;
+    const commentBtn = (c, name) => c.getByRole("button", { name, exact: true });
     const seeded = card("[TESTE] item semeado (sem dono)");
     const adminItem = card("[TESTE] item do admin");
 
@@ -196,13 +197,13 @@ async function seedBoard() {
       const own = of("[TESTE] item do scrum master");
       const noOwner = of("[TESTE] item semeado (sem dono)");
       const admins = of("[TESTE] item do admin");
-      expect(`own item ${where}: draggable, with Editar and Excluir`, (await own.getAttribute("draggable")) === "true" && (await count(btn(own, "Editar"))) === 1 && (await count(btn(own, "Excluir"))) === 1);
-      expect(`seeded item (no owner) ${where}: draggable, '+ Comment' only, no Editar, no Excluir`, (await noOwner.getAttribute("draggable")) === "true" && (await count(btn(noOwner, "+ Comment"))) === 1 && (await count(btn(noOwner, "Editar"))) === 0 && (await count(btn(noOwner, "Excluir"))) === 0);
+      expect(`own item ${where}: draggable, with Edit and Delete`, (await own.getAttribute("draggable")) === "true" && (await count(btn(own, "Edit"))) === 1 && (await count(btn(own, "Delete"))) === 1);
+      expect(`seeded item (no owner) ${where}: draggable, '+ Comment' only, no Edit, no Delete`, (await noOwner.getAttribute("draggable")) === "true" && (await count(btn(noOwner, "+ Comment"))) === 1 && (await count(btn(noOwner, "Edit"))) === 0 && (await count(btn(noOwner, "Delete"))) === 0);
       expect(`admin's item ${where}: not draggable and no controls at all`, (await admins.getAttribute("draggable")) === "false" && (await count(admins.getByRole("button"))) === 0);
     }
 
-    // ------------------------------------------------ create through the UI: "+ Novo item" in the Kanban's Open
-    await open.getByRole("button", { name: "+ Novo item" }).click();
+    // ------------------------------------------------ create through the UI: "+ New item" in the Kanban's Open
+    await open.getByRole("button", { name: "+ New item" }).click();
     // The one card in edit mode (not draggable while editing, has the note field): stable while its inputs change.
     const fresh = page.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])');
     await fresh.waitFor({ timeout: 15000 });
@@ -210,20 +211,20 @@ async function seedBoard() {
       (await count(fresh)) === 1 && (await count(open.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])'))) === 1);
     await fresh.locator("input").first().fill("[TESTE] criado pelo Scrum Master");
     await fresh.locator("textarea").fill("descrição escrita no teste");
-    // By their visible labels, not their position: the card gained and lost selects (Tipo, Stack) over time.
+    // By their visible labels, not their position: the card gained and lost selects (Type, Stack) over time.
     // The select sits inside its <label>, so the label's accessible name also carries every option: match its caption.
     const labelled = (scope, caption) => scope.locator("label").filter({ has: page.getByText(caption, { exact: true }) }).locator("select");
-    await labelled(fresh, "Prioridade").selectOption("High");
+    await labelled(fresh, "Priority").selectOption("High");
     await labelled(fresh, "Effort").selectOption("Low");
     await fresh.getByPlaceholder("Write a Comment (optional)...").fill("[TESTE] primeira nota");
-    await btn(fresh, "Salvar").click();
+    await btn(fresh, "Save").click();
     await page.getByText("[TESTE] criado pelo Scrum Master").first().waitFor({ timeout: 15000 });
     await sleep(1500);
     const { data: created } = await svc.from("roadmap_items").select("id, title, prioridade, effort, created_by, github_issue_url, lane_id").eq("title", "[TESTE] criado pelo Scrum Master").maybeSingle();
     expect("create: saved with the SM as owner, High/Low, with no week: in the feature type lane", created && created.created_by === L.ids.sm && created.prioridade === "High" && created.effort === "Low" && created.lane_id === "tipo-feature", JSON.stringify(created));
     expect("create: no GitHub issue was opened (the token is empty in this test server)", created && created.github_issue_url === null);
     // The week's order is roadmap_items.sort_order (the Roadmap's week, the Dashboard's Sprint and roadmap-state's
-    // position all read it); a new item, and an item moved with "Mover para", goes last.
+    // position all read it); a new item, and an item moved with "Move to", goes last.
     const isLastOfWeek = async (id) => {
       const rows = (await svc.from("roadmap_items").select("id, sort_order").eq("lane_id", "zz-test-sprint")).data ?? [];
       const mine = rows.find((r) => r.id === id);
@@ -240,17 +241,17 @@ async function seedBoard() {
 
     // ------------------------------------------------ edit own item, on its card in Open
     const own = openCard("[TESTE] criado pelo Scrum Master");
-    await btn(own, "Editar").click();
+    await btn(own, "Edit").click();
     const editing = page.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])');
     await editing.locator("input").first().fill("[TESTE] criado e editado pelo SM");
     // A bug: unplanned later, the item goes back to the bug type lane (the server picks it by the item's type).
-    await labelled(editing, "Tipo").selectOption("bug");
+    await labelled(editing, "Type").selectOption("bug");
     // The Stacks are named in English (issue #22): the old Portuguese names are no longer offered.
     const stackOptions = await labelled(editing, "Stack").locator("option").allTextContents();
     expect("edit own item: Stack offers the English names only", stackOptions.includes("Database") && stackOptions.includes("General") && !stackOptions.includes("Banco de dados") && !stackOptions.includes("Geral"), JSON.stringify(stackOptions));
     await labelled(editing, "Stack").selectOption("Database");
     await labelled(editing, "Effort").selectOption("High");
-    await btn(editing, "Salvar").click();
+    await btn(editing, "Save").click();
     await page.getByText("[TESTE] criado e editado pelo SM").first().waitFor({ timeout: 15000 });
     await sleep(1000);
     const { data: edited } = await svc.from("roadmap_items").select("title, tipo, stack, effort, field_changed_at").eq("id", created.id).single();
@@ -264,11 +265,11 @@ async function seedBoard() {
     // An item with no week: Open stays where it is (Development would plan it into the real current week, so it isn't
     // chosen here). Done and Blocker are the item's own, shown on its card; the sync takes them to the issue.
     const setStatus = async (status) => {
-      await btn(openCard("[TESTE] criado e editado pelo SM"), "Editar").click();
+      await btn(openCard("[TESTE] criado e editado pelo SM"), "Edit").click();
       const panel = page.locator('div[draggable="false"]:has(input[aria-label="New Comment"])');
       const offered = await labelled(panel, "Status").locator("option").allTextContents();
       await labelled(panel, "Status").selectOption(status);
-      await btn(panel, "Salvar").click();
+      await btn(panel, "Save").click();
       await panel.waitFor({ state: "detached", timeout: 15000 });
       // The save lands after the panel closes: wait for it (up to 15 s), then for the board it reloads.
       let data = null;
@@ -285,7 +286,7 @@ async function seedBoard() {
       expect("status: the selector offers Open, Development, Blocker and Done", JSON.stringify(done.offered) === JSON.stringify(["Open", "Development", "Blocker", "Done"]), JSON.stringify(done.offered));
       expect("status: Done is saved with its edit time, and the item stays where it was",
         done.row.status === "Done" && !!done.row.field_changed_at?.status && done.row.lane_id === created.lane_id, JSON.stringify(done.row));
-      expect("status: the card shows Concluído", (await count(openCard("[TESTE] criado e editado pelo SM").getByText("Concluído", { exact: true }))) === 1);
+      expect("status: the card shows Done", (await count(openCard("[TESTE] criado e editado pelo SM").getByText("Done", { exact: true }))) === 1);
       const blocked = await setStatus("Blocker");
       expect("status: Blocker is saved and shown on the card", blocked.row.status === "Blocker" && (await count(openCard("[TESTE] criado e editado pelo SM").getByText("Blocker", { exact: true }))) === 1, JSON.stringify(blocked.row));
       const reopened = await setStatus("Open");
@@ -296,10 +297,10 @@ async function seedBoard() {
     // ------------------------------------------------ Comments (issue #23): whoever wrote one edits and deletes it
     const myComment = openCard("[TESTE] criado e editado pelo SM").locator("[data-comment-id]", { hasText: "[TESTE] primeira nota" });
     expect("Comment: shows its author and, to whoever wrote it, Edit and Delete",
-      (await count(btn(myComment, "Edit"))) === 1 && (await count(btn(myComment, "Delete"))) === 1);
-    await btn(myComment, "Edit").click();
+      (await count(commentBtn(myComment, "Edit"))) === 1 && (await count(commentBtn(myComment, "Delete"))) === 1);
+    await commentBtn(myComment, "Edit").click();
     await myComment.getByLabel("Edit Comment").fill("[TESTE] primeira nota, editada");
-    await btn(myComment, "Save").click();
+    await commentBtn(myComment, "Save").click();
     await page.getByText("[TESTE] primeira nota, editada").first().waitFor({ timeout: 15000 });
     await sleep(500);
     const { data: editedNote } = await svc.from("item_notes").select("body, updated_at, deleted_at").eq("item_id", created.id);
@@ -310,9 +311,9 @@ async function seedBoard() {
     await editedMark.waitFor({ timeout: 15000 }).catch(() => {});
     expect("Comment: an edited one says so", (await count(editedMark)) === 1);
     const editedComment = openCard("[TESTE] criado e editado pelo SM").locator("[data-comment-id]", { hasText: "[TESTE] primeira nota, editada" });
-    await btn(editedComment, "Delete").click();
+    await commentBtn(editedComment, "Delete").click();
     expect("Comment: Delete asks first, in the card", (await count(editedComment.getByText("Delete this Comment?"))) === 1);
-    await btn(editedComment, "Delete").click();
+    await commentBtn(editedComment, "Delete").click();
     await editedComment.waitFor({ state: "detached", timeout: 15000 });
     const { data: noteLeft } = await svc.from("item_notes").select("id").eq("item_id", created.id);
     expect("Comment: one never sent to GitHub is deleted at once", noteLeft.length === 0, JSON.stringify(noteLeft));
@@ -323,7 +324,7 @@ async function seedBoard() {
     try {
       await page.reload({ waitUntil: "load" });
       await openCard("[TESTE] criado e editado pelo SM").waitFor({ timeout: 30000 });
-      await btn(openCard("[TESTE] criado e editado pelo SM"), "Editar").click();
+      await btn(openCard("[TESTE] criado e editado pelo SM"), "Edit").click();
       const assigning = page.locator('div[draggable="false"]:has([data-assignees])');
       // The profile shows by its name (the account's, or the login when it has none).
       const { data: smUser } = await svc.auth.admin.getUserById(L.ids.sm);
@@ -331,7 +332,7 @@ async function seedBoard() {
       const choice = assigning.locator("[data-assignees] label", { hasText: smName });
       await choice.waitFor({ timeout: 15000 });
       await choice.locator("input").check();
-      await btn(assigning, "Salvar").click();
+      await btn(assigning, "Save").click();
       await openCard("[TESTE] criado e editado pelo SM").locator("[data-assignees-shown]").waitFor({ timeout: 15000 });
       const { data: assigned } = await svc.from("roadmap_items").select("assignees, field_changed_at").eq("id", created.id).single();
       expect("Assignees: the profile picked is saved as its GitHub login, with the time of the edit",
@@ -343,10 +344,10 @@ async function seedBoard() {
     // ------------------------------------------------ seeded item: note + priority only, on its card in Open
     await btn(openCard("[TESTE] item semeado (sem dono)"), "+ Comment").click();
     const noting = page.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])');
-    expect("seeded item: the edit panel has NO title/description/produto fields", (await count(noting.getByText("Título", { exact: true }))) === 0 && (await count(noting.getByText("Descrição", { exact: true }))) === 0);
-    await labelled(noting, "Prioridade").selectOption("Critical");
+    expect("seeded item: the edit panel has NO title/description/produto fields", (await count(noting.getByText("Title", { exact: true }))) === 0 && (await count(noting.getByText("Description", { exact: true }))) === 0);
+    await labelled(noting, "Priority").selectOption("Critical");
     await noting.getByPlaceholder("Write a Comment (optional)...").fill("[TESTE] nota no item semeado");
-    await btn(noting, "Salvar").click();
+    await btn(noting, "Save").click();
     await page.getByText("[TESTE] nota no item semeado").first().waitFor({ timeout: 15000 });
     await sleep(1000);
     const { data: sRow } = await svc.from("roadmap_items").select("title, prioridade, field_changed_at").eq("id", L.ids.seeded).single();
@@ -418,7 +419,7 @@ async function seedBoard() {
     // The seeded item (no owner), taken out of its week, is planned from Open too.
     await svc.from("roadmap_items").update({ lane_id: "zz-test-b" }).eq("id", L.ids.seeded);
     await page.reload({ waitUntil: "load" });
-    await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+    await page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
     await openCard("[TESTE] item semeado (sem dono)").waitFor({ timeout: 15000 });
     await L.fitWholePage(page);
     {
@@ -465,13 +466,13 @@ async function seedBoard() {
       // Below lg a select on the card moves it too, by the lane's id (the option reads only the week's dates).
       await page.setViewportSize({ width: 800, height: 1000 });
       await sleep(800);
-      await openCard("[TESTE] criado e editado pelo SM").locator('select[aria-label="Mover para"]').selectOption("zz-test-sprint");
+      await openCard("[TESTE] criado e editado pelo SM").locator('select[aria-label="Move to"]').selectOption("zz-test-sprint");
       await sleep(2500);
       const outOfWeek = await laneOfItem(created.id);
       expect("move (select on the Open card, narrow screen): the item goes back to the test week", outOfWeek === "zz-test-sprint", outOfWeek);
       {
         const last = await isLastOfWeek(created.id);
-        expect("move (select): \"Mover para\" puts the item last in the week", last.ok, JSON.stringify(last.rows));
+        expect("move (select): \"Move to\" puts the item last in the week", last.ok, JSON.stringify(last.rows));
       }
       expect("empty week: its only item moved out, the future week's lane is deleted", (await laneRows(trailing)).length === 0);
       await page.locator(`[data-lane-id="${next}"]`).waitFor({ state: "detached", timeout: 15000 }).catch(() => {});
@@ -497,7 +498,7 @@ async function seedBoard() {
       await svc.from("roadmap_items").update({ sort_order: 7 }).in("id", [L.ids.adminItem, L.ids.smItem]);
       await svc.from("roadmap_items").update({ sort_order: 9 }).eq("id", created.id);
       await page.reload({ waitUntil: "load" });
-      await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+      await page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
       await page.getByText("[TESTE] criado e editado pelo SM").first().waitFor({ timeout: 15000 });
       await L.fitWholePage(page);
       await page.locator('[data-lane-id="zz-test-sprint"]').scrollIntoViewIfNeeded();
@@ -542,7 +543,7 @@ async function seedBoard() {
       expect("reorder within a week: nothing is queued (roadmap-state's position carries the order)", (await queued(created.id)) === queuedOwn);
       const shownB = await shownOrder(page);
       await page.reload({ waitUntil: "load" });
-      await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+      await page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
       await page.getByText("[TESTE] criado e editado pelo SM").first().waitFor({ timeout: 15000 });
       const reloadedB = await shownOrder(page);
       expect("reorder within a week: the screen shows the order saved, right after the drop and on a fresh load",
@@ -555,7 +556,7 @@ async function seedBoard() {
       const phone = await L.newSession(browser, "sm", { width: 390, height: 844 }, { hasTouch: true, isMobile: true });
       await L.login(phone);
       await phone.page.goto(BASE + "/roadmap", { waitUntil: "load" });
-      await phone.page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+      await phone.page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
       await phone.page.getByText("[TESTE] criado e editado pelo SM").first().waitFor({ timeout: 15000 });
       const cdp = await phone.context.newCDPSession(phone.page);
       const touch = (type, x, y) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y }] });
@@ -589,9 +590,9 @@ async function seedBoard() {
       };
 
       // The select stays only for screen readers: on a touch screen it takes no room on the card.
-      const select = phone.page.locator('select[aria-label="Mover para"]');
+      const select = phone.page.locator('select[aria-label="Move to"]');
       const box = (await select.count()) ? await select.first().boundingBox() : null;
-      expect("phone: no 'Mover para' select to see on a touch screen (kept for screen readers)", !box || (box.width <= 1 && box.height <= 1), JSON.stringify(box));
+      expect("phone: no 'Move to' select to see on a touch screen (kept for screen readers)", !box || (box.width <= 1 && box.height <= 1), JSON.stringify(box));
       // Nothing (a loose absolute element, say) widens the page past the phone, which would zoom the whole page out.
       const widths = await phone.page.evaluate(() => [window.innerWidth, document.documentElement.scrollWidth]);
       expect("phone: the Roadmap is as wide as the phone, not zoomed out", widths[0] === 390 && widths[1] === 390, JSON.stringify(widths));
@@ -802,7 +803,7 @@ async function seedBoard() {
       // Back where the rest of this suite expects it.
       await svc.from("roadmap_items").update({ lane_id: "zz-test-sprint" }).eq("id", created.id);
       await page.reload({ waitUntil: "load" });
-      await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+      await page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
     }
 
     // ------------------------------------------------ unplan: a card dragged from a week back to the Kanban
@@ -829,14 +830,14 @@ async function seedBoard() {
       expect("unplan: the card stays in Open with no week label, not faded, and is in no week",
         shown.copies === 1 && shown.label === null && shown.opacity === "1" && (await count(card(title))) === 0, JSON.stringify(shown));
       await page.reload({ waitUntil: "load" });
-      await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+      await page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
       await openCard(title).waitFor({ timeout: 15000 });
       const reloaded = await inOpen(title);
       expect("unplan: on a fresh load the card is in Open with no week label, and in no week",
         reloaded.copies === 1 && reloaded.label === null && (await count(page.locator(`[data-lane-id] [data-item-id="${created.id}"]`))) === 0, JSON.stringify(reloaded));
     }
 
-    // ------------------------------------------------ unplan by keyboard: "Mover para" → "Kanban (sem semana)"
+    // ------------------------------------------------ unplan by keyboard: "Move to" → "Kanban (no week)"
     // The same server action as the drop on Open, without a drag. Back in the test week first (the service role, like the
     // phone above), then below lg, where the select shows.
     {
@@ -844,30 +845,30 @@ async function seedBoard() {
       await svc.from("roadmap_items").update({ lane_id: "zz-test-sprint" }).eq("id", created.id);
       await page.setViewportSize({ width: 800, height: 1000 });
       await page.reload({ waitUntil: "load" });
-      await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+      await page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
       await card(title).waitFor({ timeout: 15000 });
-      const options = (loc) => loc.locator('select[aria-label="Mover para"] option').evaluateAll((els) => els.map((el) => ({ value: el.value, text: el.textContent })));
+      const options = (loc) => loc.locator('select[aria-label="Move to"] option').evaluateAll((els) => els.map((el) => ({ value: el.value, text: el.textContent })));
       const weekOptions = await options(card(title));
       const openOptions = await options(openCard(title));
-      expect("unplan (Mover para): the card in a week offers 'Kanban (sem semana)'; its card in Open does not",
-        weekOptions.some((o) => o.value === "kanban" && o.text === "Kanban (sem semana)") && !openOptions.some((o) => o.value === "kanban"),
+      expect("unplan (Move to): the card in a week offers 'Kanban (no week)'; its card in Open does not",
+        weekOptions.some((o) => o.value === "kanban" && o.text === "Kanban (no week)") && !openOptions.some((o) => o.value === "kanban"),
         JSON.stringify({ weekOptions, openOptions }));
 
       const since = new Date().toISOString();
       const saved = moveAnswer(created.id, "kanban");
-      await card(title).locator('select[aria-label="Mover para"]').selectOption("kanban");
+      await card(title).locator('select[aria-label="Move to"]').selectOption("kanban");
       await saved;
-      expect("unplan (Mover para → Kanban): the item is saved in the bug type lane, out of the week", (await laneOfItem(created.id)) === "tipo-bug", await laneOfItem(created.id));
+      expect("unplan (Move to → Kanban): the item is saved in the bug type lane, out of the week", (await laneOfItem(created.id)) === "tipo-bug", await laneOfItem(created.id));
       const { data: q } = await svc.from("roadmap_sync_queue").select("payload").eq("item_id", created.id).eq("action", "move_lane").gte("created_at", since);
       const moves = (q ?? []).map((r) => r.payload);
-      expect("unplan (Mover para): one move_lane is queued, from the test week to the bug type lane, from the app",
+      expect("unplan (Move to): one move_lane is queued, from the test week to the bug type lane, from the app",
         moves.length === 1 && moves[0]?.from_lane_id === "zz-test-sprint" && moves[0]?.lane_id === "tipo-bug" && moves[0]?.origin === "app", JSON.stringify(moves));
       // Leaving its week changes the item's Week (issue #22): the time of that edit is kept for the two-way sync.
       const { data: stamped } = await svc.from("roadmap_items").select("field_changed_at").eq("id", created.id).single();
-      expect("unplan (Mover para): the Week's edit time is kept, at this move", (stamped?.field_changed_at?.week ?? "") >= since, JSON.stringify(stamped));
+      expect("unplan (Move to): the Week's edit time is kept, at this move", (stamped?.field_changed_at?.week ?? "") >= since, JSON.stringify(stamped));
       await openCard(title).waitFor({ timeout: 15000 });
       const shown = await inOpen(title);
-      expect("unplan (Mover para): the card is in Open with no week label, and in no week",
+      expect("unplan (Move to): the card is in Open with no week label, and in no week",
         shown.copies === 1 && shown.label === null && (await count(card(title))) === 0, JSON.stringify(shown));
       await page.setViewportSize({ width: 1440, height: 900 });
       await sleep(500);
@@ -875,7 +876,7 @@ async function seedBoard() {
 
     // ------------------------------------------------ delete: own yes, others no; from the card in Open
     const toDelete = openCard("[TESTE] criado e editado pelo SM");
-    await btn(toDelete, "Excluir").click();
+    await btn(toDelete, "Delete").click();
     // The delete lands after the card leaves the screen (an issue would be closed first): wait for it, up to 15 s.
     let gone = [];
     for (let i = 0; i < 30; i++) {
@@ -883,26 +884,26 @@ async function seedBoard() {
       if (!gone?.length) break;
       await sleep(500);
     }
-    expect("delete (Excluir on the Open card): own item is removed, from Open and from its week", gone.length === 0 &&
+    expect("delete (Delete on the Open card): own item is removed, from Open and from its week", gone.length === 0 &&
       (await count(page.locator(`[data-item-id="${created.id}"]`))) === 0);
-    expect("delete: the admin's item survives, the seeded one has no Excluir", (await svc.from("roadmap_items").select("id").eq("id", L.ids.adminItem)).data.length === 1);
+    expect("delete: the admin's item survives, the seeded one has no Delete", (await svc.from("roadmap_items").select("id").eq("id", L.ids.adminItem)).data.length === 1);
 
-    // ------------------------------------------------ Sincronizar with no token
-    await page.getByRole("button", { name: /^Sincronizar$/ }).click();
-    const msg = await page.getByText(/Erro ao sincronizar|não configurada/).waitFor({ timeout: 20000 }).then(() => true, () => false);
+    // ------------------------------------------------ Sync with no token
+    await page.getByRole("button", { name: /^Sync$/ }).click();
+    const msg = await page.getByText(/Sync failed|not configured yet/).waitFor({ timeout: 20000 }).then(() => true, () => false);
     expect("sync issues: with no GitHub token it fails closed with a message", msg);
 
-    // ------------------------------------------------ idle and Sair
+    // ------------------------------------------------ idle and Sign out
     await page.evaluate(() => localStorage.setItem("roads-last-activity", String(Date.now() - (10 * 60 + 1) * 1000)));
     await page.waitForURL("**/login", { timeout: 45000 });
     expect("idle: 10 minutes and 1 second signs the Scrum Master out", true);
     await L.login(s);
     await menu.waitFor();
     await menu.click();
-    await page.getByRole("button", { name: "Sair" }).click();
+    await page.getByRole("button", { name: "Sign out" }).click();
     await page.waitForURL("**/login");
     await page.goto(BASE + "/roadmap", { waitUntil: "load" });
-    expect("logout: Sair ends the session", page.url().endsWith("/login"));
+    expect("logout: Sign out ends the session", page.url().endsWith("/login"));
 
     const noise = s.problems.filter((p) => !/auth\/v1\/token|ERR_FAILED|Failed to load resource/.test(p));
     expect("no console errors, hydration errors or failed requests during the whole run", noise.length === 0, noise.slice(0, 3).join(" | "));

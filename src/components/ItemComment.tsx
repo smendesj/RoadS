@@ -5,6 +5,8 @@ import { useState } from "react";
 import { deleteItemComment, editItemComment } from "@/lib/actions/comments";
 import { mayChangeComment } from "@/lib/comment-author";
 import type { Note } from "@/lib/types";
+import { ACTION } from "@/lib/text/common";
+import { ROADMAP } from "@/lib/text/roadmap";
 
 // One Comment of an item (issue #23): who wrote it (the profile's name, or the GitHub login of a comment from there),
 // when, and, for whoever wrote it and the admin, Edit and Delete. The next sync takes the change to the issue.
@@ -42,15 +44,15 @@ export function ItemComment({
         <b>{author}</b>
         <span className="text-rs-text-faint">
           · {note.when}
-          {note.edited ? " · edited" : ""}
+          {note.edited ? ` · ${ROADMAP.edited}` : ""}
         </span>
         {canChange && !editing && !confirming && (
           <span className="ml-auto flex gap-2">
             <button type="button" onClick={() => setEditing(true)} className="font-bold text-rs-brand-text">
-              Edit
+              {ACTION.edit}
             </button>
             <button type="button" onClick={() => setConfirming(true)} className="font-bold text-rs-text-faint">
-              Delete
+              {ACTION.delete}
             </button>
           </span>
         )}
@@ -58,7 +60,7 @@ export function ItemComment({
       {editing ? (
         <div className="mt-1.5 flex flex-col gap-1.5">
           <textarea
-            aria-label="Edit Comment"
+            aria-label={ROADMAP.editComment}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             rows={3}
@@ -66,10 +68,10 @@ export function ItemComment({
           />
           <div className="flex gap-2">
             <button type="button" disabled={busy || !draft.trim()} onClick={() => run(() => editItemComment(note.id, draft))} className="font-bold text-rs-brand-text disabled:opacity-60">
-              Save
+              {ACTION.save}
             </button>
             <button type="button" onClick={() => { setEditing(false); setDraft(note.text); }} className="text-rs-text-faint">
-              Cancel
+              {ACTION.cancel}
             </button>
           </div>
         </div>
@@ -78,12 +80,12 @@ export function ItemComment({
       )}
       {confirming && (
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
-          <span>Delete this Comment? It is also deleted on the issue.</span>
+          <span>{ROADMAP.deleteCommentConfirm}</span>
           <button type="button" disabled={busy} onClick={() => run(() => deleteItemComment(note.id))} className="font-bold text-rs-red-text disabled:opacity-60">
-            Delete
+            {ACTION.delete}
           </button>
           <button type="button" onClick={() => setConfirming(false)} className="text-rs-text-faint">
-            Cancel
+            {ACTION.cancel}
           </button>
         </div>
       )}

@@ -46,8 +46,8 @@ test("a stored picture outside the shipped set is dropped", async () => {
   assert.equal((await loadViewer(signedIn({ role: "dev", avatar: "../../secret" })))?.avatar, null);
 });
 
-test("role labels, with Visitante only for nobody", () => {
-  assert.equal(roleLabel(null), "Visitante");
+test("role labels, with Visitor only for nobody", () => {
+  assert.equal(roleLabel(null), "Visitor");
   assert.equal(roleLabel("admin"), "Admin");
   assert.equal(roleLabel("scrum_master"), "Scrum Master");
   assert.equal(roleLabel("dev"), "Dev");

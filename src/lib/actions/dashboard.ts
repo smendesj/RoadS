@@ -2,7 +2,7 @@
 
 // Everything on the Dashboard is derived from the Roadmap (lanes + items in
 // Supabase), crossed with the last GitHub Project #7 snapshot for each item's issue status. So a
-// Scrum Master's change on /roadmap shows up here on the next "Sincronizar" (or page load), with
+// Scrum Master's change on /roadmap shows up here on the next "Sync" (or page load), with
 // no hand-kept data in between.
 
 import { getRoadmapBoard } from "@/lib/actions/roadmap";
@@ -13,6 +13,7 @@ import { partsByIssue, type IssuePartRows, type SliceGroup } from "@/lib/slices"
 import { brakeMessage, roadmapChanged, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
 import { currentSprintLane } from "@/lib/current-sprint";
 import { createClient } from "@/lib/supabase/server";
+import { KPI, NO_ISSUE_PILL, ofTotal, STATUS_PILL } from "@/lib/text/dashboard";
 import type { Tone } from "@/lib/tones";
 
 export type DashboardModel = {
@@ -23,13 +24,8 @@ export type DashboardModel = {
   syncedAt: string | null;
 };
 
-const STATUS_LABEL: Record<string, { status: string; tone: Tone }> = {
-  open: { status: "A FAZER", tone: "neutral" },
-  dev: { status: "EM ANDAMENTO", tone: "brand" },
-  blocker: { status: "BLOQUEADO", tone: "red" },
-  done: { status: "CONCLUÍDO", tone: "green" },
-};
-const NO_ISSUE = { status: "SEM ISSUE", tone: "neutral" as Tone };
+const STATUS_LABEL: Record<string, { status: string; tone: Tone }> = STATUS_PILL;
+const NO_ISSUE = NO_ISSUE_PILL;
 
 // Weekly branch name from the current week's raw dates (the lane whose dates hold today): SPRINT-28_09-02_10.
 async function currentSprintBranch(): Promise<string> {
@@ -75,17 +71,17 @@ async function buildDashboard(columns: SyncColumn[], syncedAt: string | null, sl
   const boardBlockers = columns.find((c) => c.key === "blocker")?.count ?? 0;
 
   const kpis: DashboardModel["kpis"] = [
-    { label: "Development", value: String(inDev), hint: atual?.title ?? "Nenhuma sprint nesta semana", tone: "neutral" },
+    { label: KPI.development, value: String(inDev), hint: atual?.title ?? KPI.noSprintThisWeek, tone: "neutral" },
     {
-      label: "Concluídas",
-      value: `${done} de ${sprintItems.length}`,
-      hint: "Comprometidas esta semana",
+      label: KPI.done,
+      value: ofTotal(done, sprintItems.length),
+      hint: KPI.committedThisWeek,
       tone: "green",
     },
     {
-      label: "Bloqueios",
+      label: KPI.blockers,
       value: String(boardBlockers),
-      hint: boardBlockers === 0 ? "Nenhum agora" : sprintBlocked > 0 ? `${sprintBlocked} nesta sprint` : "Fora desta sprint",
+      hint: boardBlockers === 0 ? KPI.noneNow : sprintBlocked > 0 ? KPI.inThisSprint(sprintBlocked) : KPI.outsideThisSprint,
       tone: boardBlockers === 0 ? "green" : "red",
     },
   ];
@@ -103,7 +99,7 @@ export async function getDashboard(fallbackColumns: SyncColumn[]): Promise<Dashb
   return buildDashboard(snapshot?.columns ?? fallbackColumns, snapshot?.syncedAt ?? null, snapshot?.slices ?? []);
 }
 
-// The "Sincronizar" button: pull GitHub Project #7 again, then rebuild everything from the Roadmap.
+// The "Sync" button: pull GitHub Project #7 again, then rebuild everything from the Roadmap.
 // If the GitHub part fails, the Roadmap part still refreshes over the last good snapshot, and the
 // error is reported alongside.
 // `notice` is what the sync did to the Roadmap and to the sprint, the same line the Roadmap tab shows, so a sync
@@ -114,7 +110,7 @@ export async function syncDashboard(opts?: { auto?: boolean }): Promise<{ model:
   const auto = opts != null && typeof opts === "object" && opts.auto === true;
   const result = await syncBoardAsViewer({ auto });
   if (result.ok) {
-    const error = result.roadmap.error ? `Project #7 lido, mas o Roadmap não foi atualizado: ${result.roadmap.error}` : null;
+    const error = result.roadmap.error ? `Project #7 read, but the Roadmap was not updated: ${result.roadmap.error}` : null;
     // The sync stored the parts of the sprint's issues with the board; read them back from there.
     const stored = await getLatestBoardSnapshot();
     const quiet = auto && (result.cached || !roadmapChanged(result.roadmap));

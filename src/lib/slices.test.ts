@@ -83,11 +83,11 @@ const CONVERTED = parseSlices(
 test("an issue's rows are its boxes, in the order of the body and with no link, then its open sub-issues, each with its link", () => {
   const parts = partsByIssue(CONVERTED, new Map([[URL(73), "dev" as const]])).get(7);
   assert.deepEqual(parts?.rows.map((r) => [r.title, r.status, r.tone, r.url, r.ref]), [
-    ["S1. Primeira parte.", "CONCLUÍDO", "green", null, ""],
-    ["S2. Segunda parte.", "BLOQUEADO", "red", null, ""],
-    ["S3. Terceira parte.", "A FAZER", "neutral", null, ""],
-    ["Slice 74", "A FAZER", "neutral", URL(74), "#74"],
-    ["Slice 73", "EM ANDAMENTO", "brand", URL(73), "#73"],
+    ["S1. Primeira parte.", "DONE", "green", null, ""],
+    ["S2. Segunda parte.", "BLOCKER", "red", null, ""],
+    ["S3. Terceira parte.", "OPEN", "neutral", null, ""],
+    ["Slice 74", "OPEN", "neutral", URL(74), "#74"],
+    ["Slice 73", "DEVELOPMENT", "brand", URL(73), "#73"],
   ]);
 });
 

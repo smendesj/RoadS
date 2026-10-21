@@ -79,8 +79,8 @@ do servidor da Vercel (foi o que revelou um erro de hidratação que o modo dev 
 **O que cada um cobre.** `audit:rls` chama a API pública do Supabase como cada papel e confere a regra de
 domínio no cadastro; sai com código 1 se achar furo (rode depois de toda migração que mexa em políticas) e
 avisa se o Site URL do Auth não é o da produção. O `e2e` dirige cada papel pelas telas (controles que devem e
-não devem existir, criar/editar/mover/apagar, notas, Config, inatividade, Sair, abas cruzadas, tema escuro,
-celular) e chama **cada ação do servidor direto**, sem a interface, conferindo o banco depois. Uma lista em
+não devem existir, criar/editar/mover/apagar, notas, Config, inatividade, Sign out, abas cruzadas, tema escuro,
+celular, e que fora da Prévia do Resumo nenhuma tela tem texto em português) e chama **cada ação do servidor direto**, sem a interface, conferindo o banco depois. Uma lista em
 `src/lib/actions/exports.test.ts` trava quais funções são endpoints: tudo que um arquivo `"use server"`
 exporta pode ser chamado por qualquer usuário logado.
 

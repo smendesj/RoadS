@@ -159,7 +159,7 @@ async function queueChange(itemId: string | null, action: "add" | "modify" | "re
   await supabase.from("roadmap_sync_queue").insert({ item_id: itemId, action, payload });
 }
 
-// "+ Novo item", in the Kanban's Open: the one place an item is born, with no week, in a type lane (NEW_ITEM_LANE). The
+// "+ New item", in the Kanban's Open: the one place an item is born, with no week, in a type lane (NEW_ITEM_LANE). The
 // lane is the server's to choose, never the caller's; planning it is dragging it to a week afterwards.
 export async function createRoadmapItem(): Promise<RoadmapItem> {
   const { userId } = await requireScrumMasterActor();
@@ -350,7 +350,7 @@ export async function saveRoadmapItemEdit(
   });
 }
 
-// Every Roadmap item is a GitHub issue. A GeoCloud item saved without one (a "+ Novo item" once it
+// Every Roadmap item is a GitHub issue. A GeoCloud item saved without one (a "+ New item" once it
 // has a real title) gets its issue here, Open on Project #7 (Development if it is in the current sprint); test data
 // (src/lib/test-data.ts) never does. A failure doesn't fail the save: the
 // next board sync retries it.
@@ -412,7 +412,7 @@ async function dropFutureWeekIfEmpty(laneId: string) {
 }
 
 // Dropped on a card of a week (`beforeId`), the item goes right before it, also within the week it is already in;
-// anywhere else in a week ("Mover para" too), last. Its own number is written under the actor's session (the RLS of
+// anywhere else in a week ("Move to" too), last. Its own number is written under the actor's session (the RLS of
 // 0007 is the backstop); the neighbours it renumbers may be anyone's, so the server writes them with the service role,
 // only now that the item is known to be the actor's to move (src/lib/week-order.ts). A group keeps its own order.
 // Dropped on the Kanban (KANBAN), the item is unplanned into a type lane the server picks (unplanItem).
@@ -480,7 +480,7 @@ const GEOCLOUD_ISSUE = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
 
 // Unplanning: a card dropped from a week on the Kanban. Called only after getItemAccess said the item is the actor's to
 // move. The item goes to the type lane of its issue's type label (read from GitHub now; with no token, or when the read
-// fails, there is none), else of the type it is stored with, else where "+ Novo item" puts one (unplanLane in
+// fails, there is none), else of the type it is stored with, else where "+ New item" puts one (unplanLane in
 // src/lib/issue-lane.ts, the rule the sync releases an item by). The server picks it, never the caller. An item already
 // in no week stays. Queued like any move, with both lanes; the future week it left, now empty, goes. Leaving the
 // current week, the Project goes back to Open through the sprint sync (only with its write switch on); leaving a week

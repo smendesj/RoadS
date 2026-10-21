@@ -9,8 +9,9 @@ import { cooldownFor } from "@/lib/auto-sync";
 import { mayPush } from "@/lib/bilateral-sync";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import type { SliceGroup } from "@/lib/slices";
+import { SYNC_SIGN_IN } from "@/lib/text/account";
 
-// Client entry point for the manual "Board sincronizado" button — dev, scrum_master
+// Client entry point for the manual Sync button — dev, scrum_master
 // and admin can all trigger it (it's a read-refresh, not an edit, so there's no
 // reason to restrict it the way Roadmap editing is restricted); anyone without a
 // real session gets turned away before we spend a GitHub API call on them.
@@ -22,10 +23,10 @@ export async function syncBoardAsViewer(opts?: { auto?: boolean }): Promise<Sync
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { ok: false, reason: "unauthenticated", message: "Entre para sincronizar o board." };
+  if (!user) return { ok: false, reason: "unauthenticated", message: SYNC_SIGN_IN };
 
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-  if (!profile?.role) return { ok: false, reason: "unauthenticated", message: "Entre para sincronizar o board." };
+  if (!profile?.role) return { ok: false, reason: "unauthenticated", message: SYNC_SIGN_IN };
 
   // Anyone may press; only a scrum master or an admin's press writes RoadS edits to GitHub (a dev's only pulls).
   return syncBoard({ brakeMs: cooldownFor({ auto }), push: mayPush(profile.role) });

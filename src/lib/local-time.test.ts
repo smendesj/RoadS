@@ -7,7 +7,7 @@ import { useLocalTime } from "./use-local-time.ts";
 
 const SYNCED_AT = "2026-10-01T11:16:55.000Z";
 
-test("the time is shown in the viewer's own time zone, 24h, pt-BR", () => {
+test("the time is shown in the viewer's own time zone, 24h", () => {
   assert.equal(formatLocalTime(SYNCED_AT, "America/Sao_Paulo"), "08:16:55");
   assert.equal(formatLocalTime(SYNCED_AT, "UTC"), "11:16:55");
 });

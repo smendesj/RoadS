@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { CONFIG } from "./text/account.ts";
 import { isValidPassword } from "./validation.ts";
 
 export type ResetPorts = {
@@ -9,7 +10,7 @@ export type ResetPorts = {
   flagMustReset: (userId: string) => Promise<void>;
 };
 
-// An admin's "Resetar senha". The order is the point: the e-mail goes out first, so if it can't be sent
+// An admin's "Reset password". The order is the point: the e-mail goes out first, so if it can't be sent
 // nothing else has happened, instead of the old password being thrown away with no way back in. The
 // address is read from the account, never taken from the caller. Returns the address for the screen.
 export async function resetPassword(userId: string, { getEmail, sendRecoveryEmail, setTemporaryPassword, flagMustReset }: ResetPorts): Promise<string> {
@@ -37,11 +38,11 @@ export function resetFailureMessage(error: unknown): string {
   // Two different Supabase limits come back as the same 429: one e-mail a minute per person, and a cap on
   // everything the project sends per hour. Only the first is cured by waiting a minute.
   if (/only request this after/i.test(text)) {
-    return "O e-mail de redefinição só pode ser enviado uma vez por minuto para a mesma pessoa. Tente de novo em instantes.";
+    return CONFIG.resetTooSoon;
   }
   if (status === 429 || code === "over_email_send_rate_limit" || /rate limit/i.test(text)) {
-    return "O limite de e-mails de autenticação do projeto foi atingido (o Supabase limita os envios por hora). Tente de novo mais tarde.";
+    return CONFIG.resetEmailCap;
   }
-  if (text === "user_not_found") return "Usuário não encontrado.";
-  return "Não foi possível concluir o reset agora. Tente de novo.";
+  if (text === "user_not_found") return CONFIG.userNotFound;
+  return CONFIG.resetFailed;
 }

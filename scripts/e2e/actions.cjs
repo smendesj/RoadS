@@ -87,7 +87,7 @@ async function call(ctx, id, args, pagePath) {
     }
     const viaLogin = await call(anon, A.createRoadmapItem, [], "/login");
     expect("nobody signed in -> an action posted to the PUBLIC /login page does nothing", viaLogin.kind !== "ok" || !/"id"/.test(viaLogin.returned), `${viaLogin.kind} ${viaLogin.returned.slice(0, 50)}`);
-    // "+ Novo item" puts an item in a type lane, never a week: no item of this run, in any lane, comes from nobody.
+    // "+ New item" puts an item in a type lane, never a week: no item of this run, in any lane, comes from nobody.
     expect("nobody signed in -> no item was created", (await svc.from("roadmap_items").select("id").gte("created_at", t0).not("created_by", "in", `(${L.ids.admin},${L.ids.sm})`)).data.length === 0);
 
     // A Comment the admin wrote (issue #23): only its author and the admin edit or delete it.
@@ -161,7 +161,7 @@ async function call(ctx, id, args, pagePath) {
 
     // password reset action, called straight: a weak password is refused by the SERVER, and nobody signed in gets nothing.
     const weak = await call(dev.context, A.completePasswordReset, ["abc"], "/redefinir-senha");
-    expect("dev -> completePasswordReset with a weak password: refused by the server, with the rule", weak.kind === "ok" && /"ok":false/.test(weak.returned) && /Mínimo 8/.test(weak.returned), weak.returned.slice(0, 80));
+    expect("dev -> completePasswordReset with a weak password: refused by the server, with the rule", weak.kind === "ok" && /"ok":false/.test(weak.returned) && /At least 8/.test(weak.returned), weak.returned.slice(0, 80));
     const anonReset = await call(anon, A.completePasswordReset, ["Strong-pass-9"], "/redefinir-senha");
     expect("nobody signed in -> completePasswordReset with a good password changes nothing (no session)", anonReset.kind === "ok" && /"ok":false/.test(anonReset.returned), anonReset.returned.slice(0, 90));
 
@@ -310,7 +310,7 @@ async function call(ctx, id, args, pagePath) {
     const r7 = await call(adm.context, A.listUsersForConfig, [], "/config");
     expect("admin -> listUsersForConfig works and does not leak password hashes", r7.kind === "ok" && !/encrypted_password|password_hash|\$2[aby]\$/i.test(r7.text), `${r7.kind}`);
     const r8 = await call(adm.context, A.resetUserPassword, [nonexistent], "/config");
-    expect("admin -> resetUserPassword on an unknown account answers 'not found' and touches nothing", r8.kind === "ok" && /"ok":false/.test(r8.returned) && /não encontrado/.test(r8.returned), r8.returned.slice(0, 90));
+    expect("admin -> resetUserPassword on an unknown account answers 'not found' and touches nothing", r8.kind === "ok" && /"ok":false/.test(r8.returned) && /User not found/.test(r8.returned), r8.returned.slice(0, 90));
 
     // an account flagged for a password change is refused by the privileged actions until it has changed it
     await svc.from("profiles").update({ must_reset_password: true }).eq("id", L.ids.sm);

@@ -21,7 +21,7 @@ const { BASE, expect, sleep, svc } = L;
     // ------------------------------------------------ Config: users table
     await page.getByRole("link", { name: "Config", exact: true }).click();
     await page.waitForURL("**/config");
-    await page.getByText("Usuários", { exact: true }).waitFor({ timeout: 30000 });
+    await page.getByText("Users", { exact: true }).waitFor({ timeout: 30000 });
     await page.locator("tbody tr").first().waitFor();
     const rows = page.locator("tbody tr");
     // Real accounts come and go (an invited CEO, say), so the table is held to the profiles table, not to a number.
@@ -30,7 +30,7 @@ const { BASE, expect, sleep, svc } = L;
     const adminRows = rows.filter({ hasText: "Admin" }).filter({ hasNot: page.locator("select") });
     expect("config: admin rows show a fixed 'Admin' badge (no role select)", (await count(adminRows)) === 2, String(await count(adminRows)));
     expect("config: every non-admin account gets a role select", (await count(page.locator("tbody select"))) === accounts - 2, String(await count(page.locator("tbody select"))));
-    expect("config: every row has 'Resetar senha'", (await count(page.getByRole("button", { name: "Resetar senha" }))) === accounts);
+    expect("config: every row has 'Reset password'", (await count(page.getByRole("button", { name: "Reset password" }))) === accounts);
 
     const devRow = rows.filter({ hasText: "RoadS Tester Dev" });
     await devRow.locator("select").selectOption("scrum_master");
@@ -65,25 +65,25 @@ const { BASE, expect, sleep, svc } = L;
 
     // ------------------------------------------------ Roadmap: full control over everybody's items
     await page.goto(BASE + "/roadmap", { waitUntil: "load" });
-    await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+    await page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
     // Each item of the test week shows twice: in the week, and in the Kanban's Open with the week's label.
     await page.getByText("[TESTE] item do scrum master").first().waitFor();
     const card = (title) => page.locator("div[draggable]", { hasText: title }).first();
     const openCard = (title) => page.locator('[data-kanban-column="open"] div[draggable]', { hasText: title }).first();
-    const btn = (c, name) => c.getByRole("button", { name, exact: true });
+    const btn = L.cardButton;
     for (const [label, title] of [["admin's own item", "[TESTE] item do admin"], ["Scrum Master's item", "[TESTE] item do scrum master"], ["seeded item", "[TESTE] item semeado (sem dono)"]]) {
       for (const [where, c] of [["in the week", card(title)], ["in the Kanban's Open", openCard(title)]]) {
-        expect(`roadmap: ${label} ${where} is draggable with Editar and Excluir`, (await c.getAttribute("draggable")) === "true" && (await count(btn(c, "Editar"))) === 1 && (await count(btn(c, "Excluir"))) === 1);
+        expect(`roadmap: ${label} ${where} is draggable with Edit and Delete`, (await c.getAttribute("draggable")) === "true" && (await count(btn(c, "Edit"))) === 1 && (await count(btn(c, "Delete"))) === 1);
       }
     }
-    expect("roadmap: no 'Config' tab missing, and the subtitle is the editor one", (await count(page.getByText(/defina o que entra e quando/))) === 1);
+    expect("roadmap: no 'Config' tab missing, and the subtitle is the editor one", (await count(page.getByText(/decide what goes in and when/))) === 1);
 
     // edit the Scrum Master's item (title) and the seeded item (title: only admin may)
-    await btn(card("[TESTE] item do scrum master"), "Editar").click();
+    await btn(card("[TESTE] item do scrum master"), "Edit").click();
     const editing = () => page.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])');
     await editing().locator("input").first().fill("[TESTE] SM item, renomeado pelo admin");
     await editing().getByPlaceholder("Write a Comment (optional)...").fill("[TESTE] nota do admin");
-    await btn(editing(), "Salvar").click();
+    await btn(editing(), "Save").click();
     await page.getByText("[TESTE] SM item, renomeado pelo admin").first().waitFor({ timeout: 15000 });
     await sleep(1200);
     const { data: renamed } = await svc.from("roadmap_items").select("title, created_by").eq("id", L.ids.smItem).single();
@@ -91,9 +91,9 @@ const { BASE, expect, sleep, svc } = L;
     expect("admin renames a Scrum Master's item; the owner stays the Scrum Master", renamed.title === "[TESTE] SM item, renomeado pelo admin" && renamed.created_by === L.ids.sm);
     expect("admin's note is stored under the admin's id", aNotes.length === 1 && aNotes[0].author_id === L.ids.admin, JSON.stringify(aNotes));
 
-    await btn(card("[TESTE] item semeado (sem dono)"), "Editar").click();
+    await btn(card("[TESTE] item semeado (sem dono)"), "Edit").click();
     await editing().locator("input").first().fill("[TESTE] semeado, renomeado pelo admin");
-    await btn(editing(), "Salvar").click();
+    await btn(editing(), "Save").click();
     await page.getByText("[TESTE] semeado, renomeado pelo admin").first().waitFor({ timeout: 15000 });
     await sleep(1000);
     const { data: seededRow } = await svc.from("roadmap_items").select("title").eq("id", L.ids.seeded).single();
@@ -103,7 +103,7 @@ const { BASE, expect, sleep, svc } = L;
     // Open, labelled with the week
     await svc.from("roadmap_items").update({ lane_id: "zz-test-a" }).eq("id", L.ids.smItem);
     await page.reload({ waitUntil: "load" });
-    await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+    await page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
     await openCard("[TESTE] SM item, renomeado pelo admin").waitFor({ timeout: 15000 });
     expect("roadmap: the Scrum Master's item with no week is in Open with no week label",
       (await count(openCard("[TESTE] SM item, renomeado pelo admin").locator("[data-week-label]"))) === 0);
@@ -132,29 +132,29 @@ const { BASE, expect, sleep, svc } = L;
     await page.setViewportSize({ width: 1440, height: 900 });
 
     // delete other people's items
-    await btn(card("[TESTE] semeado, renomeado pelo admin"), "Excluir").click();
+    await btn(card("[TESTE] semeado, renomeado pelo admin"), "Delete").click();
     await sleep(1800);
-    await btn(card("[TESTE] SM item, renomeado pelo admin"), "Excluir").click();
+    await btn(card("[TESTE] SM item, renomeado pelo admin"), "Delete").click();
     await sleep(1800);
     const left = (await svc.from("roadmap_items").select("id").in("id", [L.ids.seeded, L.ids.smItem])).data.length;
     expect("admin deletes a seeded item and a Scrum Master's item", left === 0, String(left));
 
     // ------------------------------------------------ dashboard + sync fails closed
     await page.goto(BASE + "/dashboard", { waitUntil: "load" });
-    await page.getByRole("button", { name: /Sincronizar/ }).click();
-    expect("dashboard: Sincronizar with no GitHub token fails closed", await page.getByText(/ainda não configurada/).waitFor({ timeout: 20000 }).then(() => true, () => false));
+    await page.getByRole("button", { name: /^Sync$/ }).click();
+    expect("dashboard: Sync with no GitHub token fails closed", await page.getByText(/not configured yet/).waitFor({ timeout: 20000 }).then(() => true, () => false));
 
-    // ------------------------------------------------ idle and Sair
+    // ------------------------------------------------ idle and Sign out
     await page.evaluate(() => localStorage.setItem("roads-last-activity", String(Date.now() - (10 * 60 + 1) * 1000)));
     await page.waitForURL("**/login", { timeout: 45000 });
     expect("idle: 10 minutes and 1 second signs the admin out", true);
     await L.login(s);
     await menu.waitFor();
     await menu.click();
-    await page.getByRole("button", { name: "Sair" }).click();
+    await page.getByRole("button", { name: "Sign out" }).click();
     await page.waitForURL("**/login");
     await page.goto(BASE + "/config", { waitUntil: "load" });
-    expect("logout: Sair ends the session (/config bounces to /login)", page.url().endsWith("/login"), page.url());
+    expect("logout: Sign out ends the session (/config bounces to /login)", page.url().endsWith("/login"), page.url());
 
     const noise = s.problems.filter((p) => !/auth\/v1\/token|ERR_FAILED|Failed to load resource/.test(p));
     expect("no console errors, hydration errors or failed requests during the whole run", noise.length === 0, noise.slice(0, 3).join(" | "));

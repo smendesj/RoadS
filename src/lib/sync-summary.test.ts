@@ -35,12 +35,12 @@ test("a failed sync keeps its reason and a message in the user's language", () =
   assert.deepEqual(syncSummary({ ok: false, reason: "not_configured" }, false), {
     ok: false,
     reason: "not_configured",
-    message: "Sincronização do GitHub ainda não configurada (falta GITHUB_TOKEN no servidor).",
+    message: "GitHub Sync is not configured yet (GITHUB_TOKEN is missing on the server).",
   });
-  assert.deepEqual(syncSummary({ ok: false, reason: "error", message: "GitHub respondeu 502" }, false), {
+  assert.deepEqual(syncSummary({ ok: false, reason: "error", message: "GitHub answered 502" }, false), {
     ok: false,
     reason: "error",
-    message: "GitHub respondeu 502",
+    message: "GitHub answered 502",
   });
 });
 

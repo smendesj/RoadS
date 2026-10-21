@@ -36,7 +36,7 @@ async function github(token: string, path: string, init: { method: string; body:
     cache: "no-store",
   });
   const json = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(`GitHub respondeu ${res.status}${json?.message ? `: ${json.message}` : ""}`);
+  if (!res.ok) throw new Error(`GitHub answered ${res.status}${json?.message ? `: ${json.message}` : ""}`);
   if (json?.errors?.length) throw new Error(json.errors[0].message);
   return json;
 }
@@ -59,7 +59,7 @@ export async function readIssueLabels(
     cache: "no-store",
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!res.ok) throw new Error(`GitHub respondeu ${res.status} ao ler a issue`);
+  if (!res.ok) throw new Error(`GitHub answered ${res.status} reading the issue`);
   const json: { labels?: (string | { name?: string })[] } = await res.json();
   return (json.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean);
 }
@@ -213,7 +213,7 @@ export async function readIssueState(token: string, number: number, { fetch: fet
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`GitHub respondeu ${res.status} ao ler a issue`);
+  if (!res.ok) throw new Error(`GitHub answered ${res.status} reading the issue`);
   const json: { state?: string } = await res.json();
   return json.state === "closed" ? "closed" : "open";
 }

@@ -1,27 +1,30 @@
 import type { SprintSyncSummary } from "./sprint-status-sync.ts";
 
+/** The generic line of a sync that failed without a message of its own. */
+export const SYNC_FAILED = "Sync failed.";
+
 // The line shown when a GitHub sync didn't run, the same wherever it was started from.
 export function syncFailureMessage(result: { reason: string; message?: string }): string {
-  if (result.reason === "not_configured") return "Sincronização do GitHub ainda não configurada (falta GITHUB_TOKEN no servidor).";
-  if (result.reason === "unauthenticated") return result.message ?? "Entre para sincronizar o board.";
-  return result.message ?? "Erro ao sincronizar.";
+  if (result.reason === "not_configured") return "GitHub Sync is not configured yet (GITHUB_TOKEN is missing on the server).";
+  if (result.reason === "unauthenticated") return result.message ?? "Sign in to sync the board.";
+  return result.message ?? SYNC_FAILED;
 }
 
 // How the current sprint and the Project's Development followed each other; nothing when neither had to.
 function sprintLine(sprint: SprintSyncSummary): string {
-  if (sprint.error) return ` A sprint atual não acompanhou o Project: ${sprint.error}.`;
+  if (sprint.error) return ` The current sprint did not follow the Project: ${sprint.error}.`;
   const parts = [
-    sprint.pulled ? `${sprint.pulled} issue(s) puxada(s) para a sprint atual` : "",
-    sprint.released ? `${sprint.released} devolvida(s) ao Roadmap` : "",
-    sprint.written ? `${sprint.written} status escrito(s) no Project` : "",
-    sprint.wouldWrite ? `${sprint.wouldWrite} status seriam escritos no Project, mas a escrita está desligada` : "",
-    sprint.failed ? `${sprint.failed} falharam` : "",
-    sprint.stuck ? `${sprint.stuck} sem bloco para voltar ao Roadmap` : "",
+    sprint.pulled ? `${sprint.pulled} issue(s) pulled into the current sprint` : "",
+    sprint.released ? `${sprint.released} returned to the Roadmap` : "",
+    sprint.written ? `${sprint.written} status(es) written to the Project` : "",
+    sprint.wouldWrite ? `${sprint.wouldWrite} status(es) would be written to the Project, but writing is off` : "",
+    sprint.failed ? `${sprint.failed} failed` : "",
+    sprint.stuck ? `${sprint.stuck} with no Roadmap block to return to` : "",
   ].filter(Boolean);
-  return parts.length ? ` Sprint atual e Project: ${parts.join(", ")}.` : "";
+  return parts.length ? ` Current sprint and Project: ${parts.join(", ")}.` : "";
 }
 
-// What the Sincronizar buttons say after a sync that ran: how many issues the Roadmap took in and let go.
+// What the Sync buttons say after a sync that ran: how many issues the Roadmap took in and let go.
 export function roadmapSyncMessage(roadmap: {
   added: number;
   removed: number;
@@ -36,10 +39,10 @@ export function roadmapSyncMessage(roadmap: {
 }): string {
   if (roadmap.error) return roadmap.error;
   return (
-    `${roadmap.added} issue(s) adicionada(s), ${roadmap.removed} encerrada(s) ou fora do Project removida(s)` +
-    (roadmap.issuesCreated ? `, ${roadmap.issuesCreated} issue(s) criada(s) para itens sem issue.` : ".") +
-    (roadmap.untyped ? ` ${roadmap.untyped} issue(s) aberta(s) sem label type:* ficaram de fora até ganharem tipo.` : "") +
-    (roadmap.fields ? fieldsLine(roadmap.fields) : roadmap.retitled ? ` ${roadmap.retitled} título(s) do Roadmap acompanharam a renomeação da issue no GitHub.` : "") +
+    `${roadmap.added} issue(s) added, ${roadmap.removed} closed or off the Project removed` +
+    (roadmap.issuesCreated ? `, ${roadmap.issuesCreated} issue(s) created for items without an issue.` : ".") +
+    (roadmap.untyped ? ` ${roadmap.untyped} open issue(s) without a type:* label left out until they get a type.` : "") +
+    (roadmap.fields ? fieldsLine(roadmap.fields) : roadmap.retitled ? ` ${roadmap.retitled} Roadmap title(s) followed the issue's rename on GitHub.` : "") +
     (roadmap.comments ? commentsLine(roadmap.comments) : "") +
     (roadmap.assignees ? assigneesLine(roadmap.assignees) : "") +
     (roadmap.sprint ? sprintLine(roadmap.sprint) : "")
@@ -48,35 +51,35 @@ export function roadmapSyncMessage(roadmap: {
 
 // The two-way sync of Assignees (issue #23): items whose Assignees came from GitHub or went there.
 function assigneesLine(assignees: { pulled: number; pushed: number; failed: number; error?: string }): string {
-  if (assignees.error) return ` Os Assignees não sincronizaram: ${assignees.error}.`;
+  if (assignees.error) return ` Assignees did not sync: ${assignees.error}.`;
   const parts = [
-    assignees.pulled ? `${assignees.pulled} item(ns) trazido(s) do GitHub` : "",
-    assignees.pushed ? `${assignees.pushed} gravado(s) no GitHub` : "",
-    assignees.failed ? `${assignees.failed} falharam` : "",
+    assignees.pulled ? `${assignees.pulled} item(s) pulled from GitHub` : "",
+    assignees.pushed ? `${assignees.pushed} pushed to GitHub` : "",
+    assignees.failed ? `${assignees.failed} failed` : "",
   ].filter(Boolean);
   return parts.length ? ` Assignees: ${parts.join(", ")}.` : "";
 }
 
 // The two-way sync of Comments (issue #23): created, edited or deleted on either side.
 function commentsLine(comments: { pulled: number; pushed: number; failed: number; error?: string }): string {
-  if (comments.error) return ` Os Comments não sincronizaram: ${comments.error}.`;
+  if (comments.error) return ` Comments did not sync: ${comments.error}.`;
   const parts = [
-    comments.pulled ? `${comments.pulled} trazido(s) do GitHub` : "",
-    comments.pushed ? `${comments.pushed} gravado(s) no GitHub` : "",
-    comments.failed ? `${comments.failed} falharam` : "",
+    comments.pulled ? `${comments.pulled} pulled from GitHub` : "",
+    comments.pushed ? `${comments.pushed} pushed to GitHub` : "",
+    comments.failed ? `${comments.failed} failed` : "",
   ].filter(Boolean);
   return parts.length ? ` Comments: ${parts.join(", ")}.` : "";
 }
 
 // The two-way sync of Title and Description (issue #22): what came from GitHub, what went there, what failed.
 function fieldsLine(fields: { pulled: number; pushed: number; failed: number; error?: string }): string {
-  if (fields.error) return ` Os campos das issues não sincronizaram: ${fields.error}.`;
+  if (fields.error) return ` Issue fields did not sync: ${fields.error}.`;
   const parts = [
-    fields.pulled ? `${fields.pulled} campo(s) trazido(s) do GitHub` : "",
-    fields.pushed ? `${fields.pushed} campo(s) gravado(s) no GitHub` : "",
-    fields.failed ? `${fields.failed} item(ns) falharam` : "",
+    fields.pulled ? `${fields.pulled} field(s) pulled from GitHub` : "",
+    fields.pushed ? `${fields.pushed} field(s) pushed to GitHub` : "",
+    fields.failed ? `${fields.failed} item(s) failed` : "",
   ].filter(Boolean);
-  return parts.length ? ` Campos das issues: ${parts.join(", ")}.` : "";
+  return parts.length ? ` Issue fields: ${parts.join(", ")}.` : "";
 }
 
 // Whether a sync did anything worth telling: a page that syncs by itself every few minutes says nothing otherwise.
@@ -90,6 +93,6 @@ export function roadmapChanged(roadmap: Parameters<typeof roadmapSyncMessage>[0]
 // What the button says when the brake answered (a sync started less than 30 s ago, or is still running): nothing
 // was read now, and that sync may have failed, so it never says it worked.
 export function brakeMessage(retryInMs: number | undefined): string {
-  if (retryInMs === undefined) return "Uma sincronização começou há menos de 30 s ou ainda está em andamento; tente de novo em instantes.";
-  return `Uma sincronização começou há menos de 30 s ou ainda está em andamento; a próxima pode sair em ${Math.max(1, Math.ceil(retryInMs / 1000))} s.`;
+  if (retryInMs === undefined) return "A sync started less than 30 s ago or is still running; try again in a moment.";
+  return `A sync started less than 30 s ago or is still running; the next one can run in ${Math.max(1, Math.ceil(retryInMs / 1000))} s.`;
 }
