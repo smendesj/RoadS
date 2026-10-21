@@ -124,6 +124,14 @@ export function statusOfIssue({ closed, card }: { closed: boolean; card: CardSta
 }
 
 /**
+ * The Status decision for an item whose issue is closed (not among the open issues the sync reads): the closed issue is
+ * Done, so an item RoadS didn't move becomes Done, and an item taken out of Done in RoadS reopens the issue.
+ */
+export function closedIssueStatus(f: { roads: ItemStatus; base: string | null; roadsAt: string | null }): FieldDecision {
+  return decideField({ roads: f.roads, base: f.base, github: "Done", roadsAt: f.roadsAt, githubAt: null });
+}
+
+/**
  * What GitHub gets when RoadS's Status wins over the issue's: Done closes the issue as completed, leaving Done reopens
  * it, and the card's Status follows (an open item is Development in the current sprint, Open outside it).
  */

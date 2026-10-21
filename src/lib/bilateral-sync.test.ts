@@ -11,6 +11,7 @@ import {
   replaceSolucao,
   selectorStatus,
   statusOfIssue,
+  closedIssueStatus,
   statusWrites,
   storedStatus,
   tipoOfLabels,
@@ -210,4 +211,17 @@ test("a Week brought from GitHub moves the item into that week, an empty one bac
   assert.deepEqual(weekPull("2026-10-19", "2026-10-21"), { to: "week", monday: "2026-10-19" });
   assert.deepEqual(weekPull("", "2026-10-21"), { to: "block" });
   assert.equal(weekPull("2026-10-12", "2026-10-21"), null);
+});
+
+// ---- P2: an issue closed outside RoadS, which the open issues read by the sync don't carry
+
+test("an issue closed on GitHub makes its item Done, whether the base was Open or never read", () => {
+  assert.equal(closedIssueStatus({ roads: "Open", base: "Open", roadsAt: null }), "pull");
+  assert.equal(closedIssueStatus({ roads: "Blocker", base: "Blocker", roadsAt: null }), "pull");
+  assert.equal(closedIssueStatus({ roads: "Open", base: null, roadsAt: null }), "pull");
+});
+
+test("an item taken out of Done in RoadS reopens its closed issue, and a Done item has nothing to do", () => {
+  assert.equal(closedIssueStatus({ roads: "Open", base: "Done", roadsAt: "2026-10-21T10:00:00Z" }), "push");
+  assert.equal(closedIssueStatus({ roads: "Done", base: "Open", roadsAt: null }), "none");
 });
