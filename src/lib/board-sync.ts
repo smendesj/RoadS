@@ -30,11 +30,12 @@ import "server-only";
 // endpoint any signed-in user can call directly, and syncBoard authorizes nobody (the cron has no
 // session) and writes with the admin client.
 
-import { createGeoCloudIssue, GEOCLOUD_REPO, readIssueChangeTimes, setProjectStatus, updateIssue } from "@/lib/github";
+import { createGeoCloudIssue, EFFORT_FIELD_ID, GEOCLOUD_REPO, PRIORIDADE_FIELD_ID, readBoardOptions, readIssueChangeTimes, setProjectOption, setProjectStatus, STACK_FIELD_ID, updateIssue, type IssueChange, type IssueChangeTimes } from "@/lib/github";
 import { importableIssues, isTestData, mayGetIssue } from "@/lib/test-data";
-import { decideField, extractSolucao, replaceSolucao } from "@/lib/bilateral-sync";
+import { decideField, extractSolucao, labelsAfter, nativeTypeOf, replaceSolucao, tipoOfLabels, type LabelledField } from "@/lib/bilateral-sync";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
-import { isStack, isTipo } from "@/lib/issue-fields";
+import { isEffort, isStack, isTipo, PRIORIDADE_OPTION_IDS, prioridadeOfOption, STACK_OPTION_IDS, stackOfOption, type Stack } from "@/lib/issue-fields";
+import type { Prioridade } from "@/lib/types";
 import { laneForLabels, releaseLane, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { planRotation, rotationIsIdle } from "@/lib/sprint-rotation";
@@ -98,6 +99,9 @@ const QUERY = `
             content { ... on Issue { number title url createdAt updatedAt repository { nameWithOwner } } }
             fieldValueByName(name: "Status") {
               ... on ProjectV2ItemFieldSingleSelectValue { name updatedAt }
+            }
+            fieldValues(first: 30) {
+              nodes { ... on ProjectV2ItemFieldSingleSelectValue { optionId updatedAt field { ... on ProjectV2FieldCommon { id } } } }
             }
           }
         }
@@ -244,10 +248,10 @@ async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
       console.error("syncBoard: failed to persist snapshot", persistError);
     }
 
-    // Title and Description go both ways between each item and its issue; a failure here doesn't fail the board sync.
+    // Each item's fields go both ways with its issue (syncIssueFields); a failure here doesn't fail the board sync.
     const fields: (FieldsSummary & { retitled?: number }) | null = cards.size
       ? await readOpen()
-          .then((open) => syncIssueFields(token, open, push))
+          .then((open) => syncIssueFields(token, open, push, cards))
           .catch((e) => {
             console.error("syncBoard: two-way fields failed", e);
             return { pulled: 0, pushed: 0, failed: 0, error: e instanceof Error ? e.message : "Erro ao sincronizar os campos." };
@@ -366,22 +370,56 @@ async function rotateSprints(doneUrls: Set<string>, now = new Date()): Promise<v
 
 type Admin = ReturnType<typeof createAdminClient>;
 
-// Title and Description go both ways between each item and its open issue (src/lib/bilateral-sync.ts has the rule;
-// the Description is the issue's "## Solução" section). A value brought in is queued as a modify so FrontlightS
-// sees it, as titles always were; a value written to GitHub changes only that field of the issue. What the issue
-// said is remembered per field (github_seen), and the title also in github_title, which older readers use. One item
-// failing is counted and the others go on.
-type SyncedField = "title" | "description";
+// Title, Description, Type, Stack, Priority and Effort go both ways between each item and its open issue
+// (src/lib/bilateral-sync.ts has the rule). The Description is the issue's "## Solução" section; the Type is its type:
+// label, and the issue's native type follows it; Stack, Priority and Effort are its card's fields on Project #7, matched
+// by id (Effort by its option's name, see EFFORT_FIELD_ID), and Stack and Priority carry the labels they imply (area:,
+// priority:high). A field the issue leaves empty is a gap RoadS fills with the item's own value; an option RoadS doesn't
+// offer (a Stack named after a person) leaves the field alone. A value brought in is queued as a modify so FrontlightS
+// sees it, as titles always were; a value written to GitHub changes only that field of the issue (labels of other
+// families are kept). What the issue said is remembered per field (github_seen), and the title also in github_title,
+// which older readers use. One item failing is counted and the others go on.
+type SyncedField = "title" | "description" | "tipo" | "stack" | "prioridade" | "effort";
+const ISSUE_FIELDS = ["title", "description", "tipo"] as const;
+const BOARD_FIELDS = { stack: STACK_FIELD_ID, prioridade: PRIORIDADE_FIELD_ID, effort: EFFORT_FIELD_ID } as const;
+type BoardField = keyof typeof BOARD_FIELDS;
 
-async function syncIssueFields(token: string, open: OpenIssue[], push: boolean): Promise<FieldsSummary & { retitled: number }> {
+async function syncIssueFields(
+  token: string,
+  open: OpenIssue[],
+  push: boolean,
+  cards: Map<number, ProjectCard>
+): Promise<FieldsSummary & { retitled: number }> {
   const admin = createAdminClient();
   const { data: items, error } = await admin
     .from("roadmap_items")
-    .select("id, title, description, github_issue_url, github_seen, field_changed_at");
+    .select("id, title, description, tipo, stack, prioridade, effort, github_issue_url, github_seen, field_changed_at");
   if (error) throw error;
 
+  // The board's options as they are now, read once: Effort's names both ways, and no write to an option the board
+  // no longer has. Unreadable, the card fields wait for the next sync and the issue's own fields still go.
+  const options = await readBoardOptions(token).catch((e) => {
+    console.error("syncBoard: board options unreadable, card fields skipped", e);
+    return null;
+  });
+  const effortOf = (id: string) => {
+    const name = options?.get(EFFORT_FIELD_ID)?.get(id);
+    return name && isEffort(name) ? name : null;
+  };
+  const fromOption: Record<BoardField, (id: string) => string | null> = { stack: stackOfOption, prioridade: prioridadeOfOption, effort: effortOf };
+  const optionFor = (field: BoardField, value: string): string | null => {
+    const id =
+      field === "stack"
+        ? STACK_OPTION_IDS[value as Stack]
+        : field === "prioridade"
+          ? PRIORIDADE_OPTION_IDS[value as Prioridade]
+          : [...(options?.get(EFFORT_FIELD_ID) ?? new Map<string, string>())].find(([, name]) => name === value)?.[0];
+    return id && options?.get(BOARD_FIELDS[field])?.has(id) ? id : null;
+  };
+
   const byNumber = new Map(open.map((i) => [i.number, i]));
-  type Row = { id: string; number: number; issue: OpenIssue; seen: Record<string, string>; changedAt: Record<string, string>; values: Record<SyncedField, { roads: string; github: string }> };
+  type Side = { roads: string; github: string; githubAt?: string | null };
+  type Row = { id: string; number: number; issue: OpenIssue; card?: ProjectCard; seen: Record<string, string>; changedAt: Record<string, string>; values: Partial<Record<SyncedField, Side>> };
   const rows: Row[] = [];
   for (const item of items ?? []) {
     if (isTestData(item.title)) continue;
@@ -391,54 +429,95 @@ async function syncIssueFields(token: string, open: OpenIssue[], push: boolean):
     const seen: Record<string, string> = { ...((item.github_seen as Record<string, string> | null) ?? {}) };
     // A body without a Solução section says nothing about the Description: it reads as unchanged on GitHub.
     const githubDescription = extractSolucao(issue.body) ?? seen.description ?? item.description ?? "";
-    rows.push({
-      id: item.id,
-      number,
-      issue,
-      seen,
-      changedAt: (item.field_changed_at as Record<string, string> | null) ?? {},
-      values: {
-        title: { roads: item.title, github: issue.title.trim() },
-        description: { roads: item.description ?? "", github: githubDescription },
-      },
-    });
+    const values: Row["values"] = {
+      title: { roads: item.title, github: issue.title.trim() },
+      description: { roads: item.description ?? "", github: githubDescription },
+      tipo: { roads: item.tipo ?? "", github: tipoOfLabels(issue.labels) ?? "" },
+    };
+    // The card's fields, when the card and its values were read: an empty field reads "", an option RoadS doesn't
+    // offer leaves the field out.
+    const card = cards.get(number);
+    if (card?.options && options) {
+      const roadsOf: Record<BoardField, string> = { stack: isStack(item.stack) ? item.stack : "", prioridade: item.prioridade ?? "", effort: item.effort ?? "" };
+      for (const field of Object.keys(BOARD_FIELDS) as BoardField[]) {
+        const value = card.options[BOARD_FIELDS[field]];
+        const github = value ? fromOption[field](value.optionId) : "";
+        if (github !== null) values[field] = { roads: roadsOf[field], github, githubAt: value?.updatedAt ?? null };
+      }
+    }
+    rows.push({ id: item.id, number, issue, card, seen, changedAt: (item.field_changed_at as Record<string, string> | null) ?? {}, values });
   }
 
-  const decide = (row: Row, field: SyncedField, times?: { titleAt: string | null; bodyAt: string | null }) =>
-    decideField({
-      roads: row.values[field].roads,
-      base: field in row.seen ? row.seen[field] : null,
-      github: row.values[field].github,
-      roadsAt: row.changedAt[field] ?? null,
-      githubAt: (field === "title" ? times?.titleAt : times?.bodyAt) ?? null,
-    });
-  // GitHub's change times are read only for the fields both sides moved, the one case the rule needs them.
-  const bothMoved = rows.filter((r) =>
-    (["title", "description"] as const).some((f) => f in r.seen && r.values[f].roads !== r.seen[f] && r.values[f].github !== r.seen[f] && r.values[f].roads !== r.values[f].github)
-  );
-  const times = bothMoved.length ? await readIssueChangeTimes(token, bothMoved.map((r) => r.number)) : new Map();
+  const moved = (row: Row, field: SyncedField) => {
+    const v = row.values[field];
+    return !!v && field in row.seen && v.roads !== row.seen[field] && v.github !== row.seen[field] && v.roads !== v.github;
+  };
+  // GitHub's change times of the issue's own fields are read only for the fields both sides moved, the one case the
+  // rule needs them; the card's fields carry theirs.
+  const bothMoved = rows.filter((r) => ISSUE_FIELDS.some((f) => moved(r, f)));
+  const times = bothMoved.length ? await readIssueChangeTimes(token, bothMoved.map((r) => r.number)) : new Map<number, IssueChangeTimes>();
+  const githubAtOf = (field: SyncedField, side: Side, t?: IssueChangeTimes) =>
+    field === "title" ? t?.titleAt : field === "description" ? t?.bodyAt : field === "tipo" ? t?.labelAt : side.githubAt;
 
   const summary = { pulled: 0, pushed: 0, failed: 0, retitled: 0 };
   for (const row of rows) {
     try {
       const pulled: Partial<Record<SyncedField, string>> = {};
-      const pushed: { title?: string; body?: string } = {};
+      const change: IssueChange = {};
+      const cardWrites: [string, string][] = [];
+      const relabel = new Set<LabelledField>();
+      const pushedFields: SyncedField[] = [];
       const seen = { ...row.seen };
-      for (const field of ["title", "description"] as const) {
-        const { roads, github } = row.values[field];
-        const decision = decide(row, field, times.get(row.number));
+      for (const [field, side] of Object.entries(row.values) as [SyncedField, Side][]) {
+        const { roads, github } = side;
+        const decision = decideField({
+          roads,
+          base: field in row.seen ? row.seen[field] : null,
+          github,
+          roadsAt: row.changedAt[field] ?? null,
+          githubAt: githubAtOf(field, side, times.get(row.number)) ?? null,
+          fillGap: field !== "title" && field !== "description",
+        });
         if (decision === "pull") {
           pulled[field] = github;
           seen[field] = github;
+          // A Stack or Priority changed on the board brings the labels it implies along on the issue.
+          if (field === "stack" || field === "prioridade") relabel.add(field);
         } else if (decision === "push" && push) {
-          if (field === "title") pushed.title = roads;
-          else pushed.body = replaceSolucao(row.issue.body, roads);
+          if (field === "title") change.title = roads;
+          else if (field === "description") change.body = replaceSolucao(row.issue.body, roads);
+          else if (field === "tipo") relabel.add("tipo");
+          else {
+            const option = row.card && optionFor(field, roads);
+            if (!option) continue; // the board has no such option (yet): nothing is written, and nothing remembered
+            cardWrites.push([BOARD_FIELDS[field], option]);
+            if (field !== "effort") relabel.add(field);
+          }
           seen[field] = roads;
+          pushedFields.push(field);
         } else if (decision === "none") {
           seen[field] = github;
         }
       }
-      if (pushed.title !== undefined || pushed.body !== undefined) await updateIssue(token, row.number, pushed);
+
+      // The labels the final values imply, and the native type the Type implies: written only by those who push.
+      let gapsFilled = false;
+      if (push) {
+        const final = (field: "tipo" | "stack" | "prioridade") => pulled[field] ?? row.values[field]?.roads ?? "";
+        const [t, s, p] = [final("tipo"), final("stack"), final("prioridade")];
+        const tipo = isTipo(t) ? t : null;
+        const labels = labelsAfter(
+          row.issue.labels,
+          { tipo, stack: isStack(s) ? s : null, prioridade: Object.hasOwn(PRIORIDADE_OPTION_IDS, p) ? (p as Prioridade) : null },
+          relabel
+        );
+        if (labels.join("\n") !== row.issue.labels.join("\n")) change.labels = labels;
+        if (tipo && row.issue.type !== nativeTypeOf(tipo)) change.type = nativeTypeOf(tipo);
+        gapsFilled = (change.labels !== undefined || change.type !== undefined) && !pushedFields.length;
+      }
+
+      if (Object.keys(change).length) await updateIssue(token, row.number, change);
+      for (const [field, option] of cardWrites) await setProjectOption(token, row.card!.itemId, field, option);
       const update: Record<string, unknown> = { github_seen: seen, github_title: seen.title ?? null, ...pulled };
       const { error: updateError } = await admin.from("roadmap_items").update(update).eq("id", row.id);
       if (updateError) throw updateError;
@@ -452,7 +531,8 @@ async function syncIssueFields(token: string, open: OpenIssue[], push: boolean):
       }
       summary.pulled += Object.keys(pulled).length;
       if (pulled.title !== undefined) summary.retitled++;
-      summary.pushed += (pushed.title !== undefined ? 1 : 0) + (pushed.body !== undefined ? 1 : 0);
+      // A write that only filled the issue's gaps (labels, native type) counts as one field written.
+      summary.pushed += pushedFields.length + (gapsFilled ? 1 : 0);
     } catch (e) {
       console.error("syncBoard: two-way fields failed for an item", e);
       summary.failed++;
@@ -605,7 +685,8 @@ async function syncSprintWithProject(
 // Each add/remove is queued in roadmap_sync_queue so FrontlightS writes it into ROADMAP.md.
 const ISSUE_URL = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
 
-type OpenIssue = { number: number; title: string; url: string; body: string; labels: string[] };
+/** An open issue as the sync reads it; `type` is its native type's name (Bug, Feature, Task), null without one. */
+type OpenIssue = { number: number; title: string; url: string; body: string; labels: string[]; type: string | null };
 
 async function fetchOpenIssues(token: string): Promise<OpenIssue[]> {
   const issues: OpenIssue[] = [];
@@ -615,9 +696,9 @@ async function fetchOpenIssues(token: string): Promise<OpenIssue[]> {
       cache: "no-store",
     });
     if (!res.ok) throw new Error(`GitHub respondeu ${res.status} ao listar as issues abertas`);
-    const batch: { number: number; title: string; html_url: string; body: string | null; labels: { name: string }[]; pull_request?: unknown }[] = await res.json();
+    const batch: { number: number; title: string; html_url: string; body: string | null; labels: { name: string }[]; type?: { name?: string } | null; pull_request?: unknown }[] = await res.json();
     for (const it of batch) {
-      if (!it.pull_request) issues.push({ number: it.number, title: it.title, url: it.html_url, body: it.body ?? "", labels: it.labels.map((l) => l.name) });
+      if (!it.pull_request) issues.push({ number: it.number, title: it.title, url: it.html_url, body: it.body ?? "", labels: it.labels.map((l) => l.name), type: it.type?.name ?? null });
     }
     if (batch.length < 100) return issues;
   }
@@ -670,7 +751,7 @@ async function reconcileRoadmapWithIssues(
           prioridade: item.prioridade,
           effort: item.effort,
           tipo: isTipo(item.tipo) ? item.tipo : "feature",
-          stack: isStack(item.stack) ? item.stack : "Geral",
+          stack: isStack(item.stack) ? item.stack : "General",
         },
         item.lane_id === current ? "Development" : "Open"
       );

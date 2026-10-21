@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { decideField, extractSolucao, mayPush, replaceSolucao } from "./bilateral-sync.ts";
+import { decideField, extractSolucao, labelsAfter, mayPush, nativeTypeOf, replaceSolucao, tipoOfLabels } from "./bilateral-sync.ts";
 
 const at = (h: number) => `2026-10-21T${String(h).padStart(2, "0")}:00:00Z`;
 
@@ -57,4 +57,54 @@ test("writing the Description replaces only the Solução section and keeps the 
 
 test("a body without a Solução section gets one at the end, and the rest stays as it was", () => {
   assert.equal(replaceSolucao("## Problema\n\nDor.", "Texto novo."), "## Problema\n\nDor.\n\n## Solução\n\nTexto novo.\n");
+});
+
+// ---- Type, Stack, Priority and Effort (S3), with the labels they imply and the native type
+
+test("a field the issue leaves empty is a gap: RoadS fills it with its own value, even on the first sync", () => {
+  assert.equal(decideField({ roads: "High", base: null, github: "", roadsAt: null, githubAt: null, fillGap: true }), "push");
+  assert.equal(decideField({ roads: "High", base: "Low", github: "", roadsAt: null, githubAt: null, fillGap: true }), "push");
+  // Without the gap rule (Title, Description), an empty GitHub value is a value like any other.
+  assert.equal(decideField({ roads: "Texto", base: null, github: "", roadsAt: null, githubAt: null }), "pull");
+  // A RoadS without a value takes the issue's, as on any first sync.
+  assert.equal(decideField({ roads: "", base: null, github: "Backend", roadsAt: null, githubAt: null, fillGap: true }), "pull");
+});
+
+test("the Type is the issue's type: label; type:epic and unknown types are not one", () => {
+  assert.equal(tipoOfLabels(["area:backend", "type:bug"]), "bug");
+  assert.equal(tipoOfLabels(["type:epic", "type:spike"]), "spike");
+  assert.equal(tipoOfLabels(["type:epic", "priority:high"]), null);
+});
+
+test("the native type follows the Type: a bug is a Bug, a feature a Feature, the rest a Task", () => {
+  assert.equal(nativeTypeOf("bug"), "Bug");
+  assert.equal(nativeTypeOf("feature"), "Feature");
+  assert.equal(nativeTypeOf("chore"), "Task");
+  assert.equal(nativeTypeOf("spike"), "Task");
+});
+
+test("a Type, Stack or Priority that changed swaps the labels of its family, and leaves every other label alone", () => {
+  const labels = ["type:feature", "area:frontend", "priority:high", "type:epic", "needs-decision"];
+  assert.deepEqual(labelsAfter(labels, { tipo: "bug", stack: "Backend", prioridade: "Low" }, new Set(["tipo", "stack", "prioridade"])), [
+    "type:epic",
+    "needs-decision",
+    "type:bug",
+    "area:backend",
+  ]);
+  assert.deepEqual(labelsAfter(["area:backend"], { tipo: "feature", stack: "Frontend/Backend", prioridade: "Medium" }, new Set(["stack"])), [
+    "type:feature",
+    "area:frontend",
+    "area:backend",
+  ]);
+});
+
+test("a field that did not change only fills the labels it implies and never removes one someone put there", () => {
+  assert.deepEqual(labelsAfter(["area:frontend"], { tipo: "chore", stack: "Backend", prioridade: "Critical" }, new Set()), [
+    "area:frontend",
+    "type:chore",
+    "area:backend",
+    "priority:high",
+  ]);
+  // A type label already there is the issue's type: no second one is added.
+  assert.deepEqual(labelsAfter(["type:bug"], { tipo: "feature", stack: null, prioridade: null }, new Set()), ["type:bug"]);
 });
