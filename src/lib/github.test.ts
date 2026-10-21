@@ -12,7 +12,7 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
-const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment } = await import("./github.ts");
+const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment, readIssueAssignees, setIssueAssignees } = await import("./github.ts");
 
 /** A GitHub that records each request (method, path, body) and answers with `answer`. */
 function recordingGitHub(answer: (url: string, body: { query?: string; variables?: Record<string, unknown> }) => unknown = () => ({})) {
@@ -177,4 +177,27 @@ test("creating, editing and deleting a comment send exactly those requests", asy
       ["DELETE", "/issues/comments/601", undefined],
     ]
   );
+});
+
+test("the assignees of each issue and when they last changed are read in one request", async () => {
+  const gh = recordingGitHub(() => ({
+    data: {
+      repository: {
+        i900001: { assignees: { nodes: [{ login: "ana-y" }, { login: "Bia-Z" }] }, timelineItems: { nodes: [{ createdAt: "2026-10-21T09:00:00Z" }] } },
+        i900002: { assignees: { nodes: [] }, timelineItems: { nodes: [] } },
+      },
+    },
+  }));
+  const assignees = await readIssueAssignees("token-sintetico", [900001, 900002], { fetch: gh.fetch });
+  assert.equal(gh.calls.length, 1);
+  assert.deepEqual(assignees.get(900001), { logins: ["ana-y", "Bia-Z"], changedAt: "2026-10-21T09:00:00Z" });
+  assert.deepEqual(assignees.get(900002), { logins: [], changedAt: null });
+});
+
+test("setting an issue's assignees sends the whole list, and nothing else of the issue", async () => {
+  const gh = recordingGitHub();
+  await setIssueAssignees("token-sintetico", 900001, ["ana-y"], { fetch: gh.fetch });
+  assert.equal(gh.calls[0].method, "PATCH");
+  assert.match(gh.calls[0].url, /\/issues\/900001$/);
+  assert.deepEqual(gh.calls[0].body, { assignees: ["ana-y"] });
 });

@@ -9,7 +9,8 @@ import { readdirSync, readFileSync } from "node:fs";
 // plain modules under src/lib.
 const PUBLIC_ACTIONS: Record<string, string[]> = {
   "account.ts": ["completePasswordReset"],
-  "admin.ts": ["listUsersForConfig", "resetUserPassword", "updateUserRole"],
+  "admin.ts": ["listUsersForConfig", "resetUserPassword", "setUserGithubLogin", "updateUserRole"],
+  "assignees.ts": ["listAssignableProfiles"],
   "comments.ts": ["deleteItemComment", "editItemComment"],
   "dashboard.ts": ["getDashboard", "syncDashboard"],
   "progress.ts": ["markProgressReportSent", "saveProgressEdit", "setProgressChecked"],

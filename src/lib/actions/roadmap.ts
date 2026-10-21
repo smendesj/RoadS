@@ -9,6 +9,7 @@ import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { mayGetIssue } from "@/lib/test-data";
 import { commentAuthorName } from "@/lib/comment-author";
+import { assigneeKey, parseLogin } from "@/lib/assignee-sync";
 import { currentSprintLane } from "@/lib/current-sprint";
 import { sprintLanesByDate, todayInSaoPaulo, weekDates, weekLanes, weekTitle } from "@/lib/sprint-week";
 import { weekRow } from "@/lib/week-plan";
@@ -31,6 +32,7 @@ type ItemRow = {
   stack?: string | null;
   created_by: string | null;
   created_at?: string;
+  assignees?: string[] | null;
   notes: {
     id: string;
     author_id: string | null;
@@ -58,6 +60,7 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
     stack: row.stack ?? null,
     createdBy: row.created_by,
     ...(row.created_at ? { createdAt: row.created_at } : {}),
+    assignees: row.assignees ?? [],
     // A Comment deleted in RoadS is kept, hidden, until the sync deletes its comment on GitHub (comment-sync.ts).
     notes: row.notes
       .filter((n) => !n.deleted_at)
@@ -88,7 +91,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
 
   const { data: items, error: itemsError } = await supabase
     .from("roadmap_items")
-    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, created_at, notes:item_notes(id, author_id, author_role, author_name, github_login, created_at, updated_at, deleted_at, body)")
+    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, created_at, assignees, notes:item_notes(id, author_id, author_role, author_name, github_login, created_at, updated_at, deleted_at, body)")
     .order("sort_order")
     .order("id");
   if (itemsError) throw itemsError;
@@ -204,13 +207,14 @@ async function getItemAccess(
       tipo: Tipo | null;
       stack: Stack | null;
       field_changed_at: Record<string, string> | null;
+      assignees: string[] | null;
     };
   }
 > {
   const supabase = await createServerSupabase();
   const { data: item, error } = await supabase
     .from("roadmap_items")
-    .select("lane_id, title, produto, description, github_issue_url, tipo, stack, created_by, field_changed_at")
+    .select("lane_id, title, produto, description, github_issue_url, tipo, stack, created_by, field_changed_at, assignees")
     .eq("id", itemId)
     .single();
   if (error) throw error;
@@ -233,6 +237,7 @@ export async function saveRoadmapItemEdit(
     note: string;
     activeView: ViewAs;
     content?: { title: string; description: string; produto: Produto; tipo: Tipo; stack: Stack };
+    assignees?: string[];
   }
 ): Promise<void> {
   const actor = await requireScrumMasterActor();
@@ -267,6 +272,15 @@ export async function saveRoadmapItemEdit(
     if (!isTipo(input.content.tipo) || !isStack(input.content.stack)) throw new Error("type_and_stack_required");
     update.tipo = input.content.tipo;
     update.stack = input.content.stack;
+  }
+
+  // Assignees (issue #23): GitHub logins, kept in lower case; their edit time settles them like the other fields.
+  if (input.assignees) {
+    const logins = [...new Set(input.assignees.map((l) => parseLogin(l)).filter((l): l is string => typeof l === "string"))];
+    if (assigneeKey(logins) !== assigneeKey(access.item.assignees ?? [])) {
+      update.assignees = logins;
+      update.field_changed_at = { ...(access.item.field_changed_at ?? {}), ...((update.field_changed_at as object | undefined) ?? {}), assignees: update.updated_at };
+    }
   }
 
   const { error: updateError } = await supabase.from("roadmap_items").update(update).eq("id", itemId);

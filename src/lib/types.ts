@@ -15,6 +15,8 @@ export type AppUser = {
   title: string;
   role: Role;
   mustResetPassword: boolean;
+  /** The GitHub login this profile is, which ties it to Assignees and to the comments on the issues (issue #23). */
+  githubLogin: string | null;
 };
 export type Produto = "GeoCloud"; // RoadS only handles GeoCloud; ELIMS issues are never pulled in.
 export type Prioridade = "Critical" | "High" | "Medium" | "Low";
@@ -53,6 +55,8 @@ export type RoadmapItem = {
   createdAt?: string;
   /** The issue's Status on Project #7 (last snapshot), set only on sprint items; "done" shows as Concluído. */
   status?: "open" | "dev" | "blocker" | "done";
+  /** The item's Assignees, as GitHub logins (issue #23); shown by the name of the profile with that login. */
+  assignees?: string[];
   notes: Note[];
 };
 
