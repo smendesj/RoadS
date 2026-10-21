@@ -9,6 +9,9 @@
 //
 // Pure on purpose: board-sync.ts reads both sides, applies the decisions and remembers the new base.
 
+import { areaLabels, isHighPriority, TIPOS, type Stack, type Tipo } from "./issue-fields.ts";
+import type { Prioridade } from "./types.ts";
+
 export type FieldSides = {
   /** What the RoadS item says now. */
   roads: string;
@@ -20,12 +23,15 @@ export type FieldSides = {
   roadsAt: string | null;
   /** When the field was last changed on GitHub (ISO), if known; only needed when both sides moved. */
   githubAt: string | null;
+  /** An empty value on GitHub is a gap RoadS fills with its own (Type, Stack, Priority, Effort), not a value to copy. */
+  fillGap?: boolean;
 };
 
 export type FieldDecision = "pull" | "push" | "none";
 
 export function decideField(f: FieldSides): FieldDecision {
   if (f.roads === f.github) return "none";
+  if (f.fillGap && f.github === "") return "push";
   if (f.base === null) return "pull";
   const roadsMoved = f.roads !== f.base;
   const githubMoved = f.github !== f.base;
@@ -33,6 +39,47 @@ export function decideField(f: FieldSides): FieldDecision {
   if (githubMoved && !roadsMoved) return "pull";
   if (f.roadsAt && f.githubAt && Date.parse(f.roadsAt) > Date.parse(f.githubAt)) return "push";
   return "pull";
+}
+
+/** The Type an issue's labels give: its first type: label RoadS knows (type:epic is a block, not a Type). */
+export function tipoOfLabels(labels: string[]): Tipo | null {
+  for (const l of labels) {
+    const t = l.startsWith("type:") ? l.slice(5) : "";
+    if ((TIPOS as readonly string[]).includes(t)) return t as Tipo;
+  }
+  return null;
+}
+
+/** The issue's native type a Type implies: Bug and Feature by name, the rest Task. */
+export function nativeTypeOf(tipo: Tipo): "Bug" | "Feature" | "Task" {
+  return tipo === "bug" ? "Bug" : tipo === "feature" ? "Feature" : "Task";
+}
+
+export type LabelledField = "tipo" | "stack" | "prioridade";
+
+/**
+ * The issue's labels once its Type, Stack and Priority are these values. A field in `changed` swaps the labels of its
+ * family (type: for the Type, area: for the Stack, priority:high for the Priority) for the ones it implies; any other
+ * field only adds the ones it implies that are missing (the gaps), never removing a label someone put there. Labels of
+ * other families are kept in their order, and the new ones go at the end.
+ */
+export function labelsAfter(
+  labels: string[],
+  values: { tipo: Tipo | null; stack: Stack | null; prioridade: Prioridade | null },
+  changed: ReadonlySet<LabelledField>
+): string[] {
+  const isType = (l: string) => l.startsWith("type:") && (TIPOS as readonly string[]).includes(l.slice(5));
+  const isArea = (l: string) => l === "area:frontend" || l === "area:backend";
+  const dropped = (l: string) =>
+    (changed.has("tipo") && isType(l)) || (changed.has("stack") && isArea(l)) || (changed.has("prioridade") && l === "priority:high");
+  const next = labels.filter((l) => !dropped(l));
+  const add = (l: string) => {
+    if (!next.includes(l)) next.push(l);
+  };
+  if (values.tipo && !next.some(isType)) add(`type:${values.tipo}`);
+  if (values.stack) areaLabels(values.stack).forEach(add);
+  if (values.prioridade && isHighPriority(values.prioridade)) add("priority:high");
+  return next;
 }
 
 /** Who may write to GitHub through a sync: scrum masters, admins and the daily cron. A dev's press only pulls. */

@@ -222,7 +222,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
             description: item.desc,
             produto: item.produto,
             tipo: item.tipo ?? "feature",
-            stack: isStack(item.stack) ? item.stack : "Geral",
+            stack: isStack(item.stack) ? item.stack : "General",
           }
         : undefined,
     });

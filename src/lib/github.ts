@@ -17,8 +17,11 @@ const STATUS_DEVELOPMENT_OPTION = "4e4b0563";
 // The two Statuses RoadS ever writes: Development is "in the current sprint", Open is everything else it plans.
 const STATUS_OPTIONS = { Open: STATUS_OPEN_OPTION, Development: STATUS_DEVELOPMENT_OPTION } as const;
 export type WritableStatus = keyof typeof STATUS_OPTIONS;
-const PRIORIDADE_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhf1oXA";
-const STACK_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhfusOE";
+export const PRIORIDADE_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhf1oXA";
+export const STACK_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhfusOE";
+// Effort's options are created on the board once (issue #22), so their ids aren't known here: its values are matched by
+// the option's name (Low, Medium, High, Very High) against the live board, the one field matched that way.
+export const EFFORT_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhhJBPw";
 const DESCRIPTION_FIELD_ID = "PVTF_lADODk7xnc4BGkj4zhfubog";
 // The board's own "Repositório" field is never written: the product comes from the native Repository field, so the
 // board can drop the custom one (issue #22).
@@ -84,6 +87,12 @@ function issueBody(description: string, effort: Effort): string {
  * skipped instead of written, so renaming a field or an option on GitHub never breaks RoadS.
  */
 export async function readBoardLayout(token: string, port: GitHubPort = {}): Promise<Map<string, Set<string> | null>> {
+  const options = await readBoardOptions(token, port);
+  return new Map([...options].map(([field, opts]) => [field, opts ? new Set(opts.keys()) : null]));
+}
+
+/** The board's fields, each with its options' ids and names (null for a field without options). */
+export async function readBoardOptions(token: string, port: GitHubPort = {}): Promise<Map<string, Map<string, string> | null>> {
   const json = await github(
     token,
     "/graphql",
@@ -99,8 +108,8 @@ export async function readBoardLayout(token: string, port: GitHubPort = {}): Pro
     },
     port
   );
-  const nodes: { id?: string; options?: { id: string }[] }[] = json?.data?.node?.fields?.nodes ?? [];
-  return new Map(nodes.filter((n) => n.id).map((n) => [n.id!, n.options ? new Set(n.options.map((o) => o.id)) : null]));
+  const nodes: { id?: string; options?: { id: string; name: string }[] }[] = json?.data?.node?.fields?.nodes ?? [];
+  return new Map(nodes.filter((n) => n.id).map((n) => [n.id!, n.options ? new Map(n.options.map((o) => [o.id, o.name])) : null]));
 }
 
 type FieldValue = { singleSelectOptionId: string } | { text: string };
@@ -157,27 +166,31 @@ export async function createGeoCloudIssue(
   return { url: issue.html_url, number: issue.number, skipped };
 }
 
-/** Writes an issue's title and/or body (the two-way sync of issue #22); nothing else of the issue is sent. */
-export async function updateIssue(token: string, number: number, change: { title?: string; body?: string }, port: GitHubPort = {}): Promise<void> {
-  const body: { title?: string; body?: string } = {};
-  if (change.title !== undefined) body.title = change.title;
-  if (change.body !== undefined) body.body = change.body;
+export type IssueChange = { title?: string; body?: string; labels?: string[]; type?: string };
+
+/**
+ * Writes what changed of an issue (the two-way sync of issue #22): its title, body, the whole list of its labels and
+ * its native type by name; only the keys given are sent.
+ */
+export async function updateIssue(token: string, number: number, change: IssueChange, port: GitHubPort = {}): Promise<void> {
+  const body: IssueChange = {};
+  for (const key of ["title", "body", "labels", "type"] as const) if (change[key] !== undefined) Object.assign(body, { [key]: change[key] });
   await github(token, `/repos/${GEOCLOUD_REPO}/issues/${number}`, { method: "PATCH", body }, port);
 }
 
-/** When each issue was last renamed and its body last edited, read in one request; null when it never was. */
-export async function readIssueChangeTimes(
-  token: string,
-  numbers: number[],
-  port: GitHubPort = {}
-): Promise<Map<number, { titleAt: string | null; bodyAt: string | null }>> {
-  const times = new Map<number, { titleAt: string | null; bodyAt: string | null }>();
+export type IssueChangeTimes = { titleAt: string | null; bodyAt: string | null; labelAt: string | null };
+
+/** When each issue was last renamed, its body last edited and a label last put or taken, in one request; null when never. */
+export async function readIssueChangeTimes(token: string, numbers: number[], port: GitHubPort = {}): Promise<Map<number, IssueChangeTimes>> {
+  const times = new Map<number, IssueChangeTimes>();
   if (!numbers.length) return times;
   const [owner, name] = GEOCLOUD_REPO.split("/");
   const fields = numbers
     .map(
       (n) => `i${n}: issue(number: ${Number(n)}) { lastEditedAt
-        timelineItems(itemTypes: [RENAMED_TITLE_EVENT], last: 1) { nodes { ... on RenamedTitleEvent { createdAt } } } }`
+        timelineItems(itemTypes: [RENAMED_TITLE_EVENT], last: 1) { nodes { ... on RenamedTitleEvent { createdAt } } }
+        labelEvents: timelineItems(itemTypes: [LABELED_EVENT, UNLABELED_EVENT], last: 1) {
+          nodes { ... on LabeledEvent { createdAt } ... on UnlabeledEvent { createdAt } } } }`
     )
     .join("\n");
   const json = await github(
@@ -186,11 +199,15 @@ export async function readIssueChangeTimes(
     { method: "POST", body: { query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`, variables: { owner, name } } },
     port
   );
-  const repo: Record<string, { lastEditedAt: string | null; timelineItems?: { nodes: { createdAt?: string }[] } } | null> =
-    json?.data?.repository ?? {};
+  type Events = { nodes: { createdAt?: string }[] };
+  const repo: Record<string, { lastEditedAt: string | null; timelineItems?: Events; labelEvents?: Events } | null> = json?.data?.repository ?? {};
   for (const n of numbers) {
     const issue = repo[`i${n}`];
-    times.set(n, { titleAt: issue?.timelineItems?.nodes?.[0]?.createdAt ?? null, bodyAt: issue?.lastEditedAt ?? null });
+    times.set(n, {
+      titleAt: issue?.timelineItems?.nodes?.[0]?.createdAt ?? null,
+      bodyAt: issue?.lastEditedAt ?? null,
+      labelAt: issue?.labelEvents?.nodes?.[0]?.createdAt ?? null,
+    });
   }
   return times;
 }
@@ -207,6 +224,11 @@ function fitsBoard(layout: Map<string, Set<string> | null>, field: string, value
  */
 export async function setProjectStatus(token: string, projectItemId: string, status: WritableStatus, port: GitHubPort = {}): Promise<void> {
   await setField(token, projectItemId, STATUS_FIELD_ID, { singleSelectOptionId: STATUS_OPTIONS[status] }, port);
+}
+
+/** Writes one single-select field of a card on Project #7, field and option by id (Stack, Priority, Effort). */
+export async function setProjectOption(token: string, projectItemId: string, field: string, optionId: string, port: GitHubPort = {}): Promise<void> {
+  await setField(token, projectItemId, field, { singleSelectOptionId: optionId }, port);
 }
 
 function setField(token: string, item: string, field: string, value: FieldValue, port: GitHubPort = {}) {

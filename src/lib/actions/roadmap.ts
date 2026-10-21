@@ -188,6 +188,8 @@ async function getItemAccess(
       github_issue_url: string | null;
       tipo: Tipo | null;
       stack: Stack | null;
+      prioridade: Prioridade;
+      effort: Effort;
       field_changed_at: Record<string, string> | null;
     };
   }
@@ -195,7 +197,7 @@ async function getItemAccess(
   const supabase = await createServerSupabase();
   const { data: item, error } = await supabase
     .from("roadmap_items")
-    .select("lane_id, title, produto, description, github_issue_url, tipo, stack, created_by, field_changed_at")
+    .select("lane_id, title, produto, description, github_issue_url, tipo, stack, prioridade, effort, created_by, field_changed_at")
     .eq("id", itemId)
     .single();
   if (error) throw error;
@@ -231,28 +233,32 @@ export async function saveRoadmapItemEdit(
   // scrum_master regardless of what the client claims, so it can't be spoofed as a dev note.
   const authorRole = realRole === "admin" ? input.activeView : "scrum_master";
 
+  const now = new Date().toISOString();
   const update: Record<string, unknown> = {
     prioridade: input.prioridade,
     effort: input.effort,
-    updated_at: new Date().toISOString(),
+    updated_at: now,
   };
+  // When each field was last edited here: the two-way sync settles a field both sides changed by these times.
+  const changedAt = { ...(access.item.field_changed_at ?? {}) };
+  if (input.prioridade !== access.item.prioridade) changedAt.prioridade = now;
+  if (input.effort !== access.item.effort) changedAt.effort = now;
 
   if (input.content) {
     const title = input.content.title.trim();
     if (!title) throw new Error("title_required");
     update.title = title;
     update.description = input.content.description.trim();
-    // When each field was last edited here: the two-way sync settles a field both sides changed by these times.
-    const changedAt = { ...(access.item.field_changed_at ?? {}) };
-    const now = update.updated_at as string;
     if (title !== access.item.title) changedAt.title = now;
     if (update.description !== access.item.description) changedAt.description = now;
-    update.field_changed_at = changedAt;
     update.produto = input.content.produto;
     if (!isTipo(input.content.tipo) || !isStack(input.content.stack)) throw new Error("type_and_stack_required");
+    if (input.content.tipo !== access.item.tipo) changedAt.tipo = now;
+    if (input.content.stack !== access.item.stack) changedAt.stack = now;
     update.tipo = input.content.tipo;
     update.stack = input.content.stack;
   }
+  update.field_changed_at = changedAt;
 
   const { error: updateError } = await supabase.from("roadmap_items").update(update).eq("id", itemId);
   if (updateError) throw updateError;
@@ -275,7 +281,7 @@ export async function saveRoadmapItemEdit(
       prioridade: input.prioridade,
       effort: input.effort,
       tipo: input.content ? input.content.tipo : access.item.tipo ?? "feature",
-      stack: input.content ? input.content.stack : access.item.stack ?? "Geral",
+      stack: input.content ? input.content.stack : access.item.stack ?? "General",
     },
     access.item.lane_id === current?.id ? "Development" : "Open"
   );

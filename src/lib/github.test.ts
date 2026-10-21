@@ -12,7 +12,7 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
-const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes } = await import("./github.ts");
+const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions } = await import("./github.ts");
 
 /** A GitHub that records each request (method, path, body) and answers with `answer`. */
 function recordingGitHub(answer: (url: string, body: { query?: string; variables?: Record<string, unknown> }) => unknown = () => ({})) {
@@ -45,8 +45,65 @@ test("the time of each issue's last rename and last body edit is read in one req
   }));
   const times = await readIssueChangeTimes("token-sintetico", [900001, 900002], { fetch: gh.fetch });
   assert.equal(gh.calls.length, 1);
-  assert.deepEqual(times.get(900001), { titleAt: "2026-10-21T09:00:00Z", bodyAt: "2026-10-21T10:00:00Z" });
-  assert.deepEqual(times.get(900002), { titleAt: null, bodyAt: null });
+  assert.deepEqual(times.get(900001), { titleAt: "2026-10-21T09:00:00Z", bodyAt: "2026-10-21T10:00:00Z", labelAt: null });
+  assert.deepEqual(times.get(900002), { titleAt: null, bodyAt: null, labelAt: null });
+});
+
+test("the last label change of each issue is read with its rename and body edit", async () => {
+  const gh = recordingGitHub(() => ({
+    data: {
+      repository: {
+        i900001: {
+          lastEditedAt: null,
+          timelineItems: { nodes: [{ createdAt: "2026-10-21T09:00:00Z" }] },
+          labelEvents: { nodes: [{ createdAt: "2026-10-21T11:00:00Z" }] },
+        },
+      },
+    },
+  }));
+  const times = await readIssueChangeTimes("token-sintetico", [900001], { fetch: gh.fetch });
+  assert.deepEqual(times.get(900001), { titleAt: "2026-10-21T09:00:00Z", bodyAt: null, labelAt: "2026-10-21T11:00:00Z" });
+  assert.match((gh.calls[0].body as { query: string }).query, /LABELED_EVENT/);
+});
+
+test("pushing labels and the native type sends them in the same edit of the issue", async () => {
+  const gh = recordingGitHub();
+  await updateIssue("token-sintetico", 900001, { labels: ["type:bug", "area:backend"], type: "Bug" }, { fetch: gh.fetch });
+  assert.equal(gh.calls.length, 1);
+  assert.equal(gh.calls[0].method, "PATCH");
+  assert.deepEqual(gh.calls[0].body, { labels: ["type:bug", "area:backend"], type: "Bug" });
+});
+
+test("a board field is written by its id with the option's id", async () => {
+  const gh = recordingGitHub();
+  await setProjectOption("token-sintetico", "PVTI_card", "PVTSSF_campo", "opcao-1", { fetch: gh.fetch });
+  assert.equal(gh.calls.length, 1);
+  const v = (gh.calls[0].body as { variables: Record<string, unknown> }).variables;
+  assert.deepEqual({ item: v.item, field: v.field, value: v.value }, { item: "PVTI_card", field: "PVTSSF_campo", value: { singleSelectOptionId: "opcao-1" } });
+});
+
+test("the board's options are read with their names, so Effort can be matched while its options have no fixed ids", async () => {
+  const gh = recordingGitHub(() => ({
+    data: {
+      node: {
+        fields: {
+          nodes: [
+            { id: "PVTSSF_effort", name: "Effort", options: [{ id: "e1", name: "Low" }, { id: "e2", name: "Very High" }] },
+            { id: "PVTF_texto", name: "Description" },
+            {},
+          ],
+        },
+      },
+    },
+  }));
+  const options = await readBoardOptions("token-sintetico", { fetch: gh.fetch });
+  assert.deepEqual(
+    [...options.entries()].map(([k, v]) => [k, v && [...v.entries()]]),
+    [
+      ["PVTSSF_effort", [["e1", "Low"], ["e2", "Very High"]]],
+      ["PVTF_texto", null],
+    ]
+  );
 });
 
 // Synthetic ids of a board like Project #7: what matters is that the fields are matched by these ids.

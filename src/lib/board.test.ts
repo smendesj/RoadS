@@ -94,6 +94,24 @@ test("projectCard leaves out ELIMS, cards with no status or no time for it, and 
   assert.equal(projectCard(cardNode({ number: null })), null);
 });
 
+test("projectCard keeps each single-select value of the card by its field's id, with the option's id and since when", () => {
+  const node = {
+    ...cardNode(),
+    fieldValues: {
+      nodes: [
+        { optionId: "opt-stack", updatedAt: "2026-10-20T10:00:00Z", field: { id: "PVTSSF_stack" } },
+        { optionId: "opt-status", updatedAt: "2026-10-06T20:49:07Z", field: { id: "PVTSSF_status" } },
+        {},
+        { text: "um texto", field: { id: "PVTF_texto" } },
+      ],
+    },
+  };
+  assert.deepEqual(projectCard(node)?.options, {
+    PVTSSF_stack: { optionId: "opt-stack", updatedAt: "2026-10-20T10:00:00Z" },
+    PVTSSF_status: { optionId: "opt-status", updatedAt: "2026-10-06T20:49:07Z" },
+  });
+});
+
 test("withStatusWrites moves a card to the column of the Status written and recounts both columns", () => {
   const card = (n: number) => ({ title: `i${n}`, ref: `#${n}`, url: `u${n}` });
   const columns = [

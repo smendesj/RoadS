@@ -177,6 +177,15 @@ resumo, nunca os cartões do quadro. Quem monta: `src/lib/frontlights/sync.ts`.
   erro HTTP. `roadmap.error` aparece quando o quadro sincronizou e o Roadmap não.
 - **`roadmap.retitled`** (opcional, número): quantos títulos do Roadmap acompanharam a renomeação da issue no
   GitHub nesta sincronização (cada um vira um `modify` com `title` na fila). Ausente quando nenhum.
+- **`roadmap.fields`** (opcional, só contagens): a sincronização nos dois sentidos dos campos de cada item com a sua
+  issue (issue #22 do RoadS): Title, Description (a seção `## Solução` do corpo), Type (a label `type:`), Stack,
+  Priority e Effort (campos do Project). `pulled`: valores trazidos do GitHub (cada item com algum vira um `modify` com
+  os campos trazidos, nas chaves `title`, `description`, `tipo`, `stack`, `prioridade` e `effort`, e `reason`
+  `"field follows the issue on GitHub"`); `pushed`: valores escritos no GitHub (com as labels `type:`, `area:` e
+  `priority:high` que eles implicam e o tipo nativo); `failed`: itens em que algo falhou; `error` (texto) quando o
+  passo todo falhou. Ausente quando nada mudou. As lacunas das issues (campo vazio, label implicada, tipo nativo)
+  passam a ser preenchidas aqui, com o valor do próprio item: a rotina de lacunas do Frontlights deixa de ser
+  necessária.
 - **`roadmap.sprint`** (opcional, só contagens): o que a sincronização fez para manter o sprint atual do
   Roadmap (a semana cujas datas contêm hoje) e o Project em acordo. `pulled`: issues que o Project pôs no sprint atual;
   `released`: issues que o Project tirou dele (voltaram ao seu bloco); `written`: Statuses que o RoadS escreveu
@@ -471,3 +480,9 @@ repositório, `roads-script/push` e `roads-script/attach`.
   continua 1** em `roadmap-state`, `pending-changes` e `ack`, porque o Frontlights publicou antes a versão que
   aceita as duas formas (ids posicionais e por data). O RoadS faz o `db push` da 0031 e o deploy depois disso.
   Nenhum campo foi tirado ou renomeado.
+- **2026-10-21 (aditivo):** `roadmap.fields` no resumo do `POST /sync-board` (`pulled`, `pushed`, `failed` e, se o passo
+  falhou, `error`), e o `modify` com `reason` `"field follows the issue on GitHub"` pode trazer `description`, `tipo`,
+  `stack`, `prioridade` e `effort` além de `title`. Os nomes de Stack guardados passam ao inglês (Modeling, Database,
+  General, General Tests, Frontend Tests, Backend Tests, Documentation, Tests, Tests/Security; os demais já eram), e é
+  com eles que vêm em `modify` e em `roadmap-state`. As lacunas das issues passam ao RoadS. Nenhuma rota mudou e a
+  `schemaVersion` segue 1.
