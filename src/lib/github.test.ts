@@ -12,7 +12,7 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
-const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState, setProjectDate, clearProjectField, readBoardFields, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment, readIssueAssignees, setIssueAssignees } =
+const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState, setProjectDate, clearProjectField, readBoardFields, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment, readIssueAssignees, setIssueAssignees, readIssueEfforts, setIssueEffort } =
   await import("./github.ts");
 
 test("closing and reopening an issue sends its state and the reason in the same edit", async () => {
@@ -118,13 +118,13 @@ test("a board field is written by its id with the option's id", async () => {
   assert.deepEqual({ item: v.item, field: v.field, value: v.value }, { item: "PVTI_card", field: "PVTSSF_campo", value: { singleSelectOptionId: "opcao-1" } });
 });
 
-test("the board's options are read with their names, so Effort can be matched while its options have no fixed ids", async () => {
+test("the board's options are read with their ids and names", async () => {
   const gh = recordingGitHub(() => ({
     data: {
       node: {
         fields: {
           nodes: [
-            { id: "PVTSSF_effort", name: "Effort", options: [{ id: "e1", name: "Low" }, { id: "e2", name: "Very High" }] },
+            { id: "PVTSSF_x", name: "Stack", options: [{ id: "o1", name: "Backend" }, { id: "o2", name: "Frontend" }] },
             { id: "PVTF_texto", name: "Description" },
             {},
           ],
@@ -136,7 +136,7 @@ test("the board's options are read with their names, so Effort can be matched wh
   assert.deepEqual(
     [...options.entries()].map(([k, v]) => [k, v && [...v.entries()]]),
     [
-      ["PVTSSF_effort", [["e1", "Low"], ["e2", "Very High"]]],
+      ["PVTSSF_x", [["o1", "Backend"], ["o2", "Frontend"]]],
       ["PVTF_texto", null],
     ]
   );
@@ -154,6 +154,7 @@ const BOARD = {
 /** A GitHub that answers the creation of an issue and records every write to a card's field, by field id. */
 function creatingGitHub(board: Record<string, { id: string; options: string[] | null }> = BOARD) {
   const written: Record<string, unknown> = {};
+  const issueFields: unknown[] = [];
   const fetchImpl = (async (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     const ok = (json: unknown) => new Response(JSON.stringify(json), { status: 200 });
@@ -167,9 +168,13 @@ function creatingGitHub(board: Record<string, { id: string; options: string[] | 
       written[body.variables.field] = body.variables.value;
       return ok({ data: { updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_sint" } } } });
     }
+    if (/setIssueFieldValue/.test(body.query)) {
+      issueFields.push(body.variables);
+      return ok({ data: { setIssueFieldValue: { issue: { number: 900001 } } } });
+    }
     return new Response("{}", { status: 404 });
   }) as typeof fetch;
-  return { fetch: fetchImpl, written };
+  return { fetch: fetchImpl, written, issueFields };
 }
 
 const NEW_ITEM = { title: "Item sintético", description: "Texto", prioridade: "High", effort: "Low", tipo: "feature", stack: "Backend" } as const;
@@ -184,6 +189,21 @@ test("creating an issue fills the board's fields by their ids and never writes t
     [BOARD.stack.id]: { singleSelectOptionId: "eae17178" },
     [BOARD.description.id]: { text: "Texto" },
   });
+});
+
+test("creating an issue sets its Effort on the issue itself, the organization's issue field, by the option's id", async () => {
+  const gh = creatingGitHub();
+  await createGeoCloudIssue("token-sintetico", NEW_ITEM, "Open", { fetch: gh.fetch });
+  assert.deepEqual(gh.issueFields, [{ issueId: "I_sint", fieldId: "IFSS_kgDOAjkpfQ", optionId: "IFSSO_kgDOA-PwtQ" }]);
+});
+
+test("an Effort GitHub refuses on a new issue is skipped and reported, and the issue and its card stay", async () => {
+  const gh = creatingGitHub();
+  const refusing = (async (url: string, init?: RequestInit) =>
+    /setIssueFieldValue/.test(String(init?.body)) ? new Response(JSON.stringify({ errors: [{ message: "refused" }] }), { status: 200 }) : gh.fetch(url, init)) as typeof fetch;
+  const created = await createGeoCloudIssue("token-sintetico", NEW_ITEM, "Open", { fetch: refusing });
+  assert.deepEqual(created, { url: "https://example.test/issues/900001", number: 900001, skipped: ["Effort"] });
+  assert.deepEqual(gh.written[BOARD.status.id], { singleSelectOptionId: "f130aaf8" });
 });
 
 test("an option the live board no longer has is skipped and reported, instead of failing the creation", async () => {
@@ -315,4 +335,74 @@ test("the board's fields are read with their names, so a field created on the bo
   assert.equal(fields.byName.get("Week"), "PVTF_week");
   assert.deepEqual([...(fields.options.get("PVTSSF_x") ?? [])], [["o1", "Backend"]]);
   assert.equal(fields.options.get("PVTF_week"), null);
+});
+
+// ---- Effort (P1): the organization's issue field, on the issue itself
+
+test("the Effort of each issue is read from its issue field in one request, with the issue's node id", async () => {
+  const gh = recordingGitHub(() => ({
+    data: {
+      repository: {
+        i900001: {
+          id: "I_um",
+          issueFieldValues: {
+            nodes: [
+              { __typename: "IssueFieldTextValue" },
+              { __typename: "IssueFieldSingleSelectValue", name: "Medium", optionId: "IFSSO_kgDOA-PwtA", field: { id: "IFSS_kgDOAjkpfQ", name: "Effort" } },
+            ],
+          },
+        },
+        i900002: { id: "I_dois", issueFieldValues: { nodes: [] } },
+        i900003: {
+          id: "I_tres",
+          issueFieldValues: { nodes: [{ __typename: "IssueFieldSingleSelectValue", name: "High", optionId: "IFSSO_outro", field: { id: "IFSS_outro", name: "Risk" } }] },
+        },
+      },
+    },
+  }));
+  const efforts = await readIssueEfforts("token-sintetico", [900001, 900002, 900003, 900004], { fetch: gh.fetch });
+  assert.equal(gh.calls.length, 1);
+  const query = (gh.calls[0].body as { query: string }).query;
+  assert.match(query, /i900001: issue\(number: 900001\)/);
+  assert.match(query, /issueFieldValues/);
+  assert.deepEqual(efforts.get(900001), { issueId: "I_um", effort: "Medium" });
+  // No Effort on the issue (another field doesn't count): an empty Effort, a gap RoadS may fill.
+  assert.deepEqual(efforts.get(900002), { issueId: "I_dois", effort: null });
+  assert.deepEqual(efforts.get(900003), { issueId: "I_tres", effort: null });
+  // An issue not found is left out.
+  assert.equal(efforts.has(900004), false);
+});
+
+test("an Effort holding an option RoadS doesn't know leaves the issue out, so it is never overwritten", async () => {
+  const gh = recordingGitHub(() => ({
+    data: {
+      repository: {
+        i900001: {
+          id: "I_um",
+          issueFieldValues: { nodes: [{ __typename: "IssueFieldSingleSelectValue", name: "Huge", optionId: "IFSSO_novo", field: { id: "IFSS_kgDOAjkpfQ", name: "Effort" } }] },
+        },
+      },
+    },
+  }));
+  const efforts = await readIssueEfforts("token-sintetico", [900001], { fetch: gh.fetch });
+  assert.equal(efforts.has(900001), false);
+});
+
+test("no issue to read is no request", async () => {
+  const gh = recordingGitHub();
+  assert.equal((await readIssueEfforts("token-sintetico", [], { fetch: gh.fetch })).size, 0);
+  assert.equal(gh.calls.length, 0);
+});
+
+test("an Effort is written to the issue's field by the option's id, and an empty one clears the field", async () => {
+  const gh = recordingGitHub();
+  await setIssueEffort("token-sintetico", "I_um", "High", { fetch: gh.fetch });
+  await setIssueEffort("token-sintetico", "I_um", "Medium", { fetch: gh.fetch });
+  await setIssueEffort("token-sintetico", "I_um", null, { fetch: gh.fetch });
+  const [high, medium, clear] = gh.calls.map((c) => c.body as { query: string; variables: Record<string, unknown> });
+  assert.match(high.query, /setIssueFieldValue\(input: \{ issueId: \$issueId, issueFields: \[\{ fieldId: \$fieldId, singleSelectOptionId: \$optionId \}\] \}\)/);
+  assert.deepEqual(high.variables, { issueId: "I_um", fieldId: "IFSS_kgDOAjkpfQ", optionId: "IFSSO_kgDOA-Pwsw" });
+  assert.deepEqual(medium.variables, { issueId: "I_um", fieldId: "IFSS_kgDOAjkpfQ", optionId: "IFSSO_kgDOA-PwtA" });
+  assert.match(clear.query, /deleteIssueFieldValue\(input: \{ issueId: \$issueId, fieldId: \$fieldId \}\)/);
+  assert.deepEqual(clear.variables, { issueId: "I_um", fieldId: "IFSS_kgDOAjkpfQ" });
 });

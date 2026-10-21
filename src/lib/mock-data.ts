@@ -17,7 +17,7 @@ export function getLanes(): Lane[] {
           title: "Gateway de pagamentos — Asaas e Stripe",
           produto: "GeoCloud",
           prioridade: "Critical",
-          effort: "Very High",
+          effort: "High",
           desc: "Billing interno com adaptador por provedor. Provedor já decidido: os dois — cotação e contratação primeiro, depois credenciais e webhook.",
           url: GH + "715",
           notes: [
@@ -25,7 +25,7 @@ export function getLanes(): Lane[] {
               id: "n1",
               author: "scrum_master",
               when: "seg",
-              text: "Dois SDKs, dois webhooks — quase uma segunda integração. Marquei Very High por isso, não só pelos 3,5 dias originais.",
+              text: "Dois SDKs, dois webhooks — quase uma segunda integração. Marquei High por isso, não só pelos 3,5 dias originais.",
             },
           ],
         },
@@ -132,8 +132,8 @@ export function getRoadmapGroups(): RoadmapGroup[] {
       id: "g5",
       title: "Módulos futuros",
       items: [
-        { id: "r11", title: "Dashboards avançados, com pedido à LLM", produto: "GeoCloud", prioridade: "Low", effort: "Very High", desc: "Cobrança separada.", url: null, notes: [] },
-        { id: "r12", title: "Visualização 3D como módulo desligável", produto: "GeoCloud", prioridade: "Low", effort: "Very High", desc: "", url: null, notes: [] },
+        { id: "r11", title: "Dashboards avançados, com pedido à LLM", produto: "GeoCloud", prioridade: "Low", effort: "High", desc: "Cobrança separada.", url: null, notes: [] },
+        { id: "r12", title: "Visualização 3D como módulo desligável", produto: "GeoCloud", prioridade: "Low", effort: "High", desc: "", url: null, notes: [] },
       ],
     },
   ];
@@ -181,7 +181,7 @@ export const dashboardData = {
     },
   ],
   entregas: [
-    { title: "Gateway de pagamentos — Asaas e Stripe", status: "DEVELOPMENT", tone: "brand" as const, effort: "Very High", ref: "#715", url: GH + "715" },
+    { title: "Gateway de pagamentos — Asaas e Stripe", status: "DEVELOPMENT", tone: "brand" as const, effort: "High", ref: "#715", url: GH + "715" },
     { title: "Cobrança por tokenização", status: "DEVELOPMENT", tone: "brand" as const, effort: "Medium", ref: "#716", url: GH + "716" },
     { title: "As duas visualizações das caixas disponíveis, vertical e horizontal", status: "DEVELOPMENT", tone: "brand" as const, effort: "Low", ref: "#717", url: GH + "717" },
   ],

@@ -10,7 +10,7 @@ import { ACTION, FIELD } from "@/lib/text/common";
 import { deleteItemConfirm, ROADMAP } from "@/lib/text/roadmap";
 
 const PRIORIDADES: Prioridade[] = ["Critical", "High", "Medium", "Low"];
-const EFFORTS: Effort[] = ["Very High", "High", "Medium", "Low"];
+const EFFORTS: Effort[] = ["High", "Medium", "Low"];
 
 /** content is only present when the viewer may edit title/description/product (admin, or RoadS-created items). */
 export type EditDraft = {
