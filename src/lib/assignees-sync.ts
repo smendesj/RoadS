@@ -3,6 +3,7 @@ import "server-only";
 import { assigneeKey, decideAssignees } from "@/lib/assignee-sync";
 import { readIssueAssignees, setIssueAssignees, type GitHubPort } from "@/lib/github";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { inPool } from "@/lib/pool";
 import { isTestData } from "@/lib/test-data";
 
 // The sync step of an item's Assignees with its issue's (issue #23), for the items whose issue is open: reads both
@@ -14,6 +15,8 @@ export type AssigneesSummary = { pulled: number; pushed: number; failed: number;
 
 const ISSUE_URL = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
 const BATCH = 20;
+// Items written at once, as the other two-way fields (board-sync.ts): a few at a time, within GitHub's write limits.
+const POOL = 6;
 
 export async function syncItemAssignees(token: string, openNumbers: number[], push: boolean, port: GitHubPort = {}): Promise<AssigneesSummary> {
   const admin = createAdminClient();
@@ -43,9 +46,9 @@ export async function syncItemAssignees(token: string, openNumbers: number[], pu
   }
 
   const summary: AssigneesSummary = { pulled: 0, pushed: 0, failed: 0 };
-  for (const row of rows) {
+  await inPool(rows, POOL, async (row) => {
     const side = theirs.get(row.number);
-    if (!side) continue;
+    if (!side) return;
     const github = side.logins;
     try {
       const decision = decideAssignees({
@@ -55,7 +58,7 @@ export async function syncItemAssignees(token: string, openNumbers: number[], pu
         roadsAt: row.changedAt.assignees ?? null,
         githubAt: side.changedAt,
       });
-      if (decision === "push" && !push) continue;
+      if (decision === "push" && !push) return;
       const value = decision === "push" ? row.assignees : github;
       if (decision === "push") await setIssueAssignees(token, row.number, value, port);
       const update: Record<string, unknown> = { github_seen: { ...row.seen, assignees: assigneeKey(value) } };
@@ -70,6 +73,6 @@ export async function syncItemAssignees(token: string, openNumbers: number[], pu
       console.error("syncBoard: Assignees failed for an item", e);
       summary.failed++;
     }
-  }
+  });
   return summary;
 }

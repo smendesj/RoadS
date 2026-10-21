@@ -12,7 +12,43 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
-const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment, readIssueAssignees, setIssueAssignees } = await import("./github.ts");
+const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState, setProjectDate, clearProjectField, readBoardFields, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment, readIssueAssignees, setIssueAssignees } =
+  await import("./github.ts");
+
+test("closing and reopening an issue sends its state and the reason in the same edit", async () => {
+  const gh = recordingGitHub();
+  await updateIssue("token-sintetico", 900001, { state: "closed", state_reason: "completed" }, { fetch: gh.fetch });
+  await updateIssue("token-sintetico", 900001, { state: "open", state_reason: "reopened" }, { fetch: gh.fetch });
+  assert.deepEqual(gh.calls.map((c) => [c.method, c.body]), [
+    ["PATCH", { state: "closed", state_reason: "completed" }],
+    ["PATCH", { state: "open", state_reason: "reopened" }],
+  ]);
+});
+
+test("Blocker and Done are written to the card's Status by their option ids", async () => {
+  const gh = recordingGitHub();
+  await setProjectStatus("token-sintetico", "PVTI_card", "Blocker", { fetch: gh.fetch });
+  await setProjectStatus("token-sintetico", "PVTI_card", "Done", { fetch: gh.fetch });
+  const values = gh.calls.map((c) => (c.body as { variables: { value: unknown } }).variables.value);
+  assert.deepEqual(values, [{ singleSelectOptionId: "95ee425e" }, { singleSelectOptionId: "9487135d" }]);
+});
+
+test("a Delete comments first and then closes the issue as not planned", async () => {
+  const gh = recordingGitHub();
+  await closeIssueAsNotPlanned("token-sintetico", 900001, "Deleted in RoadS by an admin.", { fetch: gh.fetch });
+  assert.deepEqual(gh.calls.map((c) => [c.method, c.url.replace(/^.*\/issues\//, ""), c.body]), [
+    ["POST", "900001/comments", { body: "Deleted in RoadS by an admin." }],
+    ["PATCH", "900001", { state: "closed", state_reason: "not_planned" }],
+  ]);
+});
+
+test("an issue's state is read as closed or open", async () => {
+  const closed = recordingGitHub(() => ({ state: "closed" }));
+  assert.equal(await readIssueState("token-sintetico", 900001, { fetch: closed.fetch }), "closed");
+  assert.equal(closed.calls[0].method, "GET");
+  const open = recordingGitHub(() => ({ state: "open" }));
+  assert.equal(await readIssueState("token-sintetico", 900001, { fetch: open.fetch }), "open");
+});
 
 /** A GitHub that records each request (method, path, body) and answers with `answer`. */
 function recordingGitHub(answer: (url: string, body: { query?: string; variables?: Record<string, unknown> }) => unknown = () => ({})) {
@@ -45,8 +81,65 @@ test("the time of each issue's last rename and last body edit is read in one req
   }));
   const times = await readIssueChangeTimes("token-sintetico", [900001, 900002], { fetch: gh.fetch });
   assert.equal(gh.calls.length, 1);
-  assert.deepEqual(times.get(900001), { titleAt: "2026-10-21T09:00:00Z", bodyAt: "2026-10-21T10:00:00Z" });
-  assert.deepEqual(times.get(900002), { titleAt: null, bodyAt: null });
+  assert.deepEqual(times.get(900001), { titleAt: "2026-10-21T09:00:00Z", bodyAt: "2026-10-21T10:00:00Z", labelAt: null });
+  assert.deepEqual(times.get(900002), { titleAt: null, bodyAt: null, labelAt: null });
+});
+
+test("the last label change of each issue is read with its rename and body edit", async () => {
+  const gh = recordingGitHub(() => ({
+    data: {
+      repository: {
+        i900001: {
+          lastEditedAt: null,
+          timelineItems: { nodes: [{ createdAt: "2026-10-21T09:00:00Z" }] },
+          labelEvents: { nodes: [{ createdAt: "2026-10-21T11:00:00Z" }] },
+        },
+      },
+    },
+  }));
+  const times = await readIssueChangeTimes("token-sintetico", [900001], { fetch: gh.fetch });
+  assert.deepEqual(times.get(900001), { titleAt: "2026-10-21T09:00:00Z", bodyAt: null, labelAt: "2026-10-21T11:00:00Z" });
+  assert.match((gh.calls[0].body as { query: string }).query, /LABELED_EVENT/);
+});
+
+test("pushing labels and the native type sends them in the same edit of the issue", async () => {
+  const gh = recordingGitHub();
+  await updateIssue("token-sintetico", 900001, { labels: ["type:bug", "area:backend"], type: "Bug" }, { fetch: gh.fetch });
+  assert.equal(gh.calls.length, 1);
+  assert.equal(gh.calls[0].method, "PATCH");
+  assert.deepEqual(gh.calls[0].body, { labels: ["type:bug", "area:backend"], type: "Bug" });
+});
+
+test("a board field is written by its id with the option's id", async () => {
+  const gh = recordingGitHub();
+  await setProjectOption("token-sintetico", "PVTI_card", "PVTSSF_campo", "opcao-1", { fetch: gh.fetch });
+  assert.equal(gh.calls.length, 1);
+  const v = (gh.calls[0].body as { variables: Record<string, unknown> }).variables;
+  assert.deepEqual({ item: v.item, field: v.field, value: v.value }, { item: "PVTI_card", field: "PVTSSF_campo", value: { singleSelectOptionId: "opcao-1" } });
+});
+
+test("the board's options are read with their names, so Effort can be matched while its options have no fixed ids", async () => {
+  const gh = recordingGitHub(() => ({
+    data: {
+      node: {
+        fields: {
+          nodes: [
+            { id: "PVTSSF_effort", name: "Effort", options: [{ id: "e1", name: "Low" }, { id: "e2", name: "Very High" }] },
+            { id: "PVTF_texto", name: "Description" },
+            {},
+          ],
+        },
+      },
+    },
+  }));
+  const options = await readBoardOptions("token-sintetico", { fetch: gh.fetch });
+  assert.deepEqual(
+    [...options.entries()].map(([k, v]) => [k, v && [...v.entries()]]),
+    [
+      ["PVTSSF_effort", [["e1", "Low"], ["e2", "Very High"]]],
+      ["PVTF_texto", null],
+    ]
+  );
 });
 
 // Synthetic ids of a board like Project #7: what matters is that the fields are matched by these ids.
@@ -200,4 +293,26 @@ test("setting an issue's assignees sends the whole list, and nothing else of the
   assert.equal(gh.calls[0].method, "PATCH");
   assert.match(gh.calls[0].url, /\/issues\/900001$/);
   assert.deepEqual(gh.calls[0].body, { assignees: ["ana-y"] });
+});
+
+// ---- Week (S5): a date field of the card
+
+test("a Week is written to the card's date field by its id, and cleared when the item leaves its week", async () => {
+  const gh = recordingGitHub();
+  await setProjectDate("token-sintetico", "PVTI_card", "PVTF_week", "2026-10-26", { fetch: gh.fetch });
+  await clearProjectField("token-sintetico", "PVTI_card", "PVTF_week", { fetch: gh.fetch });
+  const [set, clear] = gh.calls.map((c) => c.body as { query: string; variables: Record<string, unknown> });
+  assert.deepEqual({ item: set.variables.item, field: set.variables.field, value: set.variables.value }, { item: "PVTI_card", field: "PVTF_week", value: { date: "2026-10-26" } });
+  assert.match(clear.query, /clearProjectV2ItemFieldValue/);
+  assert.deepEqual({ item: clear.variables.item, field: clear.variables.field }, { item: "PVTI_card", field: "PVTF_week" });
+});
+
+test("the board's fields are read with their names, so a field created on the board (Week) is found by its name", async () => {
+  const gh = recordingGitHub(() => ({
+    data: { node: { fields: { nodes: [{ id: "PVTF_week", name: "Week", dataType: "DATE" }, { id: "PVTSSF_x", name: "Stack", dataType: "SINGLE_SELECT", options: [{ id: "o1", name: "Backend" }] }] } } },
+  }));
+  const fields = await readBoardFields("token-sintetico", { fetch: gh.fetch });
+  assert.equal(fields.byName.get("Week"), "PVTF_week");
+  assert.deepEqual([...(fields.options.get("PVTSSF_x") ?? [])], [["o1", "Backend"]]);
+  assert.equal(fields.options.get("PVTF_week"), null);
 });

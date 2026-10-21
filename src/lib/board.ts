@@ -40,6 +40,8 @@ type ProjectNode = {
   content?: { number?: number; title?: string; url?: string; repository?: { nameWithOwner?: string } } | null;
   /** The Status value; `updatedAt` is when GitHub last changed it on this card. */
   fieldValueByName?: { name?: string; updatedAt?: string } | null;
+  /** The card's field values; the single selects carry the option's id, when it was set and the field's id. */
+  fieldValues?: { nodes?: ({ optionId?: string; date?: string; updatedAt?: string; field?: { id?: string } } | null)[] } | null;
 };
 
 export function boardCard(node: ProjectNode): { status: BoardStatus; card: BoardCard } | null {
@@ -54,7 +56,18 @@ export function boardCard(node: ProjectNode): { status: BoardStatus; card: Board
   };
 }
 
-export type ProjectCard = { itemId: string; number: number; status: BoardStatus; statusAt: string };
+export type CardOption = { optionId: string; updatedAt: string };
+
+export type ProjectCard = {
+  itemId: string;
+  number: number;
+  status: BoardStatus;
+  statusAt: string;
+  /** Each single-select value of the card, by its field's id (the two-way sync of Stack, Priority and Effort). */
+  options?: Record<string, CardOption>;
+  /** Each date value of the card, by its field's id (the two-way sync of Week). */
+  dates?: Record<string, { date: string; updatedAt: string }>;
+};
 
 /**
  * A GeoCloud card as the sprint sync reads it: its id on the Project, the issue, its Status and since when.
@@ -65,7 +78,15 @@ export function projectCard(node: ProjectNode): ProjectCard | null {
   const number = node.content?.number;
   const statusAt = node.fieldValueByName?.updatedAt;
   if (!card || !number || !node.id || !statusAt) return null;
-  return { itemId: node.id, number, status: card.status, statusAt };
+  if (!node.fieldValues) return { itemId: node.id, number, status: card.status, statusAt };
+  const options: Record<string, CardOption> = {};
+  const dates: Record<string, { date: string; updatedAt: string }> = {};
+  for (const v of node.fieldValues.nodes ?? []) {
+    if (!v?.updatedAt || !v.field?.id) continue;
+    if (v.optionId) options[v.field.id] = { optionId: v.optionId, updatedAt: v.updatedAt };
+    else if (v.date) dates[v.field.id] = { date: v.date, updatedAt: v.updatedAt };
+  }
+  return { itemId: node.id, number, status: card.status, statusAt, options, dates };
 }
 
 const COLUMN_OF_STATUS = { Open: "open", Development: "dev" } as const;

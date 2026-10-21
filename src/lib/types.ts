@@ -57,6 +57,8 @@ export type RoadmapItem = {
   status?: "open" | "dev" | "blocker" | "done";
   /** The item's Assignees, as GitHub logins (issue #23); shown by the name of the profile with that login. */
   assignees?: string[];
+  /** The item's own Status (issue #22), kept equal to its issue's by the sync: Done closes it, Blocker blocks it. */
+  state?: "Open" | "Blocker" | "Done";
   notes: Note[];
 };
 

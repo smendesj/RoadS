@@ -9,6 +9,10 @@
 //
 // Pure on purpose: board-sync.ts reads both sides, applies the decisions and remembers the new base.
 
+import { areaLabels, isHighPriority, TIPOS, type Stack, type Tipo } from "./issue-fields.ts";
+import type { Prioridade } from "./types.ts";
+import { currentMonday } from "./sprint-week.ts";
+
 export type FieldSides = {
   /** What the RoadS item says now. */
   roads: string;
@@ -20,12 +24,18 @@ export type FieldSides = {
   roadsAt: string | null;
   /** When the field was last changed on GitHub (ISO), if known; only needed when both sides moved. */
   githubAt: string | null;
+  /**
+   * An empty value on GitHub is a gap RoadS fills with its own (Type, Stack, Priority, Effort), not a value to copy; only
+   * with a value someone edited in RoadS (`roadsAt`), never with a default nobody chose, which waits for that edit.
+   */
+  fillGap?: boolean;
 };
 
 export type FieldDecision = "pull" | "push" | "none";
 
 export function decideField(f: FieldSides): FieldDecision {
   if (f.roads === f.github) return "none";
+  if (f.fillGap && f.github === "") return f.roadsAt ? "push" : "none";
   if (f.base === null) return "pull";
   const roadsMoved = f.roads !== f.base;
   const githubMoved = f.github !== f.base;
@@ -33,6 +43,115 @@ export function decideField(f: FieldSides): FieldDecision {
   if (githubMoved && !roadsMoved) return "pull";
   if (f.roadsAt && f.githubAt && Date.parse(f.roadsAt) > Date.parse(f.githubAt)) return "push";
   return "pull";
+}
+
+/** Whether two bases hold the same fields with the same values: an item whose base didn't change isn't written again. */
+export function sameBase(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => Object.hasOwn(b, k) && a[k] === b[k]);
+}
+
+/** The Type an issue's labels give: its first type: label RoadS knows (type:epic is a block, not a Type). */
+export function tipoOfLabels(labels: string[]): Tipo | null {
+  for (const l of labels) {
+    const t = l.startsWith("type:") ? l.slice(5) : "";
+    if ((TIPOS as readonly string[]).includes(t)) return t as Tipo;
+  }
+  return null;
+}
+
+/** The issue's native type a Type implies: Bug and Feature by name, the rest Task. */
+export function nativeTypeOf(tipo: Tipo): "Bug" | "Feature" | "Task" {
+  return tipo === "bug" ? "Bug" : tipo === "feature" ? "Feature" : "Task";
+}
+
+export type LabelledField = "tipo" | "stack" | "prioridade";
+
+/**
+ * The issue's labels once its Type, Stack and Priority are these values. A field in `changed` swaps the labels of its
+ * family (type: for the Type, area: for the Stack, priority:high for the Priority) for the ones it implies; any other
+ * field only adds the ones it implies that are missing (the gaps), never removing a label someone put there. Labels of
+ * other families are kept in their order, and the new ones go at the end.
+ */
+export function labelsAfter(
+  labels: string[],
+  values: { tipo: Tipo | null; stack: Stack | null; prioridade: Prioridade | null },
+  changed: ReadonlySet<LabelledField>
+): string[] {
+  const isType = (l: string) => l.startsWith("type:") && (TIPOS as readonly string[]).includes(l.slice(5));
+  const isArea = (l: string) => l === "area:frontend" || l === "area:backend";
+  const dropped = (l: string) =>
+    (changed.has("tipo") && isType(l)) || (changed.has("stack") && isArea(l)) || (changed.has("prioridade") && l === "priority:high");
+  const next = labels.filter((l) => !dropped(l));
+  const add = (l: string) => {
+    if (!next.includes(l)) next.push(l);
+  };
+  if (values.tipo && !next.some(isType)) add(`type:${values.tipo}`);
+  if (values.stack) areaLabels(values.stack).forEach(add);
+  if (values.prioridade && isHighPriority(values.prioridade)) add("priority:high");
+  return next;
+}
+
+// ---- Week (S5). An item's Week is the Monday of its week lane ("" in a block); on the board it is the date field Week.
+
+/** The Monday of the item's week, or "" when it sits in a block. */
+export function weekOfLane(lane: { kind: string; start_date: string | null } | undefined): string {
+  return lane?.kind === "sprint" && lane.start_date ? lane.start_date : "";
+}
+
+/** The issue's Week: the Monday of the date on its card (a weekend counts as the week after, as the calendar does). */
+export function weekOfIssue(date: string | null | undefined): string {
+  return date ? currentMonday(date) : "";
+}
+
+/** Where a Week brought from GitHub puts the item: into that week, or back to its block; a week gone by moves nothing. */
+export function weekPull(monday: string, today: string): { to: "week"; monday: string } | { to: "block" } | null {
+  if (!monday) return { to: "block" };
+  return monday < currentMonday(today) ? null : { to: "week", monday };
+}
+
+// ---- Status (S4). An item's own Status is Open, Blocker or Done. Development is not a Status RoadS keeps: it is being
+// in the current sprint, which the sprint sync (sprint-status-sync.ts) keeps in step with the Project, as since 06/10.
+
+export type ItemStatus = "Open" | "Blocker" | "Done";
+export type SelectorStatus = "Open" | "Development" | "Blocker" | "Done";
+type CardStatus = "Open" | "Development" | "Blocker" | "Done";
+
+/** The issue's Status as RoadS compares it: Done when the issue is closed or its card says Done, Blocker when the card says so. */
+export function statusOfIssue({ closed, card }: { closed: boolean; card: CardStatus | null }): ItemStatus {
+  if (closed || card === "Done") return "Done";
+  return card === "Blocker" ? "Blocker" : "Open";
+}
+
+/**
+ * What GitHub gets when RoadS's Status wins over the issue's: Done closes the issue as completed, leaving Done reopens
+ * it, and the card's Status follows (an open item is Development in the current sprint, Open outside it).
+ */
+export function statusWrites(
+  roads: ItemStatus,
+  github: ItemStatus,
+  inCurrentSprint: boolean
+): { issue: { state: "open" | "closed"; state_reason: "completed" | "reopened" } | null; card: CardStatus } {
+  if (roads === "Done") return { issue: { state: "closed", state_reason: "completed" }, card: "Done" };
+  const issue = github === "Done" ? ({ state: "open", state_reason: "reopened" } as const) : null;
+  return { issue, card: roads === "Blocker" ? "Blocker" : inCurrentSprint ? "Development" : "Open" };
+}
+
+/** The selector's value for an item: its Done or Blocker, else Development in the current sprint and Open outside it. */
+export function selectorStatus(status: ItemStatus, inCurrentSprint: boolean): SelectorStatus {
+  return status === "Open" && inCurrentSprint ? "Development" : status;
+}
+
+/** What a choice in the selector stores, and the move it makes: Development and Open are where the item is planned. */
+export function storedStatus(choice: SelectorStatus, inCurrentSprint: boolean): { status: ItemStatus; move: "into_sprint" | "out_of_sprint" | null } {
+  if (choice === "Development") return { status: "Open", move: inCurrentSprint ? null : "into_sprint" };
+  if (choice === "Open") return { status: "Open", move: inCurrentSprint ? "out_of_sprint" : null };
+  return { status: choice, move: null };
+}
+
+/** The Comment a Delete leaves on the issue it closes; the profile has no name, so it names the role. */
+export function deletionComment(role: "admin" | "scrum_master"): string {
+  return `Deleted in RoadS by ${role === "admin" ? "an admin" : "a scrum master"}: this issue was closed as not planned.`;
 }
 
 /** Who may write to GitHub through a sync: scrum masters, admins and the daily cron. A dev's press only pulls. */

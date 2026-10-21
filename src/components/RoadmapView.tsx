@@ -12,6 +12,7 @@ import type { SyncColumn } from "@/lib/board-sync";
 import { useAutoSync } from "@/lib/use-auto-sync";
 import { useTouchDrag } from "@/lib/use-touch-drag";
 import { isStack } from "@/lib/issue-fields";
+import { selectorStatus } from "@/lib/bilateral-sync";
 import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { DONE_WINDOW_DAYS, kanbanColumns, type KanbanIssue } from "@/lib/kanban";
 import { columnClass, KANBAN_TABS, shownTab, type KanbanTab } from "@/lib/kanban-tabs";
@@ -222,18 +223,20 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
 
   function startEdit(item: RoadmapItem, place: Place) {
     setEditing({ id: item.id, place });
+    const inCurrentWeek = !!currentWeek && lanes.some((l) => l.id === currentWeek && l.items.some((it) => it.id === item.id));
     setEditDraft({
       prioridade: item.prioridade,
       effort: item.effort,
       note: "",
       assignees: item.assignees ?? [],
+      status: selectorStatus(item.state ?? "Open", inCurrentWeek),
       content: canEditContent(item)
         ? {
             title: item.title,
             description: item.desc,
             produto: item.produto,
             tipo: item.tipo ?? "feature",
-            stack: isStack(item.stack) ? item.stack : "Geral",
+            stack: isStack(item.stack) ? item.stack : "General",
           }
         : undefined,
     });

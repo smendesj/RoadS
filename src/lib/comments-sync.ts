@@ -3,6 +3,7 @@ import "server-only";
 import { planComments, type CommentAction, type NoteSide } from "@/lib/comment-sync";
 import { createIssueComment, deleteIssueComment, readIssueComments, updateIssueComment, type GitHubPort } from "@/lib/github";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { inPool } from "@/lib/pool";
 import { isTestData } from "@/lib/test-data";
 
 // The sync step of an item's Comments with its issue's comments (issue #23): reads both sides for the items whose
@@ -13,6 +14,8 @@ import { isTestData } from "@/lib/test-data";
 export type CommentsSummary = { pulled: number; pushed: number; failed: number; error?: string };
 
 const ISSUE_URL = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
+// Items written at once, as the other two-way fields (board-sync.ts): a few at a time, within GitHub's write limits.
+const POOL = 6;
 const BATCH = 20;
 const WRITES: CommentAction["kind"][] = ["create", "update", "delete"];
 
@@ -48,9 +51,9 @@ export async function syncItemComments(token: string, openNumbers: number[], pus
   }
 
   const summary: CommentsSummary = { pulled: 0, pushed: 0, failed: 0 };
-  for (const [number, item] of byNumber) {
+  await inPool([...byNumber], POOL, async ([number, item]) => {
     const theirs = comments.get(number);
-    if (!theirs) continue; // not read (too many comments): its Comments are left alone this time
+    if (!theirs) return; // not read (too many comments): its Comments are left alone this time
     const sides: NoteSide[] = item.notes.map((n) => ({
       id: n.id,
       body: n.body,
@@ -71,7 +74,7 @@ export async function syncItemComments(token: string, openNumbers: number[], pus
         summary.failed++;
       }
     }
-  }
+  });
   return summary;
 }
 

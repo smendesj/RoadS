@@ -5,6 +5,7 @@ import { isStack, isTipo, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } fr
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
 import { ItemComment } from "@/components/ItemComment";
 import { assigneeNames } from "@/lib/assignee-sync";
+import type { SelectorStatus } from "@/lib/bilateral-sync";
 
 const PRIORIDADES: Prioridade[] = ["Critical", "High", "Medium", "Low"];
 const EFFORTS: Effort[] = ["Very High", "High", "Medium", "Low"];
@@ -17,7 +18,11 @@ export type EditDraft = {
   content?: { title: string; description: string; produto: Produto; tipo: Tipo; stack: Stack };
   /** The Assignees being picked, as GitHub logins (issue #23). */
   assignees?: string[];
+  /** The Status selector (issue #22): Development and Open plan the item into or out of the current sprint. */
+  status: SelectorStatus;
 };
+
+const STATUSES: SelectorStatus[] = ["Open", "Development", "Blocker", "Done"];
 
 /** The profiles to pick from, plus any login already assigned that no profile has (shown as the login). */
 function assigneeChoices(people: { login: string; name: string }[], current: string[]) {
@@ -133,7 +138,8 @@ export function ItemCard({
         <span className={badgeClass(produtoTone(item.produto))}>{item.produto}</span>
         <span className={badgeClass(prioridadeTone(item.prioridade))}>{item.prioridade}</span>
         <span className={badgeClass(effortTone(item.effort))}>{item.effort}</span>
-        {item.status === "done" && <span className={badgeClass("green")}>Concluído</span>}
+        {(item.status === "done" || item.state === "Done") && <span className={badgeClass("green")}>Concluído</span>}
+        {item.state === "Blocker" && <span className={badgeClass("red")}>Blocker</span>}
       </div>
 
       {item.desc && <p className="text-[13px] leading-snug text-rs-text-soft">{item.desc}</p>}
@@ -231,6 +237,20 @@ export function ItemCard({
               </select>
             </label>
           </div>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Status</span>
+            <select
+              value={editDraft.status}
+              onChange={(e) => onDraftChange({ ...editDraft, status: e.target.value as SelectorStatus })}
+              className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-base font-bold text-rs-text sm:text-xs"
+            >
+              {STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
           {editDraft.assignees && (people.length > 0 || editDraft.assignees.length > 0) && (
             <fieldset data-assignees className="flex flex-col gap-1">
               <legend className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Assignees</legend>

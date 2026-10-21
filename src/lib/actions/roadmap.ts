@@ -3,14 +3,15 @@
 import { getLatestBoardSnapshot } from "@/lib/actions/sync";
 import { withIssueStatus } from "@/lib/board";
 import type { SyncColumn } from "@/lib/board-sync";
-import { createGeoCloudIssue, readIssueLabels } from "@/lib/github";
+import { deletionComment, storedStatus, type ItemStatus, type SelectorStatus } from "@/lib/bilateral-sync";
+import { closeIssueAsNotPlanned, createGeoCloudIssue, readIssueLabels } from "@/lib/github";
 import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
 import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
-import { mayGetIssue } from "@/lib/test-data";
+import { isTestData, mayGetIssue } from "@/lib/test-data";
 import { commentAuthorName } from "@/lib/comment-author";
 import { assigneeKey, parseLogin } from "@/lib/assignee-sync";
-import { currentSprintLane } from "@/lib/current-sprint";
+import { currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
 import { sprintLanesByDate, todayInSaoPaulo, weekDates, weekLanes, weekTitle } from "@/lib/sprint-week";
 import { weekRow } from "@/lib/week-plan";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -30,6 +31,7 @@ type ItemRow = {
   github_issue_url: string | null;
   tipo?: RoadmapItem["tipo"];
   stack?: string | null;
+  status?: ItemStatus;
   created_by: string | null;
   created_at?: string;
   assignees?: string[] | null;
@@ -58,6 +60,7 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
     number: Number(row.github_issue_url?.match(/\/issues\/(\d+)/)?.[1]) || null,
     tipo: row.tipo ?? null,
     stack: row.stack ?? null,
+    ...(row.status ? { state: row.status } : {}),
     createdBy: row.created_by,
     ...(row.created_at ? { createdAt: row.created_at } : {}),
     assignees: row.assignees ?? [],
@@ -91,7 +94,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
 
   const { data: items, error: itemsError } = await supabase
     .from("roadmap_items")
-    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, created_at, assignees, notes:item_notes(id, author_id, author_role, author_name, github_login, created_at, updated_at, deleted_at, body)")
+    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, status, created_by, created_at, assignees, notes:item_notes(id, author_id, author_role, author_name, github_login, created_at, updated_at, deleted_at, body)")
     .order("sort_order")
     .order("id");
   if (itemsError) throw itemsError;
@@ -176,7 +179,7 @@ export async function createRoadmapItem(): Promise<RoadmapItem> {
       effort: "Medium",
       created_by: userId,
     })
-    .select("id, lane_id, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, created_at")
+    .select("id, lane_id, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, status, created_by, created_at")
     .single();
   if (error) throw error;
 
@@ -206,6 +209,9 @@ async function getItemAccess(
       github_issue_url: string | null;
       tipo: Tipo | null;
       stack: Stack | null;
+      prioridade: Prioridade;
+      effort: Effort;
+      status: ItemStatus;
       field_changed_at: Record<string, string> | null;
       assignees: string[] | null;
     };
@@ -214,7 +220,7 @@ async function getItemAccess(
   const supabase = await createServerSupabase();
   const { data: item, error } = await supabase
     .from("roadmap_items")
-    .select("lane_id, title, produto, description, github_issue_url, tipo, stack, created_by, field_changed_at, assignees")
+    .select("lane_id, title, produto, description, github_issue_url, tipo, stack, prioridade, effort, status, created_by, field_changed_at, assignees")
     .eq("id", itemId)
     .single();
   if (error) throw error;
@@ -238,6 +244,8 @@ export async function saveRoadmapItemEdit(
     activeView: ViewAs;
     content?: { title: string; description: string; produto: Produto; tipo: Tipo; stack: Stack };
     assignees?: string[];
+    /** The Status selector's choice (issue #22); absent, the Status and the week stay as they are. */
+    status?: SelectorStatus;
   }
 ): Promise<void> {
   const actor = await requireScrumMasterActor();
@@ -251,37 +259,49 @@ export async function saveRoadmapItemEdit(
   // scrum_master regardless of what the client claims, so it can't be spoofed as a dev note.
   const authorRole = realRole === "admin" ? input.activeView : "scrum_master";
 
+  if (input.status !== undefined && !["Open", "Development", "Blocker", "Done"].includes(input.status)) throw new Error("invalid_status");
+  const current = await currentSprintLane(supabase).catch(() => null);
+  const inCurrentSprint = access.item.lane_id === current?.id;
+  const chosen = input.status ? storedStatus(input.status, inCurrentSprint) : null;
+
+  const now = new Date().toISOString();
   const update: Record<string, unknown> = {
     prioridade: input.prioridade,
     effort: input.effort,
-    updated_at: new Date().toISOString(),
+    updated_at: now,
   };
+  // When each field was last edited here: the two-way sync settles a field both sides changed by these times.
+  const changedAt = { ...(access.item.field_changed_at ?? {}) };
+  if (input.prioridade !== access.item.prioridade) changedAt.prioridade = now;
+  if (input.effort !== access.item.effort) changedAt.effort = now;
 
   if (input.content) {
     const title = input.content.title.trim();
     if (!title) throw new Error("title_required");
     update.title = title;
     update.description = input.content.description.trim();
-    // When each field was last edited here: the two-way sync settles a field both sides changed by these times.
-    const changedAt = { ...(access.item.field_changed_at ?? {}) };
-    const now = update.updated_at as string;
     if (title !== access.item.title) changedAt.title = now;
     if (update.description !== access.item.description) changedAt.description = now;
-    update.field_changed_at = changedAt;
     update.produto = input.content.produto;
     if (!isTipo(input.content.tipo) || !isStack(input.content.stack)) throw new Error("type_and_stack_required");
+    if (input.content.tipo !== access.item.tipo) changedAt.tipo = now;
+    if (input.content.stack !== access.item.stack) changedAt.stack = now;
     update.tipo = input.content.tipo;
     update.stack = input.content.stack;
   }
-
+  if (chosen) {
+    update.status = chosen.status;
+    if (chosen.status !== access.item.status) changedAt.status = now;
+  }
   // Assignees (issue #23): GitHub logins, kept in lower case; their edit time settles them like the other fields.
   if (input.assignees) {
     const logins = [...new Set(input.assignees.map((l) => parseLogin(l)).filter((l): l is string => typeof l === "string"))];
     if (assigneeKey(logins) !== assigneeKey(access.item.assignees ?? [])) {
       update.assignees = logins;
-      update.field_changed_at = { ...(access.item.field_changed_at ?? {}), ...((update.field_changed_at as object | undefined) ?? {}), assignees: update.updated_at };
+      changedAt.assignees = now;
     }
   }
+  update.field_changed_at = changedAt;
 
   const { error: updateError } = await supabase.from("roadmap_items").update(update).eq("id", itemId);
   if (updateError) throw updateError;
@@ -299,8 +319,13 @@ export async function saveRoadmapItemEdit(
     if (noteError) throw noteError;
   }
 
+  // Development and Open are where the item is planned: into the current sprint (its week created when missing) or out of
+  // it, back to its type lane, through the same move a drag makes (queued, and kept in step with the Project by the sync).
+  if (chosen?.move === "into_sprint") await moveRoadmapItemLane(itemId, await ensureCurrentSprintLane(createAdminClient()));
+  if (chosen?.move === "out_of_sprint") await moveRoadmapItemLane(itemId, KANBAN);
+  const inSprintNow = chosen?.move ? chosen.move === "into_sprint" : inCurrentSprint;
+
   // Born in the current week, the issue is Development on the Project from the start (Open when that can't be read).
-  const current = await currentSprintLane(supabase).catch(() => null);
   const issue = await ensureIssue(
     itemId,
     {
@@ -310,15 +335,16 @@ export async function saveRoadmapItemEdit(
       prioridade: input.prioridade,
       effort: input.effort,
       tipo: input.content ? input.content.tipo : access.item.tipo ?? "feature",
-      stack: input.content ? input.content.stack : access.item.stack ?? "Geral",
+      stack: input.content ? input.content.stack : access.item.stack ?? "General",
     },
-    access.item.lane_id === current?.id ? "Development" : "Open"
+    inSprintNow ? "Development" : "Open"
   );
 
   await queueChange(itemId, "modify", {
     prioridade: input.prioridade,
     effort: input.effort,
     note: input.note.trim() || null,
+    ...(chosen ? { status: chosen.status } : {}),
     ...(input.content ? { title: update.title, description: update.description, produto: update.produto, tipo: update.tipo, stack: update.stack } : {}),
     ...(issue ? { github_issue_url: issue.url } : {}),
   });
@@ -357,6 +383,12 @@ export async function deleteRoadmapItem(itemId: string): Promise<void> {
 
   const access = await getItemAccess(itemId, actor);
   if (!access.canDelete) throw new Error("forbidden");
+
+  // Its GeoCloud issue is closed as not planned first, with a Comment saying who deleted it (reopening the issue brings
+  // the item back). If GitHub refuses, nothing is deleted: the item would come back with the next sync anyway.
+  const number = Number(access.item.github_issue_url?.match(/github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i)?.[1]);
+  const token = process.env.GITHUB_TOKEN;
+  if (number && token && !isTestData(access.item.title)) await closeIssueAsNotPlanned(token, number, deletionComment(actor.realRole));
 
   // Queued before the delete so the row still exists for the FK; item_id then goes null via
   // "on delete set null" and the payload keeps the id for FrontlightS.
@@ -424,7 +456,7 @@ export async function moveRoadmapItemLane(itemId: string, targetLaneId: string, 
 
   const { data: moved, error } = await supabase
     .from("roadmap_items")
-    .update({ lane_id: to, ...(place ? { sort_order: place.sortOrder } : {}), updated_at: new Date().toISOString() })
+    .update({ lane_id: to, ...(place ? { sort_order: place.sortOrder } : {}), ...weekEdited(access.item.field_changed_at), updated_at: new Date().toISOString() })
     .eq("id", itemId)
     .select("id");
   if (error || !moved?.length) {
@@ -453,7 +485,15 @@ const GEOCLOUD_ISSUE = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
 // in no week stays. Queued like any move, with both lanes; the future week it left, now empty, goes. Leaving the
 // current week, the Project goes back to Open through the sprint sync (only with its write switch on); leaving a week
 // to come, nothing changes on the Project.
-async function unplanItem(itemId: string, item: { lane_id: string; title: string; github_issue_url: string | null; tipo: Tipo | null }): Promise<void> {
+// A move changes the item's Week (issue #22): its time is kept for the two-way sync, as a saved field's is.
+function weekEdited(changedAt: Record<string, string> | null): { field_changed_at: Record<string, string> } {
+  return { field_changed_at: { ...(changedAt ?? {}), week: new Date().toISOString() } };
+}
+
+async function unplanItem(
+  itemId: string,
+  item: { lane_id: string; title: string; github_issue_url: string | null; tipo: Tipo | null; field_changed_at: Record<string, string> | null }
+): Promise<void> {
   const supabase = await createServerSupabase();
   const { data: lanes, error: lanesError } = await supabase.from("lanes").select("id, kind");
   if (lanesError) throw lanesError;
@@ -475,7 +515,7 @@ async function unplanItem(itemId: string, item: { lane_id: string; title: string
 
   const { data: moved, error } = await supabase
     .from("roadmap_items")
-    .update({ lane_id: to, sort_order: sortOrder, updated_at: new Date().toISOString() })
+    .update({ lane_id: to, sort_order: sortOrder, ...weekEdited(item.field_changed_at), updated_at: new Date().toISOString() })
     .eq("id", itemId)
     .eq("lane_id", from)
     .select("id");
