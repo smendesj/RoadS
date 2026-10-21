@@ -166,7 +166,7 @@ export async function createGeoCloudIssue(
   const layout = await readBoardLayout(token, port);
   const wanted: [string, string, FieldValue][] = [
     ["Status", STATUS_FIELD_ID, { singleSelectOptionId: STATUS_OPTIONS[status] }],
-    ["Prioridade", PRIORIDADE_FIELD_ID, { singleSelectOptionId: PRIORIDADE_OPTION_IDS[prioridade] }],
+    ["Priority", PRIORIDADE_FIELD_ID, { singleSelectOptionId: PRIORIDADE_OPTION_IDS[prioridade] }],
     ["Stack", STACK_FIELD_ID, { singleSelectOptionId: STACK_OPTION_IDS[stack] }],
     ["Description", DESCRIPTION_FIELD_ID, { text: description.trim() || title }],
   ];
