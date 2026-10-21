@@ -44,11 +44,11 @@ bloqueia gravação de arquivos `.env*`) com `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_P
 `GITHUB_TOKEN` é um PAT clássico com `repo`, `read:org` e `project`. O `project` é de leitura **e** escrita: o
 RoadS já escreve no Project ao criar uma issue.
 
-`PROJECT_STATUS_WRITE` é **opcional**. Com `on`, a sincronização (botão, cron diário e
-`POST /api/frontlights/sync-board`) escreve Development ou Open no Project para manter o sprint atual do Roadmap
-e o Status em acordo (vale quem mexeu por último; Done e Blocker nunca são escritos). Com qualquer outro valor,
-ou sem a variável, ela só **informa** o que escreveria; o Roadmap continua seguindo o que o Project diz. A regra
-e o que o Frontlights vê dela estão em `docs/frontlights-contract.md`.
+A sincronização (botão, cron diário e `POST /api/frontlights/sync-board`) escreve no GitHub quando quem a roda é
+scrum master ou admin (ou o cron e o Frontlights): o Status do Project (Development ou Open para manter o sprint
+atual do Roadmap em acordo, e o Status próprio do item, Blocker ou Done, que fecha e reabre a issue) e os campos da
+issue (issue #22). A sincronização de um dev só **puxa**. A antiga variável `PROJECT_STATUS_WRITE` não é mais lida.
+A regra e o que o Frontlights vê dela estão em `docs/frontlights-contract.md`.
 
 ## Setup do banco
 
