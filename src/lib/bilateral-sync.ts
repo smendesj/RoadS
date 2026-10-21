@@ -11,6 +11,7 @@
 
 import { areaLabels, isHighPriority, TIPOS, type Stack, type Tipo } from "./issue-fields.ts";
 import type { Prioridade } from "./types.ts";
+import { currentMonday } from "./sprint-week.ts";
 
 export type FieldSides = {
   /** What the RoadS item says now. */
@@ -80,6 +81,24 @@ export function labelsAfter(
   if (values.stack) areaLabels(values.stack).forEach(add);
   if (values.prioridade && isHighPriority(values.prioridade)) add("priority:high");
   return next;
+}
+
+// ---- Week (S5). An item's Week is the Monday of its week lane ("" in a block); on the board it is the date field Week.
+
+/** The Monday of the item's week, or "" when it sits in a block. */
+export function weekOfLane(lane: { kind: string; start_date: string | null } | undefined): string {
+  return lane?.kind === "sprint" && lane.start_date ? lane.start_date : "";
+}
+
+/** The issue's Week: the Monday of the date on its card (a weekend counts as the week after, as the calendar does). */
+export function weekOfIssue(date: string | null | undefined): string {
+  return date ? currentMonday(date) : "";
+}
+
+/** Where a Week brought from GitHub puts the item: into that week, or back to its block; a week gone by moves nothing. */
+export function weekPull(monday: string, today: string): { to: "week"; monday: string } | { to: "block" } | null {
+  if (!monday) return { to: "block" };
+  return monday < currentMonday(today) ? null : { to: "week", monday };
 }
 
 // ---- Status (S4). An item's own Status is Open, Blocker or Done. Development is not a Status RoadS keeps: it is being

@@ -30,16 +30,16 @@ import "server-only";
 // endpoint any signed-in user can call directly, and syncBoard authorizes nobody (the cron has no
 // session) and writes with the admin client.
 
-import { createGeoCloudIssue, EFFORT_FIELD_ID, GEOCLOUD_REPO, PRIORIDADE_FIELD_ID, readBoardOptions, readIssueChangeTimes, readIssueState, setProjectOption, setProjectStatus, STACK_FIELD_ID, updateIssue, type IssueChange, type IssueChangeTimes } from "@/lib/github";
+import { createGeoCloudIssue, EFFORT_FIELD_ID, GEOCLOUD_REPO, PRIORIDADE_FIELD_ID, clearProjectField, readBoardFields, readIssueChangeTimes, readIssueState, setProjectDate, setProjectOption, setProjectStatus, STACK_FIELD_ID, updateIssue, type IssueChange, type IssueChangeTimes } from "@/lib/github";
 import { importableIssues, isTestData, mayGetIssue } from "@/lib/test-data";
-import { decideField, extractSolucao, labelsAfter, nativeTypeOf, replaceSolucao, statusOfIssue, statusWrites, tipoOfLabels, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
+import { decideField, extractSolucao, labelsAfter, nativeTypeOf, replaceSolucao, statusOfIssue, statusWrites, tipoOfLabels, weekOfIssue, weekOfLane, weekPull, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isEffort, isStack, isTipo, PRIORIDADE_OPTION_IDS, prioridadeOfOption, STACK_OPTION_IDS, stackOfOption, type Stack } from "@/lib/issue-fields";
 import type { Prioridade } from "@/lib/types";
 import { laneForLabels, releaseLane, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { planRotation, rotationIsIdle } from "@/lib/sprint-rotation";
-import { todayInSaoPaulo, weekLanes } from "@/lib/sprint-week";
+import { sprintIdFor, todayInSaoPaulo, weekLanes } from "@/lib/sprint-week";
 import { parseSlices, slicesQuery } from "@/lib/slices";
 import { removeClosedBeforeTheirWeek as runClosedRemoval, type ClosedRemovalDeps } from "@/lib/closed-before-week";
 import { currentSprintIn, currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
@@ -101,7 +101,10 @@ const QUERY = `
               ... on ProjectV2ItemFieldSingleSelectValue { name updatedAt }
             }
             fieldValues(first: 30) {
-              nodes { ... on ProjectV2ItemFieldSingleSelectValue { optionId updatedAt field { ... on ProjectV2FieldCommon { id } } } }
+              nodes {
+                ... on ProjectV2ItemFieldSingleSelectValue { optionId updatedAt field { ... on ProjectV2FieldCommon { id } } }
+                ... on ProjectV2ItemFieldDateValue { date updatedAt field { ... on ProjectV2FieldCommon { id } } }
+              }
             }
           }
         }
@@ -379,7 +382,7 @@ type Admin = ReturnType<typeof createAdminClient>;
 // sees it, as titles always were; a value written to GitHub changes only that field of the issue (labels of other
 // families are kept). What the issue said is remembered per field (github_seen), and the title also in github_title,
 // which older readers use. One item failing is counted and the others go on.
-type SyncedField = "title" | "description" | "tipo" | "stack" | "prioridade" | "effort" | "status";
+type SyncedField = "title" | "description" | "tipo" | "stack" | "prioridade" | "effort" | "status" | "week";
 const ISSUE_FIELDS = ["title", "description", "tipo"] as const;
 const BOARD_FIELDS = { stack: STACK_FIELD_ID, prioridade: PRIORIDADE_FIELD_ID, effort: EFFORT_FIELD_ID } as const;
 type BoardField = keyof typeof BOARD_FIELDS;
@@ -397,13 +400,23 @@ async function syncIssueFields(
   if (error) throw error;
   // An open item's Status on the card is Development in the current sprint and Open outside it.
   const currentId = (await currentSprintLane(admin).catch(() => null))?.id ?? null;
+  // The lanes tell an item's Week (the Monday of its week lane) and the block a Week emptied on GitHub sends it to.
+  const { data: lanes, error: lanesError } = await admin.from("lanes").select("id, kind, start_date");
+  if (lanesError) throw lanesError;
+  const laneById = new Map((lanes ?? []).map((l) => [l.id, l]));
+  const groupIds = new Set((lanes ?? []).filter((l) => l.kind === "group").map((l) => l.id));
+  const today = todayInSaoPaulo(new Date());
 
   // The board's options as they are now, read once: Effort's names both ways, and no write to an option the board
   // no longer has. Unreadable, the card fields wait for the next sync and the issue's own fields still go.
-  const options = await readBoardOptions(token).catch((e) => {
+  const fields = await readBoardFields(token).catch((e) => {
     console.error("syncBoard: board options unreadable, card fields skipped", e);
     return null;
   });
+  const options = fields?.options ?? null;
+  // The Week is a date field made on the board by hand, so it is found by its name (and taken only as a date field).
+  const weekId = fields?.byName.get("Week");
+  const weekField = weekId && options?.get(weekId) === null ? weekId : null;
   const effortOf = (id: string) => {
     const name = options?.get(EFFORT_FIELD_ID)?.get(id);
     return name && isEffort(name) ? name : null;
@@ -421,7 +434,7 @@ async function syncIssueFields(
 
   const byNumber = new Map(open.map((i) => [i.number, i]));
   type Side = { roads: string; github: string; githubAt?: string | null };
-  type Row = { id: string; laneId: string; number: number; issue: OpenIssue; card?: ProjectCard; seen: Record<string, string>; changedAt: Record<string, string>; values: Partial<Record<SyncedField, Side>> };
+  type Row = { id: string; laneId: string; tipo: string | null; number: number; issue: OpenIssue; card?: ProjectCard; seen: Record<string, string>; changedAt: Record<string, string>; values: Partial<Record<SyncedField, Side>> };
   const rows: Row[] = [];
   for (const item of items ?? []) {
     if (isTestData(item.title)) continue;
@@ -441,6 +454,10 @@ async function syncIssueFields(
     const card = cards.get(number);
     // The Status: Done and Blocker on the card are the item's own; Open and Development are both an open item.
     if (card) values.status = { roads: item.status ?? "Open", github: statusOfIssue({ closed: false, card: card.status }), githubAt: card.statusAt };
+    if (card && weekField) {
+      const value = card.dates?.[weekField];
+      values.week = { roads: weekOfLane(laneById.get(item.lane_id)), github: weekOfIssue(value?.date), githubAt: value?.updatedAt ?? null };
+    }
     if (card?.options && options) {
       const roadsOf: Record<BoardField, string> = { stack: isStack(item.stack) ? item.stack : "", prioridade: item.prioridade ?? "", effort: item.effort ?? "" };
       for (const field of Object.keys(BOARD_FIELDS) as BoardField[]) {
@@ -449,7 +466,7 @@ async function syncIssueFields(
         if (github !== null) values[field] = { roads: roadsOf[field], github, githubAt: value?.updatedAt ?? null };
       }
     }
-    rows.push({ id: item.id, laneId: item.lane_id, number, issue, card, seen, changedAt: (item.field_changed_at as Record<string, string> | null) ?? {}, values });
+    rows.push({ id: item.id, laneId: item.lane_id, tipo: item.tipo, number, issue, card, seen, changedAt: (item.field_changed_at as Record<string, string> | null) ?? {}, values });
   }
 
   const moved = (row: Row, field: SyncedField) => {
@@ -463,6 +480,34 @@ async function syncIssueFields(
   const githubAtOf = (field: SyncedField, side: Side, t?: IssueChangeTimes) =>
     field === "title" ? t?.titleAt : field === "description" ? t?.bodyAt : field === "tipo" ? t?.labelAt : side.githubAt;
 
+  // A Week changed on GitHub moves the item there (its week created when missing, the item last in it) or back to its
+  // block, the way the sprint sync moves one: only from where this sync saw it, queued as a move_lane with origin
+  // "project", undone if the queue refuses; a future week it leaves empty goes. Answers whether it moved.
+  async function moveToWeek(row: Row, to: NonNullable<ReturnType<typeof weekPull>>): Promise<boolean> {
+    const target = to.to === "week" ? await ensureWeekLane(admin, sprintIdFor(to.monday)) : releaseLane(row.issue.labels, row.tipo, groupIds);
+    if (!target || target === row.laneId) return false;
+    const sortOrder = to.to === "week" ? await nextSprintOrder(admin, target) : row.number;
+    const { data: moved, error } = await admin
+      .from("roadmap_items")
+      .update({ lane_id: target, sort_order: sortOrder })
+      .eq("id", row.id)
+      .eq("lane_id", row.laneId)
+      .select("id, title");
+    if (error) throw error;
+    if (!moved?.length) return false;
+    const { error: queueError } = await admin.from("roadmap_sync_queue").insert({
+      item_id: row.id,
+      action: "move_lane",
+      payload: moveLanePayload({ from: row.laneId, to: target, title: moved[0].title, reason: "week follows the issue on GitHub", origin: "project" }),
+    });
+    if (queueError) {
+      await admin.from("roadmap_items").update({ lane_id: row.laneId }).eq("id", row.id);
+      throw queueError;
+    }
+    if (laneById.get(row.laneId)?.kind === "sprint") await deleteFutureWeekIfEmpty(admin, row.laneId).catch(() => {});
+    return true;
+  }
+
   const summary = { pulled: 0, pushed: 0, failed: 0, retitled: 0 };
   for (const row of rows) {
     try {
@@ -470,6 +515,8 @@ async function syncIssueFields(
       const change: IssueChange = {};
       const cardWrites: [string, string][] = [];
       let cardStatus: ReturnType<typeof statusWrites>["card"] | null = null;
+      let cardWeek: string | null = null;
+      let weekMove: NonNullable<ReturnType<typeof weekPull>> | null = null;
       const relabel = new Set<LabelledField>();
       const pushedFields: SyncedField[] = [];
       const seen = { ...row.seen };
@@ -483,7 +530,11 @@ async function syncIssueFields(
           githubAt: githubAtOf(field, side, times.get(row.number)) ?? null,
           fillGap: field !== "title" && field !== "description" && field !== "status",
         });
-        if (decision === "pull") {
+        if (decision === "pull" && field === "week") {
+          // A Week brought in moves the item; a week gone by moves nothing and is looked at again next time.
+          weekMove = weekPull(github, today);
+          if (weekMove) seen.week = github;
+        } else if (decision === "pull") {
           pulled[field] = github;
           seen[field] = github;
           // A Stack or Priority changed on the board brings the labels it implies along on the issue.
@@ -497,6 +548,8 @@ async function syncIssueFields(
             const writes = statusWrites(roads as ItemStatus, github as ItemStatus, row.laneId === currentId);
             if (writes.issue) Object.assign(change, writes.issue);
             cardStatus = writes.card;
+          } else if (field === "week") {
+            cardWeek = roads; // the Monday, or "" to empty the field when the item left its week
           } else {
             const option = row.card && optionFor(field, roads);
             if (!option) continue; // the board has no such option (yet): nothing is written, and nothing remembered
@@ -529,6 +582,11 @@ async function syncIssueFields(
       if (Object.keys(change).length) await updateIssue(token, row.number, change);
       for (const [field, option] of cardWrites) await setProjectOption(token, row.card!.itemId, field, option);
       if (cardStatus) await setProjectStatus(token, row.card!.itemId, cardStatus);
+      if (cardWeek !== null) {
+        if (cardWeek) await setProjectDate(token, row.card!.itemId, weekField!, cardWeek);
+        else await clearProjectField(token, row.card!.itemId, weekField!);
+      }
+      if (weekMove && (await moveToWeek(row, weekMove))) summary.pulled++;
       const update: Record<string, unknown> = { github_seen: seen, github_title: seen.title ?? null, ...pulled };
       const { error: updateError } = await admin.from("roadmap_items").update(update).eq("id", row.id);
       if (updateError) throw updateError;

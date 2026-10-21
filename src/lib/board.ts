@@ -41,7 +41,7 @@ type ProjectNode = {
   /** The Status value; `updatedAt` is when GitHub last changed it on this card. */
   fieldValueByName?: { name?: string; updatedAt?: string } | null;
   /** The card's field values; the single selects carry the option's id, when it was set and the field's id. */
-  fieldValues?: { nodes?: ({ optionId?: string; updatedAt?: string; field?: { id?: string } } | null)[] } | null;
+  fieldValues?: { nodes?: ({ optionId?: string; date?: string; updatedAt?: string; field?: { id?: string } } | null)[] } | null;
 };
 
 export function boardCard(node: ProjectNode): { status: BoardStatus; card: BoardCard } | null {
@@ -65,6 +65,8 @@ export type ProjectCard = {
   statusAt: string;
   /** Each single-select value of the card, by its field's id (the two-way sync of Stack, Priority and Effort). */
   options?: Record<string, CardOption>;
+  /** Each date value of the card, by its field's id (the two-way sync of Week). */
+  dates?: Record<string, { date: string; updatedAt: string }>;
 };
 
 /**
@@ -78,10 +80,13 @@ export function projectCard(node: ProjectNode): ProjectCard | null {
   if (!card || !number || !node.id || !statusAt) return null;
   if (!node.fieldValues) return { itemId: node.id, number, status: card.status, statusAt };
   const options: Record<string, CardOption> = {};
+  const dates: Record<string, { date: string; updatedAt: string }> = {};
   for (const v of node.fieldValues.nodes ?? []) {
-    if (v?.optionId && v.updatedAt && v.field?.id) options[v.field.id] = { optionId: v.optionId, updatedAt: v.updatedAt };
+    if (!v?.updatedAt || !v.field?.id) continue;
+    if (v.optionId) options[v.field.id] = { optionId: v.optionId, updatedAt: v.updatedAt };
+    else if (v.date) dates[v.field.id] = { date: v.date, updatedAt: v.updatedAt };
   }
-  return { itemId: node.id, number, status: card.status, statusAt, options };
+  return { itemId: node.id, number, status: card.status, statusAt, options, dates };
 }
 
 const COLUMN_OF_STATUS = { Open: "open", Development: "dev" } as const;
