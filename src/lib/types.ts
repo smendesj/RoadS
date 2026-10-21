@@ -46,6 +46,8 @@ export type RoadmapItem = {
   createdAt?: string;
   /** The issue's Status on Project #7 (last snapshot), set only on sprint items; "done" shows as Concluído. */
   status?: "open" | "dev" | "blocker" | "done";
+  /** The item's own Status (issue #22), kept equal to its issue's by the sync: Done closes it, Blocker blocks it. */
+  state?: "Open" | "Blocker" | "Done";
   notes: Note[];
 };
 

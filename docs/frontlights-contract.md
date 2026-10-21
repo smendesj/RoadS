@@ -177,6 +177,15 @@ resumo, nunca os cartões do quadro. Quem monta: `src/lib/frontlights/sync.ts`.
   erro HTTP. `roadmap.error` aparece quando o quadro sincronizou e o Roadmap não.
 - **`roadmap.retitled`** (opcional, número): quantos títulos do Roadmap acompanharam a renomeação da issue no
   GitHub nesta sincronização (cada um vira um `modify` com `title` na fila). Ausente quando nenhum.
+- **`roadmap.fields`** (opcional, só contagens): a sincronização nos dois sentidos dos campos de cada item com a sua
+  issue (issue #22 do RoadS): Title, Description (a seção `## Solução` do corpo), Type (a label `type:`), Stack,
+  Priority e Effort (campos do Project). `pulled`: valores trazidos do GitHub (cada item com algum vira um `modify` com
+  os campos trazidos, nas chaves `title`, `description`, `tipo`, `stack`, `prioridade` e `effort`, e `reason`
+  `"field follows the issue on GitHub"`); `pushed`: valores escritos no GitHub (com as labels `type:`, `area:` e
+  `priority:high` que eles implicam e o tipo nativo); `failed`: itens em que algo falhou; `error` (texto) quando o
+  passo todo falhou. Ausente quando nada mudou. As lacunas das issues (campo vazio, label implicada, tipo nativo)
+  passam a ser preenchidas aqui, com um valor editado no RoadS (nunca um padrão): a rotina de lacunas do Frontlights deixa de ser
+  necessária.
 - **`roadmap.sprint`** (opcional, só contagens): o que a sincronização fez para manter o sprint atual do
   Roadmap (a semana cujas datas contêm hoje) e o Project em acordo. `pulled`: issues que o Project pôs no sprint atual;
   `released`: issues que o Project tirou dele (voltaram ao seu bloco); `written`: Statuses que o RoadS escreveu
@@ -190,10 +199,13 @@ resumo, nunca os cartões do quadro. Quem monta: `src/lib/frontlights/sync.ts`.
   mais recente, o RoadS move o item (para a semana atual, criando a lane dela se faltar, ou dela de volta ao seu bloco de tipo) e enfileira um
   `move_lane` com as duas lanes (`origin` `"project"`); se o Roadmap é o mais recente, escreve o Status
   (Development ou Open) no Project. Só uma discordância é tratada, então uma escrita do RoadS nunca volta como
-  mudança nova. Done e Blocker nunca são escritos nem movidos; só issues abertas do GeoCloud participam, nunca as
-  do ELIMS. A escrita no Project fica atrás de `PROJECT_STATUS_WRITE=on` no servidor (desligada por padrão: o
-  Roadmap ainda acompanha o que o Project diz, e o resumo só informa `wouldWrite`). O Frontlights não escreve no
-  Project e não precisa mudar: segue escrevendo `ROADMAP.md` e os arquivos de sprint a partir da fila.
+  mudança nova. Esta regra não escreve nem move Done e Blocker; só issues abertas do GeoCloud participam, nunca as
+  do ELIMS. Desde 21/10 (issue #22) a escrita no Project não depende mais de `PROJECT_STATUS_WRITE`: escreve quem
+  empurra (scrum master, admin, o cron e esta rota); a sincronização de um dev só informa `wouldWrite`. Blocker e
+  Done passam a ser o Status próprio do item, sincronizado nos dois sentidos com `roadmap.fields` (Done fecha a
+  issue como concluída, sair de Done a reabre; um item apagado no RoadS fecha a issue como not planned, com um
+  Comment). O Frontlights não escreve no Project e não precisa mudar: segue escrevendo `ROADMAP.md` e os arquivos
+  de sprint a partir da fila.
 
 ## 5. As rotas do resumo para a diretoria
 
@@ -471,3 +483,13 @@ repositório, `roads-script/push` e `roads-script/attach`.
   continua 1** em `roadmap-state`, `pending-changes` e `ack`, porque o Frontlights publicou antes a versão que
   aceita as duas formas (ids posicionais e por data). O RoadS faz o `db push` da 0031 e o deploy depois disso.
   Nenhum campo foi tirado ou renomeado.
+- **2026-10-21 (aditivo):** `roadmap.fields` no resumo do `POST /sync-board` (`pulled`, `pushed`, `failed` e, se o passo
+  falhou, `error`), e o `modify` com `reason` `"field follows the issue on GitHub"` pode trazer `description`, `tipo`,
+  `stack`, `prioridade` e `effort` além de `title`. Os nomes de Stack guardados passam ao inglês (Modeling, Database,
+  General, General Tests, Frontend Tests, Backend Tests, Documentation, Tests, Tests/Security; os demais já eram), e é
+  com eles que vêm em `modify` e em `roadmap-state`. As lacunas das issues passam ao RoadS. Nenhuma rota mudou e a
+  `schemaVersion` segue 1.
+- **2026-10-21 (aditivo):** o Status próprio do item (Open, Blocker, Done) sincroniza nos dois sentidos e conta em
+  `roadmap.fields`; o `modify` pode trazer `status`. Um `remove` feito no app fecha a issue como not planned antes. A
+  escrita de Status no Project deixa de depender de `PROJECT_STATUS_WRITE` e passa a seguir o papel de quem
+  sincroniza. Nenhuma rota mudou e a `schemaVersion` segue 1.

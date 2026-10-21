@@ -3,6 +3,7 @@
 import type { Effort, Prioridade, Produto, RoadmapItem } from "@/lib/types";
 import { isStack, isTipo, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } from "@/lib/issue-fields";
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
+import type { SelectorStatus } from "@/lib/bilateral-sync";
 
 const PRIORIDADES: Prioridade[] = ["Critical", "High", "Medium", "Low"];
 const EFFORTS: Effort[] = ["Very High", "High", "Medium", "Low"];
@@ -13,7 +14,11 @@ export type EditDraft = {
   effort: Effort;
   note: string;
   content?: { title: string; description: string; produto: Produto; tipo: Tipo; stack: Stack };
+  /** The Status selector (issue #22): Development and Open plan the item into or out of the current sprint. */
+  status: SelectorStatus;
 };
+
+const STATUSES: SelectorStatus[] = ["Open", "Development", "Blocker", "Done"];
 
 export function ItemCard({
   item,
@@ -94,8 +99,8 @@ export function ItemCard({
       {dropLine && <div data-drop-line aria-hidden="true" className="pointer-events-none absolute -top-2 left-0 right-0 h-1 -translate-y-1/2 rounded-full bg-rs-brand" />}
       {item.url ? (
         <a href={item.url} target="_blank" rel="noreferrer" className="text-sm font-bold text-rs-text">
-          {item.number ? `#${item.number} ` : ""}
-          {item.title} ↗
+          {item.title}
+          {item.number ? ` #${item.number}` : ""} ↗
         </a>
       ) : (
         <span className="text-sm font-bold text-rs-text">{item.title}</span>
@@ -110,7 +115,8 @@ export function ItemCard({
         <span className={badgeClass(produtoTone(item.produto))}>{item.produto}</span>
         <span className={badgeClass(prioridadeTone(item.prioridade))}>{item.prioridade}</span>
         <span className={badgeClass(effortTone(item.effort))}>{item.effort}</span>
-        {item.status === "done" && <span className={badgeClass("green")}>Concluído</span>}
+        {(item.status === "done" || item.state === "Done") && <span className={badgeClass("green")}>Concluído</span>}
+        {item.state === "Blocker" && <span className={badgeClass("red")}>Blocker</span>}
       </div>
 
       {item.desc && <p className="text-[13px] leading-snug text-rs-text-soft">{item.desc}</p>}
@@ -206,6 +212,20 @@ export function ItemCard({
               </select>
             </label>
           </div>
+          <label className="flex flex-col gap-1">
+            <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Status</span>
+            <select
+              value={editDraft.status}
+              onChange={(e) => onDraftChange({ ...editDraft, status: e.target.value as SelectorStatus })}
+              className="rounded-lg border border-rs-border bg-rs-card px-2 py-1.5 text-base font-bold text-rs-text sm:text-xs"
+            >
+              {STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="flex flex-wrap gap-1.5 sm:flex-nowrap">
             <input
               value={editDraft.note}

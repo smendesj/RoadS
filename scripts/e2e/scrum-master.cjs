@@ -245,11 +245,53 @@ async function seedBoard() {
     await editing.locator("input").first().fill("[TESTE] criado e editado pelo SM");
     // A bug: unplanned later, the item goes back to the bug type lane (the server picks it by the item's type).
     await labelled(editing, "Tipo").selectOption("bug");
+    // The Stacks are named in English (issue #22): the old Portuguese names are no longer offered.
+    const stackOptions = await labelled(editing, "Stack").locator("option").allTextContents();
+    expect("edit own item: Stack offers the English names only", stackOptions.includes("Database") && stackOptions.includes("General") && !stackOptions.includes("Banco de dados") && !stackOptions.includes("Geral"), JSON.stringify(stackOptions));
+    await labelled(editing, "Stack").selectOption("Database");
+    await labelled(editing, "Effort").selectOption("High");
     await btn(editing, "Salvar").click();
     await page.getByText("[TESTE] criado e editado pelo SM").first().waitFor({ timeout: 15000 });
     await sleep(1000);
-    const { data: edited } = await svc.from("roadmap_items").select("title, tipo").eq("id", created.id).single();
+    const { data: edited } = await svc.from("roadmap_items").select("title, tipo, stack, effort, field_changed_at").eq("id", created.id).single();
     expect("edit own item: the new title and the type bug are saved", edited.title === "[TESTE] criado e editado pelo SM" && edited.tipo === "bug", JSON.stringify(edited));
+    // The two-way sync settles a field both sides changed by when it was edited here: each edited field has its time.
+    const stamped = Object.keys(edited.field_changed_at ?? {});
+    expect("edit own item: Stack Database and Effort High saved, each edited field (title, type, stack, effort) with the time of its edit",
+      edited.stack === "Database" && edited.effort === "High" && ["title", "tipo", "stack", "effort"].every((f) => stamped.includes(f)), JSON.stringify(edited));
+
+    // ------------------------------------------------ the Status selector (issue #22): Done, Blocker and back to Open
+    // An item with no week: Open stays where it is (Development would plan it into the real current week, so it isn't
+    // chosen here). Done and Blocker are the item's own, shown on its card; the sync takes them to the issue.
+    const setStatus = async (status) => {
+      await btn(openCard("[TESTE] criado e editado pelo SM"), "Editar").click();
+      const panel = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
+      const offered = await labelled(panel, "Status").locator("option").allTextContents();
+      await labelled(panel, "Status").selectOption(status);
+      await btn(panel, "Salvar").click();
+      await panel.waitFor({ state: "detached", timeout: 15000 });
+      // The save lands after the panel closes: wait for it (up to 15 s), then for the board it reloads.
+      let data = null;
+      for (let i = 0; i < 30; i++) {
+        ({ data } = await svc.from("roadmap_items").select("status, lane_id, field_changed_at").eq("id", created.id).single());
+        if (data?.status === status || (status === "Development" && data?.status === "Open")) break;
+        await sleep(500);
+      }
+      await sleep(1500);
+      return { offered, row: data };
+    };
+    {
+      const done = await setStatus("Done");
+      expect("status: the selector offers Open, Development, Blocker and Done", JSON.stringify(done.offered) === JSON.stringify(["Open", "Development", "Blocker", "Done"]), JSON.stringify(done.offered));
+      expect("status: Done is saved with its edit time, and the item stays where it was",
+        done.row.status === "Done" && !!done.row.field_changed_at?.status && done.row.lane_id === created.lane_id, JSON.stringify(done.row));
+      expect("status: the card shows Concluído", (await count(openCard("[TESTE] criado e editado pelo SM").getByText("Concluído", { exact: true }))) === 1);
+      const blocked = await setStatus("Blocker");
+      expect("status: Blocker is saved and shown on the card", blocked.row.status === "Blocker" && (await count(openCard("[TESTE] criado e editado pelo SM").getByText("Blocker", { exact: true }))) === 1, JSON.stringify(blocked.row));
+      const reopened = await setStatus("Open");
+      expect("status: back to Open, with no badge, still out of any week",
+        reopened.row.status === "Open" && reopened.row.lane_id === created.lane_id && (await count(openCard("[TESTE] criado e editado pelo SM").getByText("Blocker", { exact: true }))) === 0, JSON.stringify(reopened.row));
+    }
 
     // ------------------------------------------------ seeded item: note + priority only, on its card in Open
     await btn(openCard("[TESTE] item semeado (sem dono)"), "+ nota").click();
@@ -260,9 +302,10 @@ async function seedBoard() {
     await btn(noting, "Salvar").click();
     await page.getByText("[TESTE] nota no item semeado").first().waitFor({ timeout: 15000 });
     await sleep(1000);
-    const { data: sRow } = await svc.from("roadmap_items").select("title, prioridade").eq("id", L.ids.seeded).single();
+    const { data: sRow } = await svc.from("roadmap_items").select("title, prioridade, field_changed_at").eq("id", L.ids.seeded).single();
     const { data: sNotes } = await svc.from("item_notes").select("author_role").eq("item_id", L.ids.seeded);
     expect("seeded item: priority changed, title untouched, note stored as scrum_master", sRow.prioridade === "Critical" && sRow.title === "[TESTE] item semeado (sem dono)" && sNotes.length === 1 && sNotes[0].author_role === "scrum_master", JSON.stringify([sRow, sNotes]));
+    expect("seeded item: the priority's edit time is kept for the two-way sync, and the title has none", !!sRow.field_changed_at?.prioridade && !sRow.field_changed_at?.title, JSON.stringify(sRow));
 
     // ------------------------------------------------ plan: a card dragged from Open to a week stays in Open, labelled with it
     // A window as tall as the page keeps source and drop target on screen together (a drop can't land off-screen).
@@ -772,6 +815,9 @@ async function seedBoard() {
       const moves = (q ?? []).map((r) => r.payload);
       expect("unplan (Mover para): one move_lane is queued, from the test week to the bug type lane, from the app",
         moves.length === 1 && moves[0]?.from_lane_id === "zz-test-sprint" && moves[0]?.lane_id === "tipo-bug" && moves[0]?.origin === "app", JSON.stringify(moves));
+      // Leaving its week changes the item's Week (issue #22): the time of that edit is kept for the two-way sync.
+      const { data: stamped } = await svc.from("roadmap_items").select("field_changed_at").eq("id", created.id).single();
+      expect("unplan (Mover para): the Week's edit time is kept, at this move", (stamped?.field_changed_at?.week ?? "") >= since, JSON.stringify(stamped));
       await openCard(title).waitFor({ timeout: 15000 });
       const shown = await inOpen(title);
       expect("unplan (Mover para): the card is in Open with no week label, and in no week",
