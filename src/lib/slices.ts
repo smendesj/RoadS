@@ -8,6 +8,7 @@ import type { StatusKey } from "./board.ts";
 import { boxTitle, type Box } from "./criteria.ts";
 import { newestIssueFirst } from "./issue-order.ts";
 import { issueParts, partsOf } from "./parts.ts";
+import { STATUS_PILL } from "./text/dashboard.ts";
 import type { Tone } from "./tones.ts";
 
 export const SLICES_REPO = { owner: "Essencis-Labs", name: "GeoCloudAI" } as const;
@@ -70,17 +71,12 @@ export function parseSlices(data: unknown, numbers: number[]): SliceGroup[] {
 export type PartRow = { title: string; ref: string; url: string | null; status: string; tone: Tone };
 export type IssuePartRows = { done: number; total: number; rows: PartRow[] };
 
-const STATUS: Record<StatusKey, { status: string; tone: Tone }> = {
-  open: { status: "A FAZER", tone: "neutral" },
-  dev: { status: "EM ANDAMENTO", tone: "brand" },
-  blocker: { status: "BLOQUEADO", tone: "red" },
-  done: { status: "CONCLUÍDO", tone: "green" },
-};
+const STATUS = STATUS_PILL;
 
 /**
- * The parts of each issue of the sprint, by issue number: its boxes first, in the order of the body (CONCLUÍDO when
- * ticked, BLOQUEADO when a "Bloqueada:" sub-item says so, A FAZER otherwise), then its open sub-issues from the
- * highest number to the lowest, each where the board puts it. "x de y" is counted by the rule (parts.ts), whatever
+ * The parts of each issue of the sprint, by issue number: its boxes first, in the order of the body (DONE when
+ * ticked, BLOCKER when a "Bloqueada:" sub-item says so, OPEN otherwise), then its open sub-issues from the
+ * highest number to the lowest, each where the board puts it. "x of y" is counted by the rule (parts.ts), whatever
  * the snapshot says: a closed sub-issue left in an older snapshot is neither shown nor counted.
  */
 export function partsByIssue(groups: SliceGroup[], statusOf: Map<string, StatusKey>): Map<number, IssuePartRows> {

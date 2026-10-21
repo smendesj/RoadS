@@ -12,7 +12,7 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
-const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState, setProjectDate, clearProjectField, readBoardFields } =
+const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState, setProjectDate, clearProjectField, readBoardFields, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment, readIssueAssignees, setIssueAssignees } =
   await import("./github.ts");
 
 test("closing and reopening an issue sends its state and the reason in the same edit", async () => {
@@ -222,6 +222,77 @@ test("the labels are read from the issue, strings or objects", async () => {
   }) as typeof fetch;
   assert.deepEqual(await readIssueLabels("token-sintetico", 900001, { fetch: github }), ["type:bug", "stack:web"]);
   assert.match(asked, /\/issues\/900001$/);
+});
+
+test("the comments of each issue are read in one request, with who wrote them and whether it was a bot", async () => {
+  const gh = recordingGitHub(() => ({
+    data: {
+      repository: {
+        i900001: {
+          comments: {
+            totalCount: 2,
+            nodes: [
+              { databaseId: 501, body: "Um", updatedAt: "2026-10-21T09:00:00Z", author: { login: "conta-teste", __typename: "User" } },
+              { databaseId: 502, body: "Dois", updatedAt: "2026-10-21T10:00:00Z", author: { login: "um-bot", __typename: "Bot" } },
+            ],
+          },
+        },
+        i900002: { comments: { totalCount: 0, nodes: [] } },
+      },
+    },
+  }));
+  const comments = await readIssueComments("token-sintetico", [900001, 900002], { fetch: gh.fetch });
+  assert.equal(gh.calls.length, 1);
+  assert.deepEqual(comments.get(900001), [
+    { id: 501, body: "Um", updatedAt: "2026-10-21T09:00:00Z", login: "conta-teste", bot: false },
+    { id: 502, body: "Dois", updatedAt: "2026-10-21T10:00:00Z", login: "um-bot", bot: true },
+  ]);
+  assert.deepEqual(comments.get(900002), []);
+});
+
+test("an issue with more comments than one page holds is left out, so its missing comments never read as deleted", async () => {
+  const gh = recordingGitHub(() => ({ data: { repository: { i900001: { comments: { totalCount: 101, nodes: [] } } } } }));
+  const comments = await readIssueComments("token-sintetico", [900001], { fetch: gh.fetch });
+  assert.equal(comments.has(900001), false);
+});
+
+test("creating, editing and deleting a comment send exactly those requests", async () => {
+  const gh = recordingGitHub((url) => (url.endsWith("/comments") ? { id: 601, updated_at: "2026-10-21T11:00:00Z" } : {}));
+  const created = await createIssueComment("token-sintetico", 900001, "Texto\n\n— Pessoa (RoadS)", { fetch: gh.fetch });
+  await updateIssueComment("token-sintetico", 601, "Texto novo", { fetch: gh.fetch });
+  await deleteIssueComment("token-sintetico", 601, { fetch: gh.fetch });
+  assert.deepEqual(created, { id: 601, updatedAt: "2026-10-21T11:00:00Z" });
+  assert.deepEqual(
+    gh.calls.map((c) => [c.method, c.url.replace(/^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+/, ""), c.body]),
+    [
+      ["POST", "/issues/900001/comments", { body: "Texto\n\n— Pessoa (RoadS)" }],
+      ["PATCH", "/issues/comments/601", { body: "Texto novo" }],
+      ["DELETE", "/issues/comments/601", undefined],
+    ]
+  );
+});
+
+test("the assignees of each issue and when they last changed are read in one request", async () => {
+  const gh = recordingGitHub(() => ({
+    data: {
+      repository: {
+        i900001: { assignees: { nodes: [{ login: "ana-y" }, { login: "Bia-Z" }] }, timelineItems: { nodes: [{ createdAt: "2026-10-21T09:00:00Z" }] } },
+        i900002: { assignees: { nodes: [] }, timelineItems: { nodes: [] } },
+      },
+    },
+  }));
+  const assignees = await readIssueAssignees("token-sintetico", [900001, 900002], { fetch: gh.fetch });
+  assert.equal(gh.calls.length, 1);
+  assert.deepEqual(assignees.get(900001), { logins: ["ana-y", "Bia-Z"], changedAt: "2026-10-21T09:00:00Z" });
+  assert.deepEqual(assignees.get(900002), { logins: [], changedAt: null });
+});
+
+test("setting an issue's assignees sends the whole list, and nothing else of the issue", async () => {
+  const gh = recordingGitHub();
+  await setIssueAssignees("token-sintetico", 900001, ["ana-y"], { fetch: gh.fetch });
+  assert.equal(gh.calls[0].method, "PATCH");
+  assert.match(gh.calls[0].url, /\/issues\/900001$/);
+  assert.deepEqual(gh.calls[0].body, { assignees: ["ana-y"] });
 });
 
 // ---- Week (S5): a date field of the card

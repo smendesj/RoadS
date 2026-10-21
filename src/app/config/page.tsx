@@ -15,7 +15,7 @@ export default async function ConfigPage() {
 
   return (
     <div className="min-h-screen">
-      <NavBar active="config" roleLabel="Admin" avatar={viewer.avatar} showConfig />
+      <NavBar active="config" role="admin" avatar={viewer.avatar} showConfig />
 
       <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-10">
         <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">Config</h1>

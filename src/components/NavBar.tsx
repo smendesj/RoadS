@@ -5,6 +5,10 @@ import { BrandMark } from "@/components/BrandMark";
 import { SessionGuard } from "@/components/SessionGuard";
 import { UserMenu } from "@/components/UserMenu";
 import { useTheme } from "@/lib/theme-provider";
+import { AUTH, NAV } from "@/lib/text/account";
+import { RESUMO_NAME } from "@/lib/text/resumo";
+import type { Role } from "@/lib/types";
+import { roleLabel } from "@/lib/viewer";
 
 function SunMoonIcon({ theme }: { theme: "light" | "dark" }) {
   const d =
@@ -21,20 +25,21 @@ function SunMoonIcon({ theme }: { theme: "light" | "dark" }) {
 type Tab = "dashboard" | "roadmap" | "resumo" | "config";
 
 // showConfig is only ever true for admin — the Config tab doesn't render for anyone else. The Resumo
-// tab follows the role label (admin and scrum master only), so no page has to pass anything new.
+// tab follows the role (admin and scrum master only). `role` is null for a visitor; what is shown is decided on the
+// role itself, never on its on-screen label, so translating a label can't change who sees what.
 export function NavBar({
   active,
-  roleLabel,
+  role,
   avatar = null,
   showConfig = false,
 }: {
   active: Tab;
-  roleLabel: string;
+  role: Role | null;
   avatar?: string | null;
   showConfig?: boolean;
 }) {
   const { theme, toggle } = useTheme();
-  const showResumo = roleLabel === "Admin" || roleLabel === "Scrum Master";
+  const showResumo = role === "admin" || role === "scrum_master";
   // Four tabs (admin) do not fit a 320px phone at the usual size: tighter below sm, and the bar scrolls
   // inside itself rather than ever widening the page.
   const crowded = showResumo && showConfig;
@@ -61,7 +66,7 @@ export function NavBar({
         </Link>
         {showResumo && (
           <Link href="/resumo" className={tabClass("resumo")}>
-            Resumo
+            {RESUMO_NAME}
           </Link>
         )}
         {showConfig && (
@@ -74,22 +79,22 @@ export function NavBar({
       <div className="flex items-center gap-3.5">
         <button
           onClick={toggle}
-          aria-label="Alternar tema"
+          aria-label={NAV.toggleTheme}
           className="flex h-9 w-9 items-center justify-center rounded-full border border-rs-border bg-rs-card text-rs-text-soft"
         >
           <SunMoonIcon theme={theme} />
         </button>
-        {roleLabel === "Visitante" ? (
+        {role === null ? (
           <Link
             href="/login"
             className="rounded-lg bg-rs-brand px-4 py-2 text-sm font-bold text-white"
           >
-            Entrar
+            {AUTH.signIn}
           </Link>
         ) : (
           <>
             <SessionGuard />
-            <UserMenu roleLabel={roleLabel} avatar={avatar} />
+            <UserMenu roleLabel={roleLabel(role)} avatar={avatar} />
           </>
         )}
       </div>

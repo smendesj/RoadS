@@ -85,7 +85,7 @@ test("Open with no snapshot yet: every item is in it, newest first", () => {
   assert.deepEqual(ids, ["unsynced", "draft", "draft-planned", "planned", "unplanned", "draft-old", "in-dev", "blocked"]);
 });
 
-test("Done: the cards that went to Done in the last 14 days, latest first, counted from when the Status changed; all of them, the same way, for 'Ver todas'", () => {
+test("Done: the cards that went to Done in the last 14 days, latest first, counted from when the Status changed; all of them, the same way, for 'Show all'", () => {
   const done = [
     issue(5, "2026-09-01T00:00:00Z"),
     issue(1, "2026-10-02T12:00:00Z"),

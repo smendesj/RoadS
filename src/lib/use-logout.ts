@@ -15,7 +15,7 @@ export function useGoToLogin() {
   }, [router]);
 }
 
-// Signs the current user out from any client component: the menu's Sair button, the idle timeout
+// Signs the current user out from any client component: the menu's Sign out button, the idle timeout
 // and the forced password reset page.
 export function useLogout() {
   const goToLogin = useGoToLogin();

@@ -33,6 +33,8 @@ import "server-only";
 import { createGeoCloudIssue, EFFORT_FIELD_ID, GEOCLOUD_REPO, PRIORIDADE_FIELD_ID, clearProjectField, readBoardFields, readIssueChangeTimes, readIssueState, setProjectDate, setProjectOption, setProjectStatus, STACK_FIELD_ID, updateIssue, type IssueChange, type IssueChangeTimes } from "@/lib/github";
 import { importableIssues, isTestData, mayGetIssue } from "@/lib/test-data";
 import { decideField, extractSolucao, labelsAfter, sameBase, nativeTypeOf, replaceSolucao, statusOfIssue, statusWrites, tipoOfLabels, weekOfIssue, weekOfLane, weekPull, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
+import { syncItemComments, type CommentsSummary } from "@/lib/comments-sync";
+import { syncItemAssignees, type AssigneesSummary } from "@/lib/assignees-sync";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isEffort, isStack, isTipo, PRIORIDADE_OPTION_IDS, prioridadeOfOption, STACK_OPTION_IDS, stackOfOption, type Stack } from "@/lib/issue-fields";
 import type { Prioridade } from "@/lib/types";
@@ -47,6 +49,7 @@ import { EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintS
 import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteFutureWeekIfEmpty, deleteWeekIfEmpty, ensureWeekLane } from "@/lib/week-lanes";
 import { brakedSync } from "@/lib/sync-claim";
+import { SYNC_FAILED } from "@/lib/sync-message";
 import { inPool } from "@/lib/pool";
 import { SYNC_COOLDOWN_MS, SYNC_MAX_DURATION_S } from "@/lib/sync-cooldown";
 
@@ -80,6 +83,10 @@ export type RoadmapReconcile = {
   retitled?: number;
   /** The two-way sync of Title and Description: values brought in, written to GitHub and failed; absent when none. */
   fields?: FieldsSummary;
+  /** The two-way sync of Comments (issue #23): brought in, written to GitHub and failed; absent when none. */
+  comments?: CommentsSummary;
+  /** The two-way sync of Assignees (issue #23): brought in, written to GitHub and failed; absent when none. */
+  assignees?: AssigneesSummary;
 };
 
 export type FieldsSummary = { pulled: number; pushed: number; failed: number; error?: string };
@@ -150,7 +157,7 @@ export async function syncBoard({ brakeMs = SYNC_COOLDOWN_MS, push = true }: { b
       run: () => runBoardSync({ push }),
     },
     { brakeMs }
-  ).catch((e): SyncResult => ({ ok: false, reason: "error", message: e instanceof Error ? e.message : "Erro ao sincronizar." }));
+  ).catch((e): SyncResult => ({ ok: false, reason: "error", message: e instanceof Error ? e.message : SYNC_FAILED }));
 }
 
 async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
@@ -174,7 +181,7 @@ async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
         body: JSON.stringify({ query: QUERY, variables: { after } }),
         cache: "no-store",
       });
-      if (!res.ok) return { ok: false, reason: "error", message: `GitHub respondeu ${res.status}` };
+      if (!res.ok) return { ok: false, reason: "error", message: `GitHub answered ${res.status}` };
 
       const json = await res.json();
       if (json.errors?.length) return { ok: false, reason: "error", message: json.errors[0].message };
@@ -184,7 +191,7 @@ async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
         return {
           ok: false,
           reason: "no_access",
-          message: "O token não enxerga o Project #7 — gere um classic PAT (não fine-grained) com escopos repo, read:org e project, a partir de uma conta que seja membro da org Essencis-Labs.",
+          message: "The token cannot see Project #7 — create a classic PAT (not fine-grained) with the repo, read:org and project scopes, from an account that is a member of the Essencis-Labs org.",
         };
       }
 
@@ -245,7 +252,7 @@ async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
         }));
       } catch (e) {
         console.error("syncBoard: sprint and project sync failed", e);
-        sprint = { ...EMPTY_SPRINT_SUMMARY, error: e instanceof Error ? e.message : "Erro ao alinhar a sprint atual com o Project." };
+        sprint = { ...EMPTY_SPRINT_SUMMARY, error: e instanceof Error ? e.message : "Failed to align the current sprint with the Project." };
       }
     }
 
@@ -262,15 +269,39 @@ async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
           .then((open) => syncIssueFields(token, open, push, cards))
           .catch((e) => {
             console.error("syncBoard: two-way fields failed", e);
-            return { pulled: 0, pushed: 0, failed: 0, error: e instanceof Error ? e.message : "Erro ao sincronizar os campos." };
+            return { pulled: 0, pushed: 0, failed: 0, error: e instanceof Error ? e.message : "Failed to sync the issue fields." };
           })
       : null;
     const retitled = fields?.retitled ?? 0;
 
+    // The Comments of each item go both ways with its issue's comments (comments-sync.ts, issue #23); a failure here
+    // doesn't fail the board sync.
+    const comments: CommentsSummary | null = cards.size
+      ? await readOpen()
+          .then((open) => syncItemComments(token, open.map((i) => i.number), push))
+          .catch((e) => {
+            console.error("syncBoard: Comments failed", e);
+            return { pulled: 0, pushed: 0, failed: 0, error: e instanceof Error ? e.message : "Failed to sync the Comments." };
+          })
+      : null;
+    const commentCounts = comments && (comments.pulled || comments.pushed || comments.failed || comments.error) ? comments : null;
+
+    // The Assignees of each item go both ways with its issue's (assignees-sync.ts, issue #23); a failure here doesn't
+    // fail the board sync.
+    const assignees: AssigneesSummary | null = cards.size
+      ? await readOpen()
+          .then((open) => syncItemAssignees(token, open.map((i) => i.number), push))
+          .catch((e) => {
+            console.error("syncBoard: Assignees failed", e);
+            return { pulled: 0, pushed: 0, failed: 0, error: e instanceof Error ? e.message : "Failed to sync the Assignees." };
+          })
+      : null;
+    const assigneeCounts = assignees && (assignees.pulled || assignees.pushed || assignees.failed || assignees.error) ? assignees : null;
+
     // The Roadmap follows the repo's open issues; a failure here doesn't fail the board sync.
     const roadmap: RoadmapReconcile = await reconcileRoadmapWithIssues(token, onProject, readOpen, cards).catch((e) => {
       console.error("syncBoard: roadmap reconcile failed", e);
-      return { added: 0, removed: 0, issuesCreated: 0, error: e instanceof Error ? e.message : "Erro ao atualizar o Roadmap." };
+      return { added: 0, removed: 0, issuesCreated: 0, error: e instanceof Error ? e.message : "Failed to update the Roadmap." };
     });
 
     // The sub-issues of the sprint's issues, for the Dashboard's Slices block. Read last, after the steps above
@@ -285,10 +316,17 @@ async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
       ok: true,
       columns,
       syncedAt,
-      roadmap: { ...roadmap, ...(sprint ? { sprint } : {}), ...(retitled ? { retitled } : {}), ...(fieldCounts ? { fields: fieldCounts } : {}) },
+      roadmap: {
+        ...roadmap,
+        ...(sprint ? { sprint } : {}),
+        ...(retitled ? { retitled } : {}),
+        ...(fieldCounts ? { fields: fieldCounts } : {}),
+        ...(commentCounts ? { comments: commentCounts } : {}),
+        ...(assigneeCounts ? { assignees: assigneeCounts } : {}),
+      },
     };
   } catch (e) {
-    return { ok: false, reason: "error", message: e instanceof Error ? e.message : "Erro desconhecido" };
+    return { ok: false, reason: "error", message: e instanceof Error ? e.message : "Unknown error" };
   }
 }
 
@@ -673,9 +711,9 @@ async function syncSlices(token: string): Promise<void> {
       body: JSON.stringify({ query: slicesQuery(numbers) }),
       cache: "no-store",
     });
-    if (!res.ok) throw new Error(`GitHub respondeu ${res.status} ao ler as sub-issues`);
+    if (!res.ok) throw new Error(`GitHub answered ${res.status} reading the sub-issues`);
     const json = await res.json();
-    if (!json.data) throw new Error(json.errors?.[0]?.message ?? "GitHub não devolveu as sub-issues");
+    if (!json.data) throw new Error(json.errors?.[0]?.message ?? "GitHub did not return the sub-issues");
     groups = parseSlices(json.data, numbers);
   }
   const { error: writeError } = await admin.from("board_sync_state").update({ slices: groups }).eq("id", true);
@@ -809,14 +847,14 @@ async function fetchOpenIssues(token: string): Promise<OpenIssue[]> {
       headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
       cache: "no-store",
     });
-    if (!res.ok) throw new Error(`GitHub respondeu ${res.status} ao listar as issues abertas`);
+    if (!res.ok) throw new Error(`GitHub answered ${res.status} listing the open issues`);
     const batch: { number: number; title: string; html_url: string; body: string | null; labels: { name: string }[]; type?: { name?: string } | null; pull_request?: unknown }[] = await res.json();
     for (const it of batch) {
       if (!it.pull_request) issues.push({ number: it.number, title: it.title, url: it.html_url, body: it.body ?? "", labels: it.labels.map((l) => l.name), type: it.type?.name ?? null });
     }
     if (batch.length < 100) return issues;
   }
-  throw new Error("Issues abertas demais para listar");
+  throw new Error("Too many open issues to list");
 }
 
 // First paragraph of the issue body, as plain text, short enough for a card.
@@ -838,7 +876,7 @@ async function reconcileRoadmapWithIssues(
 ): Promise<RoadmapReconcile> {
   // The Roadmap is the open issues that are on Project #7. An empty project read means the read went
   // wrong, so nothing is removed on its account.
-  if (onProject.size === 0) throw new Error("O Project #7 não devolveu issues do GeoCloud; o Roadmap não foi alterado.");
+  if (onProject.size === 0) throw new Error("Project #7 returned no GeoCloud issues; the Roadmap was not changed.");
   const open = await readOpen();
   const openNumbers = new Set(open.map((i) => i.number));
 

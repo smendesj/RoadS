@@ -3,7 +3,7 @@ export type Role = "admin" | "scrum_master" | "dev";
 /** Sprint lanes should hold at most this many items (the type lanes, where an item with no week sits, have no limit).
  *  Not enforced: a sprint over it shows n/4 and a warning asking for the overflow to move out. */
 export const MAX_ITEMS_PER_SPRINT = 4;
-/** Title a "+ Novo item" card starts with; it gets no GitHub issue until someone writes a real one. */
+/** Title a "+ New item" card starts with; it gets no GitHub issue until someone writes a real one. */
 export const NEW_ITEM_TITLE = "Novo item — edite a descrição";
 /** The two working views a Roadmap card can render as. Admin can look through either one, or Config. */
 export type ViewAs = "dev" | "scrum_master";
@@ -15,16 +15,25 @@ export type AppUser = {
   title: string;
   role: Role;
   mustResetPassword: boolean;
+  /** The GitHub login this profile is, which ties it to Assignees and to the comments on the issues (issue #23). */
+  githubLogin: string | null;
 };
 export type Produto = "GeoCloud"; // RoadS only handles GeoCloud; ELIMS issues are never pulled in.
 export type Prioridade = "Critical" | "High" | "Medium" | "Low";
 export type Effort = "Low" | "Medium" | "High" | "Very High";
 
+/** A Comment of an item: written in RoadS by a profile, or on the issue by a GitHub login (issue #23). */
 export type Note = {
   id: string;
   author: ViewAs;
   when: string;
   text: string;
+  /** The profile that wrote it in RoadS; null for a comment that came from GitHub. */
+  authorId?: string | null;
+  /** The name it is shown and signed with: the profile's name, or the GitHub login of a comment from there. */
+  authorName?: string | null;
+  /** Edited after it was written. */
+  edited?: boolean;
 };
 
 export type RoadmapItem = {
@@ -44,8 +53,10 @@ export type RoadmapItem = {
   createdBy?: string | null;
   /** When the item was stored: the Kanban's Open lists the items with no issue on the board newest first. */
   createdAt?: string;
-  /** The issue's Status on Project #7 (last snapshot), set only on sprint items; "done" shows as Concluído. */
+  /** The issue's Status on Project #7 (last snapshot), set only on sprint items; "done" shows as Done. */
   status?: "open" | "dev" | "blocker" | "done";
+  /** The item's Assignees, as GitHub logins (issue #23); shown by the name of the profile with that login. */
+  assignees?: string[];
   /** The item's own Status (issue #22), kept equal to its issue's by the sync: Done closes it, Blocker blocks it. */
   state?: "Open" | "Blocker" | "Done";
   notes: Note[];

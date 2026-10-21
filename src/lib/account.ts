@@ -1,3 +1,4 @@
+import { RESET } from "./text/account.ts";
 import { isValidPassword, PASSWORD_HINT } from "./validation.ts";
 
 export type FinishResetPorts = {
@@ -25,7 +26,7 @@ export function resetErrorMessage(error: unknown): string {
   const text = error instanceof Error ? error.message : "";
   const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : "";
   if (text === "weak_password") return PASSWORD_HINT;
-  if (text === "not_authenticated" || code === "session_not_found" || /session missing/i.test(text)) return "Sua sessão expirou. Peça um novo link ao admin ou entre de novo.";
-  if (code === "same_password") return "A nova senha precisa ser diferente da atual.";
-  return "Não foi possível salvar a senha agora. Tente de novo.";
+  if (text === "not_authenticated" || code === "session_not_found" || /session missing/i.test(text)) return RESET.sessionExpired;
+  if (code === "same_password") return RESET.samePassword;
+  return RESET.saveFailed;
 }

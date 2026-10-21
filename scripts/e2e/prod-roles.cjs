@@ -21,17 +21,17 @@ const { BASE, expect, sleep } = L;
       expect(`${label}: nav ${role === "admin" ? "has" : "has no"} Config`, hrefs.includes("/config") === (role === "admin"), JSON.stringify(hrefs));
 
       await page.goto(BASE + "/roadmap", { waitUntil: "load" });
-      await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 45000 });
+      await page.getByText("Loading...").waitFor({ state: "detached", timeout: 45000 });
       await sleep(800);
-      const novo = await page.getByRole("button", { name: "+ Novo item" }).count();
-      const syncIssues = await page.getByRole("button", { name: /^Sincronizar$/ }).count();
+      const novo = await page.getByRole("button", { name: "+ New item" }).count();
+      const syncIssues = await page.getByRole("button", { name: /^Sync$/ }).count();
       const draggable = await page.locator('div[draggable="true"]').count();
-      const mover = await page.locator('select[aria-label="Mover para"]').count();
+      const mover = await page.locator('select[aria-label="Move to"]').count();
       const editable = role !== "dev";
       expect(`${label}: roadmap controls ${editable ? "present" : "absent"} (novo ${novo}, sync ${syncIssues}, draggable ${draggable}, mover ${mover})`,
-        // One "+ Novo item": in the Kanban's Open, the one place an item is born.
+        // One "+ New item": in the Kanban's Open, the one place an item is born.
         editable ? novo === 1 && syncIssues === 1 && draggable > 0 && mover > 0 : novo === 0 && syncIssues === 1 && draggable === 0 && mover === 0);
-      expect(`${label}: never sees 'Entrar' while signed in`, (await page.locator('a[href="/login"]').count()) === 0);
+      expect(`${label}: never sees 'Sign in' while signed in`, (await page.locator('a[href="/login"]').count()) === 0);
 
       await page.goto(BASE + "/config", { waitUntil: "load" });
       const onConfig = new URL(page.url()).pathname === "/config";
@@ -56,10 +56,10 @@ const { BASE, expect, sleep } = L;
       }
 
       await menu.click();
-      await page.getByRole("button", { name: "Sair" }).click();
+      await page.getByRole("button", { name: "Sign out" }).click();
       await page.waitForURL("**/login");
       await page.goto(BASE + "/dashboard", { waitUntil: "load" });
-      expect(`${label}: Sair ends the session`, page.url().endsWith("/login"));
+      expect(`${label}: Sign out ends the session`, page.url().endsWith("/login"));
       const noise = s.problems.filter((p) => !/auth\/v1\/token|ERR_FAILED|Failed to load resource/.test(p));
       expect(`${label}: no console or hydration errors on production`, noise.length === 0, noise.slice(0, 3).join(" | "));
     }

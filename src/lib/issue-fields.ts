@@ -23,7 +23,7 @@ export const STACK_OPTION_IDS = {
   "Frontend/Backend": "a5e4159d",
   "Backend/IA": "887e719b",
   Tests: "de89f648",
-  "Tests/Security": "a0c84fd1",
+  "Security Tests": "a0c84fd1",
   Infra: "08898dea",
   Mobile: "1f5e972d",
 } as const;

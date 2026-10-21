@@ -1,3 +1,5 @@
+import { AUTH } from "./text/account.ts";
+
 export const ALLOWED_DOMAINS = ["essencislabs.com", "essencistech.com.br"];
 
 // Exactly one "@": taking whatever follows the first one would let "ana@essencislabs.com@evil.com" in.
@@ -7,7 +9,7 @@ export function isAllowedEmail(email: string): boolean {
 }
 
 export function emailDomainHint(): string {
-  return ALLOWED_DOMAINS.map((d) => `@${d}`).join(" ou ");
+  return ALLOWED_DOMAINS.map((d) => `@${d}`).join(AUTH.domainJoin);
 }
 
 // 8+ chars, at least one letter and one digit. Uppercase, lowercase and special characters are
@@ -16,4 +18,4 @@ export function isValidPassword(password: string): boolean {
   return password.length >= 8 && /[A-Za-z]/.test(password) && /\d/.test(password);
 }
 
-export const PASSWORD_HINT = "Mínimo 8 caracteres, com letras e números.";
+export const PASSWORD_HINT = AUTH.passwordHint;

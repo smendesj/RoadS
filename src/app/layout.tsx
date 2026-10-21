@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import { THEME_INIT_SCRIPT } from "@/lib/theme-store";
 import { ThemeProvider } from "@/lib/theme-provider";
+import { SITE } from "@/lib/text/account";
 import "./globals.css";
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -18,13 +19,12 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "RoadS",
-  description:
-    "Dashboard e roadmap colaborativo da Essencis Labs — substitui o SCRUM síncrono por um board em tempo real e priorização assíncrona.",
+  description: SITE.description,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="pt-BR" className={`${plusJakarta.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+    <html lang="en" className={`${plusJakarta.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
       {/* A plain inline script in <head> runs while the page is parsed, before anything paints;
           next/script's beforeInteractive only queues inline code for Next's bootstrap, after the JS loads. */}
       <head>

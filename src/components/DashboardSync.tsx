@@ -4,6 +4,8 @@ import { createContext, useContext, useState, useTransition, type ReactNode } fr
 import { SyncButton } from "@/components/SyncButton";
 import { badgeClass } from "@/lib/tones";
 import { syncDashboard, type DashboardModel } from "@/lib/actions/dashboard";
+import { SYNC_FAILED } from "@/lib/sync-message";
+import { DASHBOARD, ofTotal } from "@/lib/text/dashboard";
 import { useAutoSync } from "@/lib/use-auto-sync";
 import { useLocalTime } from "@/lib/use-local-time";
 
@@ -24,7 +26,7 @@ function useSync() {
   return ctx;
 }
 
-// Holds the whole Dashboard. "Sincronizar" pulls GitHub Project #7 and re-reads the Roadmap, so every block below
+// Holds the whole Dashboard. "Sync" pulls GitHub Project #7 and re-reads the Roadmap, so every block below
 // reflects the latest state. The Kanban is no longer here: it is on the Roadmap, under the weeks.
 export function DashboardSyncProvider({
   initialModel,
@@ -50,7 +52,7 @@ export function DashboardSyncProvider({
         setError(result.error);
         setNotice(result.notice);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Erro ao sincronizar.");
+        setError(e instanceof Error ? e.message : SYNC_FAILED);
       }
     });
   }
@@ -85,7 +87,7 @@ export function SyncPill() {
   // Shown in the viewer's time zone, which only the browser knows: "—" holds the line until then.
   const syncedAt = useLocalTime(model.syncedAt);
   const lastSync = model.syncedAt && (
-    <span className="text-[11px] text-rs-text-faint">Última sincronização: {syncedAt ?? "—"}</span>
+    <span className="text-[11px] text-rs-text-faint">{DASHBOARD.lastSync}: {syncedAt ?? "—"}</span>
   );
 
   return (
@@ -124,12 +126,12 @@ export function KpiCards() {
 
 // The issues of the current sprint, each followed by its parts (src/lib/slices.ts): one indented row per box of its
 // acceptance criteria (no link: the boxes are ticked on the issue) and one per sub-issue still open, with its link.
-// "x de y" counts the parts by the rule of src/lib/parts.ts.
+// "x of y" counts the parts by the rule of src/lib/parts.ts.
 export function SprintPanels() {
   const { model } = useSync();
   return (
     <div className="flex flex-col gap-1 rounded-2xl border border-rs-border bg-rs-card p-4 sm:p-7">
-      <span className="mb-2 text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">Sprint</span>
+      <span className="mb-2 text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">{DASHBOARD.sprint}</span>
       {model.entregas.map((e, i) => {
         const row = (
           <>
@@ -138,7 +140,7 @@ export function SprintPanels() {
             <span className="text-[13px] text-rs-text-faint">{e.effort}</span>
             {e.parts && (
               <span data-parts-count className="whitespace-nowrap text-[13px] text-rs-text-faint">
-                {e.parts.done} de {e.parts.total}
+                {ofTotal(e.parts.done, e.parts.total)}
               </span>
             )}
             <span className="font-mono text-[13px] text-rs-brand-text">{e.ref}</span>
@@ -177,7 +179,7 @@ export function SprintPanels() {
         );
       })}
       {model.entregas.length === 0 && (
-        <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">Nenhum item na sprint atual.</div>
+        <div className="border-t border-rs-bg py-3.5 text-sm text-rs-text-faint">{DASHBOARD.noSprintItems}</div>
       )}
     </div>
   );

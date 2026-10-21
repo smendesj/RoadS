@@ -36,7 +36,7 @@ async function github(token: string, path: string, init: { method: string; body:
     cache: "no-store",
   });
   const json = await res.json().catch(() => null);
-  if (!res.ok) throw new Error(`GitHub respondeu ${res.status}${json?.message ? `: ${json.message}` : ""}`);
+  if (!res.ok) throw new Error(`GitHub answered ${res.status}${json?.message ? `: ${json.message}` : ""}`);
   if (json?.errors?.length) throw new Error(json.errors[0].message);
   return json;
 }
@@ -59,7 +59,7 @@ export async function readIssueLabels(
     cache: "no-store",
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!res.ok) throw new Error(`GitHub respondeu ${res.status} ao ler a issue`);
+  if (!res.ok) throw new Error(`GitHub answered ${res.status} reading the issue`);
   const json: { labels?: (string | { name?: string })[] } = await res.json();
   return (json.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean);
 }
@@ -166,7 +166,7 @@ export async function createGeoCloudIssue(
   const layout = await readBoardLayout(token, port);
   const wanted: [string, string, FieldValue][] = [
     ["Status", STATUS_FIELD_ID, { singleSelectOptionId: STATUS_OPTIONS[status] }],
-    ["Prioridade", PRIORIDADE_FIELD_ID, { singleSelectOptionId: PRIORIDADE_OPTION_IDS[prioridade] }],
+    ["Priority", PRIORIDADE_FIELD_ID, { singleSelectOptionId: PRIORIDADE_OPTION_IDS[prioridade] }],
     ["Stack", STACK_FIELD_ID, { singleSelectOptionId: STACK_OPTION_IDS[stack] }],
     ["Description", DESCRIPTION_FIELD_ID, { text: description.trim() || title }],
   ];
@@ -213,7 +213,7 @@ export async function readIssueState(token: string, number: number, { fetch: fet
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`GitHub respondeu ${res.status} ao ler a issue`);
+  if (!res.ok) throw new Error(`GitHub answered ${res.status} reading the issue`);
   const json: { state?: string } = await res.json();
   return json.state === "closed" ? "closed" : "open";
 }
@@ -250,6 +250,103 @@ export async function readIssueChangeTimes(token: string, numbers: number[], por
     });
   }
   return times;
+}
+
+/** One comment of an issue, as the two-way sync of Comments reads it (comment-sync.ts). */
+export type IssueComment = { id: number; body: string; updatedAt: string; login: string | null; bot: boolean };
+
+const COMMENTS_PAGE = 100;
+
+/**
+ * The comments of each issue, read in one request. An issue with more comments than one page holds is left out of
+ * the map: the sync then leaves its Comments alone, since a comment it did not read would look deleted.
+ */
+export async function readIssueComments(token: string, numbers: number[], port: GitHubPort = {}): Promise<Map<number, IssueComment[]>> {
+  const comments = new Map<number, IssueComment[]>();
+  if (!numbers.length) return comments;
+  const [owner, name] = GEOCLOUD_REPO.split("/");
+  const fields = numbers
+    .map(
+      (n) => `i${n}: issue(number: ${Number(n)}) { comments(first: ${COMMENTS_PAGE}) { totalCount
+        nodes { databaseId body updatedAt author { login __typename } } } }`
+    )
+    .join("\n");
+  const json = await github(
+    token,
+    "/graphql",
+    { method: "POST", body: { query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`, variables: { owner, name } } },
+    port
+  );
+  type Node = { databaseId: number; body: string; updatedAt: string; author: { login: string; __typename: string } | null };
+  const repo: Record<string, { comments: { totalCount: number; nodes: Node[] } } | null> = json?.data?.repository ?? {};
+  for (const n of numbers) {
+    const issue = repo[`i${n}`];
+    if (!issue || issue.comments.totalCount > issue.comments.nodes.length) continue;
+    comments.set(
+      n,
+      issue.comments.nodes.map((c) => ({
+        id: c.databaseId,
+        body: c.body,
+        updatedAt: c.updatedAt,
+        login: c.author?.login ?? null,
+        bot: c.author?.__typename === "Bot",
+      }))
+    );
+  }
+  return comments;
+}
+
+/** Writes a new comment on an issue; answers its id and time, which the Comment keeps so it never comes back as new. */
+export async function createIssueComment(token: string, number: number, body: string, port: GitHubPort = {}): Promise<{ id: number; updatedAt: string }> {
+  const json = await github(token, `/repos/${GEOCLOUD_REPO}/issues/${number}/comments`, { method: "POST", body: { body } }, port);
+  return { id: json.id, updatedAt: json.updated_at };
+}
+
+export async function updateIssueComment(token: string, commentId: number, body: string, port: GitHubPort = {}): Promise<void> {
+  await github(token, `/repos/${GEOCLOUD_REPO}/issues/comments/${commentId}`, { method: "PATCH", body: { body } }, port);
+}
+
+export async function deleteIssueComment(token: string, commentId: number, port: GitHubPort = {}): Promise<void> {
+  await github(token, `/repos/${GEOCLOUD_REPO}/issues/comments/${commentId}`, { method: "DELETE", body: undefined }, port);
+}
+
+/**
+ * The assignees of each issue (their GitHub logins) and when someone last assigned or unassigned one, read in one
+ * request; an issue not found is left out.
+ */
+export async function readIssueAssignees(
+  token: string,
+  numbers: number[],
+  port: GitHubPort = {}
+): Promise<Map<number, { logins: string[]; changedAt: string | null }>> {
+  const assignees = new Map<number, { logins: string[]; changedAt: string | null }>();
+  if (!numbers.length) return assignees;
+  const [owner, name] = GEOCLOUD_REPO.split("/");
+  const fields = numbers
+    .map(
+      (n) => `i${n}: issue(number: ${Number(n)}) { assignees(first: 20) { nodes { login } }
+        timelineItems(itemTypes: [ASSIGNED_EVENT, UNASSIGNED_EVENT], last: 1) {
+          nodes { ... on AssignedEvent { createdAt } ... on UnassignedEvent { createdAt } } } }`
+    )
+    .join("\n");
+  const json = await github(
+    token,
+    "/graphql",
+    { method: "POST", body: { query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`, variables: { owner, name } } },
+    port
+  );
+  type Issue = { assignees: { nodes: { login: string }[] }; timelineItems?: { nodes: { createdAt?: string }[] } };
+  const repo: Record<string, Issue | null> = json?.data?.repository ?? {};
+  for (const n of numbers) {
+    const issue = repo[`i${n}`];
+    if (issue) assignees.set(n, { logins: issue.assignees.nodes.map((a) => a.login), changedAt: issue.timelineItems?.nodes?.[0]?.createdAt ?? null });
+  }
+  return assignees;
+}
+
+/** Sets an issue's assignees to exactly these logins; nothing else of the issue is sent. */
+export async function setIssueAssignees(token: string, number: number, logins: string[], port: GitHubPort = {}): Promise<void> {
+  await github(token, `/repos/${GEOCLOUD_REPO}/issues/${number}`, { method: "PATCH", body: { assignees: logins } }, port);
 }
 
 function fitsBoard(layout: Map<string, Set<string> | null>, field: string, value: FieldValue): boolean {

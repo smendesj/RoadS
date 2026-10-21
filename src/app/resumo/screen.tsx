@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { NavBar } from "@/components/NavBar";
 import { ProgressReportPreview } from "@/components/ProgressReportPreview";
-import { EMPTY_REPORT_TEXT, EMPTY_SENT_TEXT, formatStamp, reportPeriodLabel } from "@/lib/progress/report-view";
-import { roleLabel, type Viewer } from "@/lib/viewer";
+import { formatStamp, reportPeriodLabel } from "@/lib/progress/report-view";
+import { RESUMO } from "@/lib/text/resumo";
+import type { Viewer } from "@/lib/viewer";
 import { groupByWeek } from "@/lib/progress/week";
 import { canReview, type ReportLoad, type SentSummary } from "./data";
 
@@ -17,8 +18,8 @@ function SentLink({ item, currentId }: { item: SentSummary; currentId: string | 
         item.id === currentId ? "font-bold text-rs-brand-text" : "text-rs-text"
       }`}
     >
-      <span className="font-semibold">{reportPeriodLabel({ start: item.period_start, end: item.period_end })}</span>
-      <span className="text-[13px] text-rs-text-faint">enviado em {formatStamp(item.sent_at)}</span>
+      <span className="font-semibold">{reportPeriodLabel({ start: item.period_start, end: item.period_end }, "en")}</span>
+      <span className="text-[13px] text-rs-text-faint">{RESUMO.sentOn(formatStamp(item.sent_at))}</span>
     </Link>
   );
 }
@@ -27,13 +28,13 @@ function SentLink({ item, currentId }: { item: SentSummary; currentId: string | 
 // the whole week at the scrum; a week with one report so far has it right under that report.
 function SentList({ sent, currentId }: { sent: { list: SentSummary[]; failed: boolean }; currentId: string | null }) {
   if (sent.failed) {
-    return <p className="text-[13px] text-rs-text-faint">Não foi possível carregar a lista dos resumos enviados.</p>;
+    return <p className="text-[13px] text-rs-text-faint">{RESUMO.sentListFailed}</p>;
   }
   if (sent.list.length === 0) return null;
   return (
     <section aria-labelledby="resumo-enviados" className={panel}>
       <h2 id="resumo-enviados" className="text-[13px] font-bold uppercase tracking-wide text-rs-text-soft">
-        Enviados
+        {RESUMO.sentHeading}
       </h2>
       <div className="flex flex-col gap-3">
         {groupByWeek(sent.list).map((week) => {
@@ -45,7 +46,8 @@ function SentList({ sent, currentId }: { sent: { list: SentSummary[]; failed: bo
                 data-present-week={week.start}
                 className="rounded-lg bg-rs-brand px-4 py-2 text-sm font-bold text-white hover:opacity-90"
               >
-                <span aria-hidden="true">▶ </span>Apresentar a semana
+                <span aria-hidden="true">▶ </span>
+                {RESUMO.presentWeek}
               </Link>
             </li>
           );
@@ -88,31 +90,29 @@ export function ResumoScreen({
 
   return (
     <div className="min-h-screen">
-      <NavBar active="resumo" roleLabel={roleLabel(viewer.role)} avatar={viewer.avatar} showConfig={viewer.role === "admin"} />
+      <NavBar active="resumo" role={viewer.role} avatar={viewer.avatar} showConfig={viewer.role === "admin"} />
 
       <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-10">
         <div className="flex flex-col gap-1.5">
-          <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">Resumo</h1>
+          <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">{RESUMO.heading}</h1>
           <p className="max-w-3xl text-[15px] text-rs-text-soft">
-            {reviewer
-              ? "Andamento do GeoCloud."
-              : "Andamento do GeoCloud. Somente leitura."}
+            {reviewer ? RESUMO.intro : RESUMO.introReadOnly}
           </p>
         </div>
 
         {failed ? (
           <p role="alert" className={`${panel} text-sm text-rs-text-soft`}>
-            Não foi possível carregar o resumo agora. Recarregue a página em instantes.
+            {RESUMO.loadFailed}
           </p>
         ) : !row ? (
           <p data-report-empty className={`${panel} text-sm text-rs-text-soft`}>
-            {reviewer ? EMPTY_REPORT_TEXT : EMPTY_SENT_TEXT}
+            {reviewer ? RESUMO.emptyDraft : RESUMO.emptySent}
           </p>
         ) : (
           <>
             {reviewer && isCurrentView && row.status === "sent" && (
               <p className="rounded-xl border border-rs-border bg-rs-brand-soft px-4 py-3 text-[13px] text-rs-text">
-                Este é o último resumo enviado. Quando o Frontlights enviar um novo rascunho, ele aparece aqui.
+                {RESUMO.latestSent}
               </p>
             )}
             {/* The key restarts the editor from fresh server data whenever the report moves on (a new push, or after sending). */}

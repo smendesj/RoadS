@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { RESUMO } from "@/lib/text/resumo";
 import { loadCurrentReport, loadSentList, requireReportViewer } from "./data";
 import { ResumoScreen } from "./screen";
 
-export const metadata: Metadata = { title: "RoadS — Resumo" };
+export const metadata: Metadata = { title: RESUMO.pageTitle };
 
 // Admin and scrum master only: everyone else is sent back to the Dashboard. An admin reviews the draft;
 // a scrum master only reads what was sent. Reading goes through the user's own database session, so Row

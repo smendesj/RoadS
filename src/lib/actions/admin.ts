@@ -2,6 +2,7 @@
 
 import { createClient as createSupabaseJs } from "@supabase/supabase-js";
 import { headers } from "next/headers";
+import { parseLogin } from "@/lib/assignee-sync";
 import { resetFailureMessage, resetPassword, temporaryPassword } from "@/lib/password-reset";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
@@ -26,7 +27,7 @@ export async function listUsersForConfig(): Promise<AppUser[]> {
   if (error) throw error;
 
   const server = await createServerSupabase();
-  const { data: profiles } = await server.from("profiles").select("id, role, must_reset_password");
+  const { data: profiles } = await server.from("profiles").select("id, role, must_reset_password, github_login");
   const byId = new Map((profiles ?? []).map((p) => [p.id as string, p]));
 
   return authList.users.map((u) => {
@@ -38,8 +39,21 @@ export async function listUsersForConfig(): Promise<AppUser[]> {
       title: "",
       role: (p?.role as Role) ?? "dev",
       mustResetPassword: p?.must_reset_password ?? false,
+      githubLogin: (p?.github_login as string | null | undefined) ?? null,
     };
   });
+}
+
+// The GitHub login a profile is (issue #23): only the admin sets it (migration 0041 says the same), one login per
+// profile. Expected failures come back as a message, so Config can say what to fix.
+export async function setUserGithubLogin(userId: string, input: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  await requireAdmin();
+  const login = parseLogin(input);
+  if (login === undefined) return { ok: false, error: "invalid_login" };
+  const server = await createServerSupabase();
+  const { error } = await server.from("profiles").update({ github_login: login }).eq("id", userId);
+  if (error) return { ok: false, error: error.code === "23505" ? "login_taken" : "save_failed" };
+  return { ok: true };
 }
 
 export async function updateUserRole(userId: string, role: "dev" | "scrum_master") {

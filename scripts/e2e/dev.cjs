@@ -89,13 +89,13 @@ async function seedSprintIssue() {
     await page.locator('input[type="email"]').fill(L.cred("ROADS_TEST_DEV_EMAIL"));
     await page.locator('input[type="password"]').fill("senha-errada-123");
     await page.locator('button[type="submit"]').click();
-    await page.getByText(/incorretos/).waitFor({ timeout: 15000 });
-    const wrongPassword = (await page.getByText(/incorretos/).innerText()).trim();
+    await page.getByText(/Wrong email or password/).waitFor({ timeout: 15000 });
+    const wrongPassword = (await page.getByText(/Wrong email or password/).innerText()).trim();
     await page.locator('input[type="email"]').fill("ninguem.existe@essencislabs.com");
     await page.locator('button[type="submit"]').click();
     await sleep(2500);
-    const unknownUser = (await page.getByText(/incorretos/).innerText()).trim();
-    expect("login: wrong password shows a message and stays on /login", page.url().endsWith("/login") && /incorretos/.test(wrongPassword), wrongPassword);
+    const unknownUser = (await page.getByText(/Wrong email or password/).innerText()).trim();
+    expect("login: wrong password shows a message and stays on /login", page.url().endsWith("/login") && /Wrong email or password/.test(wrongPassword), wrongPassword);
     expect("login: unknown e-mail gets the SAME message (no user enumeration)", wrongPassword === unknownUser);
 
     // ------------------------------------------------ valid login
@@ -116,14 +116,16 @@ async function seedSprintIssue() {
     expect("dashboard: opening it asks the server for a sync without anyone clicking", autoSyncs.length >= 1, `posts=${autoSyncs.length}`);
     // The blocks it keeps (Sprint, with the parts of each issue under it) and the ones it dropped.
     const block = (title) => page.getByText(title, { exact: true }).count();
-    expect("dashboard: has the Sprint block and the 'Concluídas' KPI, and no Slices block", (await block("Sprint")) === 1 && (await block("Slices")) === 0 && (await block("Concluídas")) === 1);
+    expect("dashboard: has the Sprint block and the 'Done' KPI, and no Slices block", (await block("Sprint")) === 1 && (await block("Slices")) === 0 && (await block("Done")) === 1);
     const dropped = [];
     for (const title of ["Em paralelo", "Próxima semana", "Esta sprint", "Concluídas na sprint"]) if ((await block(title)) > 0) dropped.push(title);
     expect("dashboard: no 'Em paralelo', 'Próxima semana' or old titles", dropped.length === 0, dropped.join(", "));
     // The Kanban went to the Roadmap, under the weeks: no Kanban title, no Open / Blocker / Done columns, no ELIMS note.
+    // "Done" is also the KPI's name now (#23), so the columns are looked for by their mark, not by that word.
     const kanbanLeft = [];
-    for (const title of ["Kanban", "Open", "Blocker", "Done", "Nenhum bloqueio agora."]) if ((await block(title)) > 0) kanbanLeft.push(title);
-    expect("dashboard: no Kanban (no 'Kanban' title, no Open, Blocker or Done column)", kanbanLeft.length === 0, kanbanLeft.join(", "));
+    for (const title of ["Kanban", "Open", "Blocker", "Nenhum bloqueio agora."]) if ((await block(title)) > 0) kanbanLeft.push(title);
+    expect("dashboard: no Kanban (no 'Kanban' title, no Open, Blocker or Done column)",
+      kanbanLeft.length === 0 && (await page.locator("[data-kanban-column]").count()) === 0, kanbanLeft.join(", "));
     expect("dashboard: no ELIMS note and no Kanban block (both are on the Roadmap now)",
       (await page.locator("[data-elims-note], [data-kanban]").count()) === 0);
     // The Slices list their issues from the highest number to the lowest (src/lib/issue-order.ts); a week keeps the
@@ -150,12 +152,12 @@ async function seedSprintIssue() {
     );
     expect("dashboard: under each issue, its boxes come first and its open sub-issues after, highest number first", partsOk);
 
-    // The made-up issue converted to boxes: its three criteria right under it, its open sub-issue, and "1 de 4".
+    // The made-up issue converted to boxes: its three criteria right under it, its open sub-issue, and "1 of 4".
     const seeded = sprintBlock.locator("[data-issue]", { has: page.getByText(SEED.title, { exact: true }) });
     const seededShown = await seeded.waitFor({ timeout: 15000 }).then(() => true, () => false);
     expect("dashboard: an issue of the sprint converted to boxes is in the Sprint block", seededShown && (await seeded.count()) === 1);
     const partsCount = seededShown ? (await seeded.locator("[data-parts-count]").innerText()).trim() : "";
-    expect("dashboard: its count is 1 de 4 (three boxes, one ticked, plus the open sub-issue; the closed ones don't count)", partsCount === "1 de 4", partsCount);
+    expect("dashboard: its count is 1 of 4 (three boxes, one ticked, plus the open sub-issue; the closed ones don't count)", partsCount === "1 of 4", partsCount);
     const boxes = seededShown
       ? await seeded.evaluate((s) => {
           const issuePill = s.firstElementChild.querySelector("span").getBoundingClientRect().left;
@@ -168,10 +170,10 @@ async function seedSprintIssue() {
         })
       : [];
     expect(
-      "dashboard: its three criteria are indented rows under it, with no link, CONCLUÍDO / BLOQUEADO / A FAZER in the order of the body",
+      "dashboard: its three criteria are indented rows under it, with no link, DONE / BLOCKER / OPEN in the order of the body",
       boxes.length === 3 &&
         boxes.every((b) => b.indented && !b.link) &&
-        JSON.stringify(boxes.map((b) => b.pill)) === JSON.stringify(["CONCLUÍDO", "BLOQUEADO", "A FAZER"]) &&
+        JSON.stringify(boxes.map((b) => b.pill)) === JSON.stringify(["DONE", "BLOCKER", "OPEN"]) &&
         boxes.every((b, i) => b.text.includes(SEED.boxes[i].text)),
       JSON.stringify(boxes)
     );
@@ -182,21 +184,21 @@ async function seedSprintIssue() {
       JSON.stringify(subRows)
     );
     expect("dashboard: its sub-issues closed in the conversion are not shown", (await page.getByText(/\[TESTE\] sub-issue fechada/).count()) === 0);
-    const notConfigured = () => page.getByText(/ainda não configurada/).waitFor({ timeout: 20000 }).then(() => true, () => false);
+    const notConfigured = () => page.getByText(/not configured yet/).waitFor({ timeout: 20000 }).then(() => true, () => false);
     expect("dashboard: its own sync with no GitHub token fails closed with a clear message (nothing reaches GitHub)", await notConfigured());
-    const sync = page.getByRole("button", { name: /Sincronizar/ });
-    expect("dashboard: shows the (read-refresh) Sincronizar button", (await sync.count()) === 1);
+    const sync = page.getByRole("button", { name: /^Sync$/ });
+    expect("dashboard: shows the (read-refresh) Sync button", (await sync.count()) === 1);
     const before = autoSyncs.length;
     await sync.click();
     await sleep(300);
     // The click clears the message and asks again: a new POST, and the message comes back from that answer.
-    const cleared = (await page.getByText(/ainda não configurada/).count()) === 0 || autoSyncs.length > before;
-    expect("dashboard: Sincronizar asks the server again and fails closed the same way", cleared && (await notConfigured()) && autoSyncs.length > before, `posts ${before} -> ${autoSyncs.length}`);
+    const cleared = (await page.getByText(/not configured yet/).count()) === 0 || autoSyncs.length > before;
+    expect("dashboard: Sync asks the server again and fails closed the same way", cleared && (await notConfigured()) && autoSyncs.length > before, `posts ${before} -> ${autoSyncs.length}`);
 
     // ------------------------------------------------ roadmap is read-only
     await page.getByRole("link", { name: "Roadmap", exact: true }).click();
     await page.waitForURL("**/roadmap");
-    await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
+    await page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
     await page.getByText("[TESTE] item semeado (sem dono)").first().waitFor({ timeout: 15000 });
     const shownWeeks = await page.locator('[data-drag-scroll="x"] > [data-lane-id]').evaluateAll((lanes) =>
       lanes.map((lane) => [...lane.querySelectorAll("[data-item-id]")].map((card) => card.dataset.itemId))
@@ -220,14 +222,15 @@ async function seedSprintIssue() {
     expect("roadmap: dev sees the Kanban with Open and Done, and no Roadmap section of type lanes",
       (await count(page.locator('[data-kanban-column="open"]'))) === 1 && (await count(page.locator('[data-kanban-column="done"]'))) === 1 &&
         (await count(page.locator('[data-lane-id="zz-test-a"], [data-lane-id^="tipo-"]'))) === 0);
-    expect("roadmap: no '+ Novo item'", (await count(page.getByRole("button", { name: "+ Novo item" }))) === 0);
-    expect("roadmap: the same read-refresh Sincronizar button as the Dashboard", (await count(page.getByRole("button", { name: /^Sincronizar$/ }))) === 1);
-    expect("roadmap: no Editar / + nota / Excluir", (await count(page.getByRole("button", { name: /^(Editar|\+ nota|Excluir)$/ }))) === 0);
+    expect("roadmap: no '+ New item'", (await count(page.getByRole("button", { name: "+ New item" }))) === 0);
+    expect("roadmap: the same read-refresh Sync button as the Dashboard", (await count(page.getByRole("button", { name: /^Sync$/ }))) === 1);
+    expect("roadmap: no Edit / + Comment / Delete", (await count(page.getByRole("button", { name: /^(Edit|\+ Comment|Delete)$/ }))) === 0);
+    expect("roadmap: a dev edits and deletes no Comment", (await count(page.locator("[data-comment-id] button"))) === 0);
     expect("roadmap: no card is draggable, in the weeks or in Open", (await count(page.locator('div[draggable="true"]'))) === 0 &&
       (await count(page.locator('[data-kanban-column="open"] div[draggable="false"]'))) > 0);
-    expect("roadmap: no 'Mover para' select", (await count(page.locator('select[aria-label="Mover para"]'))) === 0);
-    expect("roadmap: plain subtitle (no 'defina o que entra e quando')", (await count(page.getByText(/defina o que entra/))) === 0);
-    expect("roadmap: the user area never shows 'Entrar'", (await count(page.locator('a[href="/login"]'))) === 0);
+    expect("roadmap: no 'Move to' select", (await count(page.locator('select[aria-label="Move to"]'))) === 0);
+    expect("roadmap: plain subtitle (no 'decide what goes in and when')", (await count(page.getByText(/decide what goes in/))) === 0);
+    expect("roadmap: the user area never shows 'Sign in'", (await count(page.locator('a[href="/login"]'))) === 0);
 
     // ------------------------------------------------ /config is closed to everyone but admin
     await page.goto(BASE + "/config", { waitUntil: "load" });
@@ -254,7 +257,7 @@ async function seedSprintIssue() {
     for (let waited = 0; heldSyncs === 0 && waited < 15000; waited += 100) await sleep(100);
     await menu.click();
     const saveAnswer = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/profile/avatar", { timeout: 15000 });
-    await page.locator('button[aria-label="Foto 02"]').click();
+    await page.locator('button[aria-label="Picture 02"]').click();
     const saveStatus = await saveAnswer.then((r) => r.status(), () => "no answer");
     expect("avatar: the pick is saved while the page's own sync is still under way (it does not wait behind it)", heldSyncs >= 1 && saveStatus === 200, `held syncs=${heldSyncs}, save=${saveStatus}`);
     releaseSync();
@@ -273,7 +276,7 @@ async function seedSprintIssue() {
     const syncRoute = await page.evaluate(async () => (await fetch("/api/frontlights/sync-board", { method: "POST" })).status);
     expect("api: cron, queue, roadmap-state and sync-board answer 401 to a signed-in Dev (they take secrets, not sessions)", cron === 401 && queue === 401 && roadmapState === 401 && syncRoute === 401, `${cron}/${queue}/${roadmapState}/${syncRoute}`);
 
-    // ------------------------------------------------ idle logout and Sair
+    // ------------------------------------------------ idle logout and Sign out
     await page.evaluate(() => localStorage.setItem("roads-last-activity", String(Date.now() - (10 * 60 + 1) * 1000)));
     const t = Date.now();
     await page.waitForURL("**/login", { timeout: 45000 });
@@ -284,10 +287,10 @@ async function seedSprintIssue() {
     await L.login(s);
     await menu.waitFor();
     await menu.click();
-    await page.getByRole("button", { name: "Sair" }).click();
+    await page.getByRole("button", { name: "Sign out" }).click();
     await page.waitForURL("**/login");
     await page.goto(BASE + "/dashboard", { waitUntil: "load" });
-    expect("logout: Sair ends the session", page.url().endsWith("/login"));
+    expect("logout: Sign out ends the session", page.url().endsWith("/login"));
 
     const noise = s.problems.filter((p) => !/auth\/v1\/token|ERR_FAILED|Failed to load resource|\/api\/(cron|frontlights)\//.test(p));
     expect("no console errors, hydration errors or failed requests during the whole run", noise.length === 0, noise.slice(0, 3).join(" | "));

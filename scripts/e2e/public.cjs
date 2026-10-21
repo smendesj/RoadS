@@ -30,7 +30,7 @@ const { BASE, expect, sleep } = L;
     await page.goto(BASE + "/cadastro", { waitUntil: "load" });
     const email = page.locator('input[type="email"]');
     const pass = page.locator('input[type="password"]');
-    const submit = page.getByRole("button", { name: "Cadastrar" });
+    const submit = page.getByRole("button", { name: "Sign up" });
     const errorText = () => page.locator("p.text-red-600, p.text-\\[13px\\]").first().innerText().catch(() => "");
     await email.fill("alguem@gmail.com");
     await pass.fill("Senha-boa-123");
@@ -40,12 +40,12 @@ const { BASE, expect, sleep } = L;
     await email.fill("ana@essencislabs.com@evil.com");
     await submit.click();
     await sleep(500);
-    expect("cadastro: 'ana@essencislabs.com@evil.com' is refused too (two @)", /Use um e-mail/.test(await errorText()), await errorText());
+    expect("cadastro: 'ana@essencislabs.com@evil.com' is refused too (two @)", /Use a @essencislabs.com or @essencistech.com.br email/.test(await errorText()), await errorText());
     await email.fill("ana@essencislabs.com");
     await pass.fill("curta1");
     await submit.click();
     await sleep(500);
-    expect("cadastro: a weak password shows the rule", /Mínimo 8 caracteres/.test(await errorText()), await errorText());
+    expect("cadastro: a weak password shows the rule", /At least 8 characters/.test(await errorText()), await errorText());
     expect("cadastro: still on /cadastro, nothing was created", new URL(page.url()).pathname === "/cadastro");
 
     // ---- /login: input handling
@@ -64,7 +64,7 @@ const { BASE, expect, sleep } = L;
       await page.locator('input[type="password"]').fill(pw);
       await page.locator('button[type="submit"]').click();
       await sleep(2200);
-      const msg = await page.getByText(/incorretos/).count();
+      const msg = await page.getByText(/Wrong email or password/).count();
       expect(`login (${label}): one generic message, still on /login`, new URL(page.url()).pathname === "/login" && msg <= 1, `msgs=${msg}`);
     }
 

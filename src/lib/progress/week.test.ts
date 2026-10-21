@@ -84,8 +84,8 @@ test("the sent list is grouped by week, newest first, each group labelled Monday
   assert.deepEqual(
     groups.map((g) => [g.start, g.label, g.items.map((i) => i.id)]),
     [
-      ["2026-10-05", "Semana de 05/10 a 09/10", ["c"]],
-      ["2026-09-28", "Semana de 28/09 a 02/10", ["b", "a"]],
+      ["2026-10-05", "Week of 05/10 to 09/10", ["c"]],
+      ["2026-09-28", "Week of 28/09 to 02/10", ["b", "a"]],
     ]
   );
   assert.deepEqual(groupByWeek([]), []);

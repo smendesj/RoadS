@@ -143,8 +143,8 @@ export const dashboardData = {
   branch: "SPRINT-21_09-25_09",
   kpis: [
     { label: "Development", value: "3", hint: "Sprint 21–25/09", tone: "neutral" as const },
-    { label: "Concluídas", value: "0 de 3", hint: "Comprometidas esta semana", tone: "green" as const },
-    { label: "Bloqueios", value: "0", hint: "Nenhum agora", tone: "green" as const },
+    { label: "Done", value: "0 of 3", hint: "Committed this week", tone: "green" as const },
+    { label: "Blockers", value: "0", hint: "None now", tone: "green" as const },
   ],
   columns: [
     {
@@ -181,8 +181,8 @@ export const dashboardData = {
     },
   ],
   entregas: [
-    { title: "Gateway de pagamentos — Asaas e Stripe", status: "EM ANDAMENTO", tone: "brand" as const, effort: "Very High", ref: "#715", url: GH + "715" },
-    { title: "Cobrança por tokenização", status: "EM ANDAMENTO", tone: "brand" as const, effort: "Medium", ref: "#716", url: GH + "716" },
-    { title: "As duas visualizações das caixas disponíveis, vertical e horizontal", status: "EM ANDAMENTO", tone: "brand" as const, effort: "Low", ref: "#717", url: GH + "717" },
+    { title: "Gateway de pagamentos — Asaas e Stripe", status: "DEVELOPMENT", tone: "brand" as const, effort: "Very High", ref: "#715", url: GH + "715" },
+    { title: "Cobrança por tokenização", status: "DEVELOPMENT", tone: "brand" as const, effort: "Medium", ref: "#716", url: GH + "716" },
+    { title: "As duas visualizações das caixas disponíveis, vertical e horizontal", status: "DEVELOPMENT", tone: "brand" as const, effort: "Low", ref: "#717", url: GH + "717" },
   ],
 };

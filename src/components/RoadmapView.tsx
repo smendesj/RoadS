@@ -6,6 +6,7 @@ import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { SyncButton } from "@/components/SyncButton";
 import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { syncBoardAsViewer } from "@/lib/actions/sync";
+import { listAssignableProfiles } from "@/lib/actions/assignees";
 import { retryDelay, touchesCurrentSprint } from "@/lib/auto-sync";
 import type { SyncColumn } from "@/lib/board-sync";
 import { useAutoSync } from "@/lib/use-auto-sync";
@@ -19,10 +20,11 @@ import { moveItem } from "@/lib/roadmap-move";
 import { brakeMessage, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
 import { badgeClass } from "@/lib/tones";
 import { MAX_ITEMS_PER_SPRINT, type Lane, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
-import { roleLabel as labelFor, type Viewer } from "@/lib/viewer";
+import type { Viewer } from "@/lib/viewer";
+import { elimsNote, recentDone, ROADMAP, showAllDone, showRecentDone, sprintOverLimit } from "@/lib/text/roadmap";
 
 /** Where a card being edited is: an item planned in a week shows in the week and in the Kanban's Open, and only the
- *  copy whose "Editar" was pressed opens. */
+ *  copy whose "Edit" was pressed opens. */
 type Place = "week" | "open";
 
 // The viewer comes from the server with the page, so the real session and role are known from the
@@ -63,6 +65,15 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
       .catch((e) => console.error("getRoadmapBoard failed", e));
   }
   useEffect(reloadBoard, []);
+
+  // Who can be an Assignee (issue #23): the profiles the admin tied to a GitHub login; cards show them by name.
+  const [people, setPeople] = useState<{ login: string; name: string }[]>([]);
+  useEffect(() => {
+    if (!viewer) return;
+    listAssignableProfiles()
+      .then(setPeople)
+      .catch((e) => console.error("listAssignableProfiles failed", e));
+  }, [viewer]);
 
   // Pulls GitHub again: open issues the Roadmap lacks come in, closed ones leave the Kanban.
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -136,7 +147,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
 
   const canEdit = activeView === "scrum_master";
 
-  // Drop targets call this with the dragged item; the "Mover para" select on each card (touch
+  // Drop targets call this with the dragged item; the "Move to" select on each card (touch
   // screens have no HTML drag and drop) passes its item directly. Moving into a full sprint is
   // allowed on purpose: the sprint shows n/4 and a warning until the overflow is moved out.
   // In a week the item goes right before the card it was dropped on (`beforeId`), else last (src/lib/roadmap-move.ts).
@@ -144,7 +155,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   // there from the week it was planned in), and its card stays in Open, labelled with the week.
   // A card taken out of a week and dropped on the Kanban's Open (KANBAN) unplans the item: the server puts it in a type
   // lane of its choosing, so the screen shows it there at once by the item's stored type and then reads the board again.
-  // Its own card in Open dropped back on Open is no unplanning: nothing changes. The "Mover para" select names the place
+  // Its own card in Open dropped back on Open is no unplanning: nothing changes. The "Move to" select names the place
   // its card is in (`taken`), since no drag says it.
   function moveToLane(targetLaneId: string, itemId: string | null = draggingId, beforeId: string | null = null, taken: Place | null = dragFrom) {
     setDropBefore(null);
@@ -194,9 +205,9 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
 
   // A card goes to a week; a card in a week can also go back to the Kanban, unplanned the way a drop on Open does it.
   const moveTargets = lanes.map((l) => ({ id: l.id, label: `${l.title} (${l.items.length}/${MAX_ITEMS_PER_SPRINT})` }));
-  const weekMoveTargets = [...moveTargets, { id: KANBAN, label: "Kanban (sem semana)" }];
+  const weekMoveTargets = [...moveTargets, { id: KANBAN, label: ROADMAP.kanbanNoWeek }];
 
-  // "+ Novo item": born in a type lane, with no week, it shows first in the Kanban's Open, open for editing.
+  // "+ New item": born in a type lane, with no week, it shows first in the Kanban's Open, open for editing.
   function addItem() {
     createRoadmapItem()
       .then((item) => {
@@ -205,7 +216,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
             ? prev.map((g) => (g.id === NEW_ITEM_LANE ? { ...g, items: [...g.items, item] } : g))
             : [...prev, { id: NEW_ITEM_LANE, title: "Features", items: [item] }]
         );
-        // A new item opens straight into edit mode — no extra click on "Editar".
+        // A new item opens straight into edit mode — no extra click on "Edit".
         startEdit(item, "open");
       })
       .catch((e) => console.error("createRoadmapItem failed", e));
@@ -218,6 +229,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
       prioridade: item.prioridade,
       effort: item.effort,
       note: "",
+      assignees: item.assignees ?? [],
       status: selectorStatus(item.state ?? "Open", inCurrentWeek),
       content: canEditContent(item)
         ? {
@@ -237,7 +249,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   }
 
   // Admin has full control. A scrum_master fully edits and deletes only their own items, can
-  // still adjust prioridade/effort/nota/lane on the seeded ones (no creator), and can't touch
+  // still adjust priority/effort/comment/lane on the seeded ones (no creator), and can't touch
   // items another user created. Mirrors getItemAccess in roadmap.ts.
   const isOwn = (item: RoadmapItem) => !!myId && item.createdBy === myId;
   const canModifyItem = (item: RoadmapItem) => canEdit && (isAdmin || isOwn(item) || !item.createdBy);
@@ -297,6 +309,9 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
       onSaveEdit: () => saveEdit(item.id),
       onCancelEdit: cancelEdit,
       onDelete: () => removeItem(item.id),
+      viewer: viewer ? { id: viewer.id, role: viewer.role } : null,
+      onCommentsChanged: reloadBoard,
+      people,
     };
   };
 
@@ -311,7 +326,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
 
   return (
     <div className="min-h-screen">
-      <NavBar active="roadmap" roleLabel={labelFor(myRole)} avatar={viewer?.avatar ?? null} showConfig={isAdmin} />
+      <NavBar active="roadmap" role={myRole} avatar={viewer?.avatar ?? null} showConfig={isAdmin} />
 
       <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-10">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -319,7 +334,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
             <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">Roadmap</h1>
             {myRole !== null && (
               <p className="text-[15px] text-rs-text-soft">
-                {activeView === "scrum_master" ? "GeoCloud · defina o que entra e quando" : "GeoCloud"}
+                {activeView === "scrum_master" ? ROADMAP.subtitleScrumMaster : "GeoCloud"}
               </p>
             )}
           </div>
@@ -332,7 +347,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
         </div>
 
         {!boardLoaded ? (
-          <p className="text-sm text-rs-text-soft">Carregando...</p>
+          <p className="text-sm text-rs-text-soft">{ROADMAP.loading}</p>
         ) : (
           <>
             {/* The sprints are weeks, in date order, titled by their dates; the current one is tinted. They sit in one row
@@ -403,8 +418,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
 
                     {lane.items.length > MAX_ITEMS_PER_SPRINT && (
                       <div className="rounded-[10px] border border-rs-brand bg-rs-brand-soft px-3 py-2 text-[12px] font-semibold text-rs-brand-text">
-                        ⚠️ Esta sprint tem {lane.items.length} itens, e o limite é {MAX_ITEMS_PER_SPRINT} issues por sprint. Mova{" "}
-                        {lane.items.length - MAX_ITEMS_PER_SPRINT} item(ns) para outra sprint.
+                        {sprintOverLimit(lane.items.length, MAX_ITEMS_PER_SPRINT)}
                       </div>
                     )}
                   </div>
@@ -414,9 +428,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
 
             {canEdit && (
               <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
-                Arraste um card do Open para uma semana para planejá-lo; ele continua no Open com a semana marcada. Numa semana, solte
-                sobre um card para pôr o item antes dele. Para desplanejar, arraste o card da semana de volta ao Open. No celular,
-                segure o card e arraste.
+                {ROADMAP.planHint}
               </div>
             )}
 
@@ -471,7 +483,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                     onClick={addItem}
                     className="rounded-[10px] border border-dashed border-rs-border bg-rs-card p-2.5 text-[13px] font-bold text-rs-text-soft"
                   >
-                    + Novo item
+                    {ROADMAP.newItem}
                   </button>
                 )}
                 <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-2">
@@ -483,7 +495,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                     )
                   )}
                 </div>
-                {kanban.open.length === 0 && <div className="p-2.5 text-[13px] text-rs-text-faint">Nenhuma issue aberta.</div>}
+                {kanban.open.length === 0 && <div className="p-2.5 text-[13px] text-rs-text-faint">{ROADMAP.noOpenIssues}</div>}
               </section>
 
               <section
@@ -496,15 +508,15 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                   <span className="text-[13px] font-bold text-rs-text-faint">{done.length}</span>
                 </div>
                 <span className="text-[12px] text-rs-text-faint">
-                  {allDone ? "Todas as issues em Done no Project" : `Foram para Done nos últimos ${DONE_WINDOW_DAYS} dias`}
+                  {allDone ? ROADMAP.allDone : recentDone(DONE_WINDOW_DAYS)}
                 </span>
                 {done.map((issue) => (
                   <IssueCard key={issue.url} issue={issue} />
                 ))}
-                {done.length === 0 && <div className="p-2.5 text-[13px] text-rs-text-faint">Nenhuma issue aqui.</div>}
+                {done.length === 0 && <div className="p-2.5 text-[13px] text-rs-text-faint">{ROADMAP.noIssuesHere}</div>}
                 {kanban.done.all.length > kanban.done.recent.length && (
                   <button onClick={() => setAllDone((v) => !v)} className="self-start py-1 text-xs font-bold text-rs-brand-text">
-                    {allDone ? `Ver só os últimos ${DONE_WINDOW_DAYS} dias` : `Ver todas (${kanban.done.all.length})`}
+                    {allDone ? showRecentDone(DONE_WINDOW_DAYS) : showAllDone(kanban.done.all.length)}
                   </button>
                 )}
               </section>
@@ -513,7 +525,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
             {/* The Project's ELIMS cards are never shown (only GeoCloud is RoadS's), so the gap to GitHub's counts is said here. */}
             {elims > 0 && (
               <p data-elims-note className="text-[13px] text-rs-text-faint">
-                {elims === 1 ? "1 issue do ELIMS no Project #7 não aparece aqui." : `${elims} issues do ELIMS no Project #7 não aparecem aqui.`}
+                {elimsNote(elims)}
               </p>
             )}
           </>
