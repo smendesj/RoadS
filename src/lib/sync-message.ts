@@ -31,6 +31,7 @@ export function roadmapSyncMessage(roadmap: {
   sprint?: SprintSyncSummary;
   retitled?: number;
   fields?: { pulled: number; pushed: number; failed: number; error?: string };
+  comments?: { pulled: number; pushed: number; failed: number; error?: string };
 }): string {
   if (roadmap.error) return roadmap.error;
   return (
@@ -38,8 +39,20 @@ export function roadmapSyncMessage(roadmap: {
     (roadmap.issuesCreated ? `, ${roadmap.issuesCreated} issue(s) criada(s) para itens sem issue.` : ".") +
     (roadmap.untyped ? ` ${roadmap.untyped} issue(s) aberta(s) sem label type:* ficaram de fora até ganharem tipo.` : "") +
     (roadmap.fields ? fieldsLine(roadmap.fields) : roadmap.retitled ? ` ${roadmap.retitled} título(s) do Roadmap acompanharam a renomeação da issue no GitHub.` : "") +
+    (roadmap.comments ? commentsLine(roadmap.comments) : "") +
     (roadmap.sprint ? sprintLine(roadmap.sprint) : "")
   );
+}
+
+// The two-way sync of Comments (issue #23): created, edited or deleted on either side.
+function commentsLine(comments: { pulled: number; pushed: number; failed: number; error?: string }): string {
+  if (comments.error) return ` Os Comments não sincronizaram: ${comments.error}.`;
+  const parts = [
+    comments.pulled ? `${comments.pulled} trazido(s) do GitHub` : "",
+    comments.pushed ? `${comments.pushed} gravado(s) no GitHub` : "",
+    comments.failed ? `${comments.failed} falharam` : "",
+  ].filter(Boolean);
+  return parts.length ? ` Comments: ${parts.join(", ")}.` : "";
 }
 
 // The two-way sync of Title and Description (issue #22): what came from GitHub, what went there, what failed.
@@ -57,7 +70,7 @@ function fieldsLine(fields: { pulled: number; pushed: number; failed: number; er
 export function roadmapChanged(roadmap: Parameters<typeof roadmapSyncMessage>[0]): boolean {
   const s = roadmap.sprint;
   return Boolean(
-    roadmap.error || roadmap.added || roadmap.removed || roadmap.issuesCreated || roadmap.retitled || roadmap.fields ||
+    roadmap.error || roadmap.added || roadmap.removed || roadmap.issuesCreated || roadmap.retitled || roadmap.fields || roadmap.comments ||
       (s && (s.error || s.pulled || s.released || s.written || s.wouldWrite || s.failed || s.stuck))
   );
 }

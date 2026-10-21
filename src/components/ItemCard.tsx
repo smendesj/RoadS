@@ -3,6 +3,7 @@
 import type { Effort, Prioridade, Produto, RoadmapItem } from "@/lib/types";
 import { isStack, isTipo, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } from "@/lib/issue-fields";
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
+import { ItemComment } from "@/components/ItemComment";
 
 const PRIORIDADES: Prioridade[] = ["Critical", "High", "Medium", "Low"];
 const EFFORTS: Effort[] = ["Very High", "High", "Medium", "Low"];
@@ -38,8 +39,14 @@ export function ItemCard({
   onSaveEdit,
   onCancelEdit,
   onDelete,
+  viewer = null,
+  onCommentsChanged = () => {},
 }: {
   item: RoadmapItem;
+  /** Who is looking: whoever wrote a Comment, and the admin, edit and delete it (ItemComment). */
+  viewer?: { id: string; role: string } | null;
+  /** A Comment was edited or deleted: the board reloads. */
+  onCommentsChanged?: () => void;
   canDrag: boolean;
   isEditing: boolean;
   editDraft: EditDraft | null;
@@ -116,11 +123,7 @@ export function ItemCard({
       {item.desc && <p className="text-[13px] leading-snug text-rs-text-soft">{item.desc}</p>}
 
       {item.notes.map((n) => (
-        <div key={n.id} className="rounded-lg bg-rs-lane p-2 text-xs text-rs-text">
-          <b>{n.author === "scrum_master" ? "Scrum Master" : "Dev"}</b>{" "}
-          <span className="text-rs-text-faint">· {n.when}</span>
-          <div>{n.text}</div>
-        </div>
+        <ItemComment key={n.id} note={n} viewer={viewer} onChanged={onCommentsChanged} />
       ))}
 
       {isEditing && editDraft && (
@@ -210,7 +213,8 @@ export function ItemCard({
             <input
               value={editDraft.note}
               onChange={(e) => onDraftChange({ ...editDraft, note: e.target.value })}
-              placeholder="Escrever nota (opcional)..."
+              aria-label="New Comment"
+              placeholder="Write a Comment (optional)..."
               className="w-full min-w-0 flex-grow rounded-lg sm:w-auto border border-rs-border bg-rs-card px-2.5 py-2 text-base text-rs-text sm:text-xs"
             />
             <button
@@ -230,7 +234,7 @@ export function ItemCard({
       {canDrag && !isEditing && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <button onClick={onStartEdit} className="py-1 text-xs font-bold text-rs-brand-text">
-            {canEditContent ? "Editar" : "+ nota"}
+            {canEditContent ? "Editar" : "+ Comment"}
           </button>
           {canDelete && (
             <button

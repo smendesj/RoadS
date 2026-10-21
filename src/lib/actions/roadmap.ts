@@ -8,6 +8,7 @@ import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/l
 import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { mayGetIssue } from "@/lib/test-data";
+import { commentAuthorName } from "@/lib/comment-author";
 import { currentSprintLane } from "@/lib/current-sprint";
 import { sprintLanesByDate, todayInSaoPaulo, weekDates, weekLanes, weekTitle } from "@/lib/sprint-week";
 import { weekRow } from "@/lib/week-plan";
@@ -30,7 +31,17 @@ type ItemRow = {
   stack?: string | null;
   created_by: string | null;
   created_at?: string;
-  notes: { id: string; author_role: string; created_at: string; body: string }[];
+  notes: {
+    id: string;
+    author_id: string | null;
+    author_role: string | null;
+    author_name: string | null;
+    github_login: string | null;
+    created_at: string;
+    updated_at: string | null;
+    deleted_at: string | null;
+    body: string;
+  }[];
 };
 
 function toRoadmapItem(row: ItemRow): RoadmapItem {
@@ -47,14 +58,18 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
     stack: row.stack ?? null,
     createdBy: row.created_by,
     ...(row.created_at ? { createdAt: row.created_at } : {}),
+    // A Comment deleted in RoadS is kept, hidden, until the sync deletes its comment on GitHub (comment-sync.ts).
     notes: row.notes
-      .slice()
+      .filter((n) => !n.deleted_at)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
       .map((n) => ({
         id: n.id,
-        author: (n.author_role === "scrum_master" ? "scrum_master" : "dev") as ViewAs,
+        author: (n.author_role === "dev" ? "dev" : "scrum_master") as ViewAs,
         when: n.created_at.slice(5, 10).split("-").reverse().join("/"),
         text: n.body,
+        authorId: n.author_id,
+        authorName: n.author_name ?? n.github_login,
+        edited: Boolean(n.updated_at),
       })),
   };
 }
@@ -73,7 +88,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
 
   const { data: items, error: itemsError } = await supabase
     .from("roadmap_items")
-    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, created_at, notes:item_notes(id, author_role, created_at, body)")
+    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, created_by, created_at, notes:item_notes(id, author_id, author_role, author_name, github_login, created_at, updated_at, deleted_at, body)")
     .order("sort_order")
     .order("id");
   if (itemsError) throw itemsError;
@@ -258,9 +273,15 @@ export async function saveRoadmapItemEdit(
   if (updateError) throw updateError;
 
   if (input.note.trim()) {
-    const { error: noteError } = await supabase
-      .from("item_notes")
-      .insert({ item_id: itemId, author_id: userId, author_role: authorRole, body: input.note.trim() });
+    // The name the Comment is signed with when the sync writes it on the issue (comment-sync.ts).
+    const { data: author } = await supabase.auth.getUser();
+    const { error: noteError } = await supabase.from("item_notes").insert({
+      item_id: itemId,
+      author_id: userId,
+      author_role: authorRole,
+      author_name: commentAuthorName(author.user, realRole),
+      body: input.note.trim(),
+    });
     if (noteError) throw noteError;
   }
 

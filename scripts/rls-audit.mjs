@@ -157,6 +157,21 @@ try {
   await check("sm", "note spoofing role dev", "deny", async () => rows(await sm.c.from("item_notes").insert({ item_id: M, author_id: sm.id, author_role: "dev", body: "[TESTE] forjada" }).select("id")));
   await check("sm", "note spoofing role admin", "deny", async () => rows(await sm.c.from("item_notes").insert({ item_id: M, author_id: sm.id, author_role: "admin", body: "[TESTE] forjada" }).select("id")));
   await check("sm", "note as someone else", "deny", async () => rows(await sm.c.from("item_notes").insert({ item_id: M, author_id: adm.id, author_role: "scrum_master", body: "[TESTE] forjada" }).select("id")));
+  // Comments (issue #23, migration 0040): whoever wrote one and the admin edit and delete it; only the sync ties it to GitHub.
+  const smNote = (await svc.from("item_notes").insert({ item_id: M, author_id: sm.id, author_role: "scrum_master", body: "[TESTE] comment do sm" }).select("id").single()).data.id;
+  const admNote = (await svc.from("item_notes").insert({ item_id: M, author_id: adm.id, author_role: "scrum_master", body: "[TESTE] comment do admin" }).select("id").single()).data.id;
+  const ghNote = (await svc.from("item_notes").insert({ item_id: M, author_id: null, author_role: null, github_login: "conta-teste", github_comment_id: 990000001, body: "[TESTE] comment do GitHub" }).select("id").single()).data.id;
+  await check("sm", "edit own Comment", "allow", async () => rows(await sm.c.from("item_notes").update({ body: "[TESTE] editado" }).eq("id", smNote).select("id")));
+  await check("sm", "edit someone else's Comment", "deny", async () => rows(await sm.c.from("item_notes").update({ body: "[TESTE] forjada" }).eq("id", admNote).select("id")));
+  await check("sm", "edit a Comment from GitHub", "deny", async () => rows(await sm.c.from("item_notes").update({ body: "[TESTE] forjada" }).eq("id", ghNote).select("id")));
+  await check("sm", "tie own Comment to a GitHub comment", "deny", async () => rows(await sm.c.from("item_notes").update({ github_comment_id: 990000002 }).eq("id", smNote).select("id")));
+  await check("sm", "insert a Comment already tied to GitHub", "deny", async () => rows(await sm.c.from("item_notes").insert({ item_id: M, author_id: sm.id, author_role: "scrum_master", body: "[TESTE] forjada", github_comment_id: 990000003 }).select("id")));
+  await check("sm", "delete someone else's Comment", "deny", async () => rows(await sm.c.from("item_notes").delete().eq("id", admNote).select("id")));
+  await check("dev", "edit a scrum master's Comment", "deny", async () => rows(await dev.c.from("item_notes").update({ body: "[TESTE] forjada" }).eq("id", smNote).select("id")));
+  await check("dev", "delete a scrum master's Comment", "deny", async () => rows(await dev.c.from("item_notes").delete().eq("id", smNote).select("id")));
+  await check("sm", "delete own Comment", "allow", async () => rows(await sm.c.from("item_notes").delete().eq("id", smNote).select("id")));
+  await check("admin", "edit a Comment from GitHub", "allow", async () => rows(await adm.c.from("item_notes").update({ body: "[TESTE] admin editou" }).eq("id", ghNote).select("id")));
+  await check("admin", "delete someone else's Comment", "allow", async () => rows(await adm.c.from("item_notes").delete().eq("id", ghNote).select("id")));
   await check("sm", "promote self to admin", "deny", async () => rows(await sm.c.from("profiles").update({ role: "admin" }).eq("id", sm.id).select("id")));
   await check("sm", "change dev's role", "deny", async () => rows(await sm.c.from("profiles").update({ role: "scrum_master" }).eq("id", dev.id).select("id")));
   await check("sm", "insert lane", "deny", async () => rows(await sm.c.from("lanes").insert({ id: "zz-test-sm", title: "x", kind: "group" }).select("id")));

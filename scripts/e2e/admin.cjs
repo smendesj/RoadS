@@ -62,9 +62,9 @@ const { BASE, expect, sleep, svc } = L;
 
     // edit the Scrum Master's item (title) and the seeded item (title: only admin may)
     await btn(card("[TESTE] item do scrum master"), "Editar").click();
-    const editing = () => page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
+    const editing = () => page.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])');
     await editing().locator("input").first().fill("[TESTE] SM item, renomeado pelo admin");
-    await editing().getByPlaceholder("Escrever nota (opcional)...").fill("[TESTE] nota do admin");
+    await editing().getByPlaceholder("Write a Comment (optional)...").fill("[TESTE] nota do admin");
     await btn(editing(), "Salvar").click();
     await page.getByText("[TESTE] SM item, renomeado pelo admin").first().waitFor({ timeout: 15000 });
     await sleep(1200);

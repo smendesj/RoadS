@@ -92,3 +92,10 @@ test("a press the brake held back says so and when the next sync can run, never 
   assert.equal(brakeMessage(400), "Uma sincronização começou há menos de 30 s ou ainda está em andamento; a próxima pode sair em 1 s.");
   assert.equal(brakeMessage(undefined), "Uma sincronização começou há menos de 30 s ou ainda está em andamento; tente de novo em instantes.");
 });
+test("the Comments a sync brought in, wrote to GitHub or failed are told, and count as a change", () => {
+  const base = { added: 0, removed: 0, issuesCreated: 0 };
+  const message = roadmapSyncMessage({ ...base, comments: { pulled: 2, pushed: 1, failed: 0 } });
+  assert.match(message, /Comments: 2 trazido\(s\) do GitHub, 1 gravado\(s\) no GitHub/);
+  assert.equal(roadmapChanged({ ...base, comments: { pulled: 0, pushed: 1, failed: 0 } }), true);
+  assert.match(roadmapSyncMessage({ ...base, comments: { pulled: 0, pushed: 0, failed: 0, error: "GitHub respondeu 502" } }), /Os Comments não sincronizaram: GitHub respondeu 502/);
+});
