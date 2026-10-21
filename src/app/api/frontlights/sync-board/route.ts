@@ -4,6 +4,9 @@ import { door } from "@/lib/frontlights/doors";
 import { supabaseSnapshotReader, syncBoardAnswer } from "@/lib/frontlights/sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+// A sync may run this long (SYNC_MAX_DURATION_S in src/lib/sync-cooldown.ts; Next reads only a literal here).
+export const maxDuration = 300;
+
 // POST /api/frontlights/sync-board -> runs the same sync as the Sincronizar button (Project #7 statuses, the
 // Dashboard snapshot, the Roadmap's open and closed issues), so FrontlightS can start from what the Roadmap
 // would show after a click. Same 30 s cooldown as the button: a second call right after one answers from the
