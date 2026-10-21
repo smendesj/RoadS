@@ -1,7 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { decideField, extractSolucao, labelsAfter, mayPush, nativeTypeOf, replaceSolucao, tipoOfLabels } from "./bilateral-sync.ts";
+import {
+  decideField,
+  deletionComment,
+  extractSolucao,
+  labelsAfter,
+  mayPush,
+  nativeTypeOf,
+  replaceSolucao,
+  selectorStatus,
+  statusOfIssue,
+  statusWrites,
+  storedStatus,
+  tipoOfLabels,
+} from "./bilateral-sync.ts";
 
 const at = (h: number) => `2026-10-21T${String(h).padStart(2, "0")}:00:00Z`;
 
@@ -107,4 +120,52 @@ test("a field that did not change only fills the labels it implies and never rem
   ]);
   // A type label already there is the issue's type: no second one is added.
   assert.deepEqual(labelsAfter(["type:bug"], { tipo: "feature", stack: null, prioridade: null }, new Set()), ["type:bug"]);
+});
+
+// ---- Status (S4): Open, Blocker, Done; Development is being in the current sprint (the sprint sync's rule of 06/10)
+
+test("the issue's Status is Done when it is closed or its card says Done, Blocker when the card says so, else Open", () => {
+  assert.equal(statusOfIssue({ closed: true, card: "Development" }), "Done");
+  assert.equal(statusOfIssue({ closed: false, card: "Done" }), "Done");
+  assert.equal(statusOfIssue({ closed: false, card: "Blocker" }), "Blocker");
+  assert.equal(statusOfIssue({ closed: false, card: "Development" }), "Open");
+  assert.equal(statusOfIssue({ closed: false, card: null }), "Open");
+});
+
+test("Done pushed closes the issue as completed and puts its card in Done", () => {
+  assert.deepEqual(statusWrites("Done", "Open", false), { issue: { state: "closed", state_reason: "completed" }, card: "Done" });
+  assert.deepEqual(statusWrites("Done", "Blocker", true), { issue: { state: "closed", state_reason: "completed" }, card: "Done" });
+});
+
+test("leaving Done reopens the issue, and the card goes to Development in the current sprint, Open outside it", () => {
+  assert.deepEqual(statusWrites("Open", "Done", false), { issue: { state: "open", state_reason: "reopened" }, card: "Open" });
+  assert.deepEqual(statusWrites("Open", "Done", true), { issue: { state: "open", state_reason: "reopened" }, card: "Development" });
+  assert.deepEqual(statusWrites("Blocker", "Done", false), { issue: { state: "open", state_reason: "reopened" }, card: "Blocker" });
+});
+
+test("Blocker and back only move the card; the issue stays open", () => {
+  assert.deepEqual(statusWrites("Blocker", "Open", true), { issue: null, card: "Blocker" });
+  assert.deepEqual(statusWrites("Open", "Blocker", true), { issue: null, card: "Development" });
+  assert.deepEqual(statusWrites("Open", "Blocker", false), { issue: null, card: "Open" });
+});
+
+test("the selector shows Done and Blocker as stored, and an open item as Development in the current sprint, else Open", () => {
+  assert.equal(selectorStatus("Done", true), "Done");
+  assert.equal(selectorStatus("Blocker", false), "Blocker");
+  assert.equal(selectorStatus("Open", true), "Development");
+  assert.equal(selectorStatus("Open", false), "Open");
+});
+
+test("choosing Development or Open stores Open and moves the item into or out of the current sprint; Blocker and Done stay put", () => {
+  assert.deepEqual(storedStatus("Development", false), { status: "Open", move: "into_sprint" });
+  assert.deepEqual(storedStatus("Development", true), { status: "Open", move: null });
+  assert.deepEqual(storedStatus("Open", true), { status: "Open", move: "out_of_sprint" });
+  assert.deepEqual(storedStatus("Open", false), { status: "Open", move: null });
+  assert.deepEqual(storedStatus("Blocker", true), { status: "Blocker", move: null });
+  assert.deepEqual(storedStatus("Done", false), { status: "Done", move: null });
+});
+
+test("the Comment of a Delete says who deleted the item and that the issue was closed as not planned", () => {
+  assert.equal(deletionComment("admin"), "Deleted in RoadS by an admin: this issue was closed as not planned.");
+  assert.equal(deletionComment("scrum_master"), "Deleted in RoadS by a scrum master: this issue was closed as not planned.");
 });

@@ -260,6 +260,33 @@ async function seedBoard() {
     expect("edit own item: Stack Database and Effort High saved, each edited field (title, type, stack, effort) with the time of its edit",
       edited.stack === "Database" && edited.effort === "High" && ["title", "tipo", "stack", "effort"].every((f) => stamped.includes(f)), JSON.stringify(edited));
 
+    // ------------------------------------------------ the Status selector (issue #22): Done, Blocker and back to Open
+    // An item with no week: Open stays where it is (Development would plan it into the real current week, so it isn't
+    // chosen here). Done and Blocker are the item's own, shown on its card; the sync takes them to the issue.
+    const setStatus = async (status) => {
+      await btn(openCard("[TESTE] criado e editado pelo SM"), "Editar").click();
+      const panel = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
+      const offered = await labelled(panel, "Status").locator("option").allTextContents();
+      await labelled(panel, "Status").selectOption(status);
+      await btn(panel, "Salvar").click();
+      await panel.waitFor({ state: "detached", timeout: 15000 });
+      await sleep(1500);
+      const { data } = await svc.from("roadmap_items").select("status, lane_id, field_changed_at").eq("id", created.id).single();
+      return { offered, row: data };
+    };
+    {
+      const done = await setStatus("Done");
+      expect("status: the selector offers Open, Development, Blocker and Done", JSON.stringify(done.offered) === JSON.stringify(["Open", "Development", "Blocker", "Done"]), JSON.stringify(done.offered));
+      expect("status: Done is saved with its edit time, and the item stays where it was",
+        done.row.status === "Done" && !!done.row.field_changed_at?.status && done.row.lane_id === created.lane_id, JSON.stringify(done.row));
+      expect("status: the card shows Concluído", (await count(openCard("[TESTE] criado e editado pelo SM").getByText("Concluído", { exact: true }))) === 1);
+      const blocked = await setStatus("Blocker");
+      expect("status: Blocker is saved and shown on the card", blocked.row.status === "Blocker" && (await count(openCard("[TESTE] criado e editado pelo SM").getByText("Blocker", { exact: true }))) === 1, JSON.stringify(blocked.row));
+      const reopened = await setStatus("Open");
+      expect("status: back to Open, with no badge, still out of any week",
+        reopened.row.status === "Open" && reopened.row.lane_id === created.lane_id && (await count(openCard("[TESTE] criado e editado pelo SM").getByText("Blocker", { exact: true }))) === 0, JSON.stringify(reopened.row));
+    }
+
     // ------------------------------------------------ seeded item: note + priority only, on its card in Open
     await btn(openCard("[TESTE] item semeado (sem dono)"), "+ nota").click();
     const noting = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');

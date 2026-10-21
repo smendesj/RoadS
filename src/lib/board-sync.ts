@@ -23,16 +23,16 @@ import "server-only";
 //
 // The same sync keeps the Roadmap's current sprint and the Project's Development telling the same story
 // (src/lib/sprint-status-sync.ts): the Project moving an issue moves it in the Roadmap, and the Roadmap
-// moving one writes its Status on the Project, but only when PROJECT_STATUS_WRITE=on (off, it reports what it
-// would write). The Roadmap's own moves are queued with origin "project" so FrontlightS writes them too.
+// moving one writes its Status on the Project, when the sync is run by someone who pushes (a scrum master, an admin,
+// the cron or FrontlightS; a dev's sync reports what it would write). The Roadmap's own moves are queued with origin "project" so FrontlightS writes them too.
 //
 // This is deliberately NOT a "use server" file: everything exported from one of those is an HTTP
 // endpoint any signed-in user can call directly, and syncBoard authorizes nobody (the cron has no
 // session) and writes with the admin client.
 
-import { createGeoCloudIssue, EFFORT_FIELD_ID, GEOCLOUD_REPO, PRIORIDADE_FIELD_ID, readBoardOptions, readIssueChangeTimes, setProjectOption, setProjectStatus, STACK_FIELD_ID, updateIssue, type IssueChange, type IssueChangeTimes } from "@/lib/github";
+import { createGeoCloudIssue, EFFORT_FIELD_ID, GEOCLOUD_REPO, PRIORIDADE_FIELD_ID, readBoardOptions, readIssueChangeTimes, readIssueState, setProjectOption, setProjectStatus, STACK_FIELD_ID, updateIssue, type IssueChange, type IssueChangeTimes } from "@/lib/github";
 import { importableIssues, isTestData, mayGetIssue } from "@/lib/test-data";
-import { decideField, extractSolucao, labelsAfter, nativeTypeOf, replaceSolucao, tipoOfLabels, type LabelledField } from "@/lib/bilateral-sync";
+import { decideField, extractSolucao, labelsAfter, nativeTypeOf, replaceSolucao, statusOfIssue, statusWrites, tipoOfLabels, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isEffort, isStack, isTipo, PRIORIDADE_OPTION_IDS, prioridadeOfOption, STACK_OPTION_IDS, stackOfOption, type Stack } from "@/lib/issue-fields";
 import type { Prioridade } from "@/lib/types";
@@ -226,7 +226,7 @@ async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
     let sprint: SprintSyncSummary | undefined;
     if (cards.size) {
       try {
-        const run = await syncSprintWithProject(token, cards, await readOpen());
+        const run = await syncSprintWithProject(token, cards, await readOpen(), push);
         sprint = run.summary;
         // What was written to the Project shows on the Roadmap and the Dashboard now, not only after the next sync.
         // A card moved by a write takes its place by the view's sort (with no sort, it stays last: GitHub's manual order
@@ -379,7 +379,7 @@ type Admin = ReturnType<typeof createAdminClient>;
 // sees it, as titles always were; a value written to GitHub changes only that field of the issue (labels of other
 // families are kept). What the issue said is remembered per field (github_seen), and the title also in github_title,
 // which older readers use. One item failing is counted and the others go on.
-type SyncedField = "title" | "description" | "tipo" | "stack" | "prioridade" | "effort";
+type SyncedField = "title" | "description" | "tipo" | "stack" | "prioridade" | "effort" | "status";
 const ISSUE_FIELDS = ["title", "description", "tipo"] as const;
 const BOARD_FIELDS = { stack: STACK_FIELD_ID, prioridade: PRIORIDADE_FIELD_ID, effort: EFFORT_FIELD_ID } as const;
 type BoardField = keyof typeof BOARD_FIELDS;
@@ -393,8 +393,10 @@ async function syncIssueFields(
   const admin = createAdminClient();
   const { data: items, error } = await admin
     .from("roadmap_items")
-    .select("id, title, description, tipo, stack, prioridade, effort, github_issue_url, github_seen, field_changed_at");
+    .select("id, lane_id, title, description, tipo, stack, prioridade, effort, status, github_issue_url, github_seen, field_changed_at");
   if (error) throw error;
+  // An open item's Status on the card is Development in the current sprint and Open outside it.
+  const currentId = (await currentSprintLane(admin).catch(() => null))?.id ?? null;
 
   // The board's options as they are now, read once: Effort's names both ways, and no write to an option the board
   // no longer has. Unreadable, the card fields wait for the next sync and the issue's own fields still go.
@@ -419,7 +421,7 @@ async function syncIssueFields(
 
   const byNumber = new Map(open.map((i) => [i.number, i]));
   type Side = { roads: string; github: string; githubAt?: string | null };
-  type Row = { id: string; number: number; issue: OpenIssue; card?: ProjectCard; seen: Record<string, string>; changedAt: Record<string, string>; values: Partial<Record<SyncedField, Side>> };
+  type Row = { id: string; laneId: string; number: number; issue: OpenIssue; card?: ProjectCard; seen: Record<string, string>; changedAt: Record<string, string>; values: Partial<Record<SyncedField, Side>> };
   const rows: Row[] = [];
   for (const item of items ?? []) {
     if (isTestData(item.title)) continue;
@@ -437,6 +439,8 @@ async function syncIssueFields(
     // The card's fields, when the card and its values were read: an empty field reads "", an option RoadS doesn't
     // offer leaves the field out.
     const card = cards.get(number);
+    // The Status: Done and Blocker on the card are the item's own; Open and Development are both an open item.
+    if (card) values.status = { roads: item.status ?? "Open", github: statusOfIssue({ closed: false, card: card.status }), githubAt: card.statusAt };
     if (card?.options && options) {
       const roadsOf: Record<BoardField, string> = { stack: isStack(item.stack) ? item.stack : "", prioridade: item.prioridade ?? "", effort: item.effort ?? "" };
       for (const field of Object.keys(BOARD_FIELDS) as BoardField[]) {
@@ -445,7 +449,7 @@ async function syncIssueFields(
         if (github !== null) values[field] = { roads: roadsOf[field], github, githubAt: value?.updatedAt ?? null };
       }
     }
-    rows.push({ id: item.id, number, issue, card, seen, changedAt: (item.field_changed_at as Record<string, string> | null) ?? {}, values });
+    rows.push({ id: item.id, laneId: item.lane_id, number, issue, card, seen, changedAt: (item.field_changed_at as Record<string, string> | null) ?? {}, values });
   }
 
   const moved = (row: Row, field: SyncedField) => {
@@ -465,6 +469,7 @@ async function syncIssueFields(
       const pulled: Partial<Record<SyncedField, string>> = {};
       const change: IssueChange = {};
       const cardWrites: [string, string][] = [];
+      let cardStatus: ReturnType<typeof statusWrites>["card"] | null = null;
       const relabel = new Set<LabelledField>();
       const pushedFields: SyncedField[] = [];
       const seen = { ...row.seen };
@@ -476,7 +481,7 @@ async function syncIssueFields(
           github,
           roadsAt: row.changedAt[field] ?? null,
           githubAt: githubAtOf(field, side, times.get(row.number)) ?? null,
-          fillGap: field !== "title" && field !== "description",
+          fillGap: field !== "title" && field !== "description" && field !== "status",
         });
         if (decision === "pull") {
           pulled[field] = github;
@@ -487,7 +492,12 @@ async function syncIssueFields(
           if (field === "title") change.title = roads;
           else if (field === "description") change.body = replaceSolucao(row.issue.body, roads);
           else if (field === "tipo") relabel.add("tipo");
-          else {
+          else if (field === "status") {
+            // Done closes the issue as completed, leaving Done reopens it, and the card's Status follows.
+            const writes = statusWrites(roads as ItemStatus, github as ItemStatus, row.laneId === currentId);
+            if (writes.issue) Object.assign(change, writes.issue);
+            cardStatus = writes.card;
+          } else {
             const option = row.card && optionFor(field, roads);
             if (!option) continue; // the board has no such option (yet): nothing is written, and nothing remembered
             cardWrites.push([BOARD_FIELDS[field], option]);
@@ -518,6 +528,7 @@ async function syncIssueFields(
 
       if (Object.keys(change).length) await updateIssue(token, row.number, change);
       for (const [field, option] of cardWrites) await setProjectOption(token, row.card!.itemId, field, option);
+      if (cardStatus) await setProjectStatus(token, row.card!.itemId, cardStatus);
       const update: Record<string, unknown> = { github_seen: seen, github_title: seen.title ?? null, ...pulled };
       const { error: updateError } = await admin.from("roadmap_items").update(update).eq("id", row.id);
       if (updateError) throw updateError;
@@ -535,6 +546,29 @@ async function syncIssueFields(
       summary.pushed += pushedFields.length + (gapsFilled ? 1 : 0);
     } catch (e) {
       console.error("syncBoard: two-way fields failed for an item", e);
+      summary.failed++;
+    }
+  }
+
+  // An item taken out of Done in RoadS holds a closed issue, which isn't among the open ones read above: it is read on
+  // its own and reopened, and its card follows. Only those who push do this.
+  for (const item of push ? (items ?? []) : []) {
+    const number = Number(item.github_issue_url?.match(ISSUE_URL)?.[1]);
+    const seen = (item.github_seen as Record<string, string> | null) ?? {};
+    const status: ItemStatus = item.status ?? "Open";
+    if (!number || byNumber.has(number) || isTestData(item.title) || seen.status !== "Done" || status === "Done") continue;
+    try {
+      if ((await readIssueState(token, number)) === "closed") {
+        const writes = statusWrites(status, "Done", item.lane_id === currentId);
+        if (writes.issue) await updateIssue(token, number, writes.issue);
+        const card = cards.get(number);
+        if (card) await setProjectStatus(token, card.itemId, writes.card);
+        summary.pushed++;
+      }
+      const { error: updateError } = await admin.from("roadmap_items").update({ github_seen: { ...seen, status } }).eq("id", item.id);
+      if (updateError) throw updateError;
+    } catch (e) {
+      console.error("syncBoard: reopening an issue failed", e);
       summary.failed++;
     }
   }
@@ -582,7 +616,8 @@ async function nextSprintOrder(admin: Admin, laneId: string): Promise<number> {
 async function syncSprintWithProject(
   token: string,
   cards: Map<number, ProjectCard>,
-  open: OpenIssue[]
+  open: OpenIssue[],
+  push: boolean
 ): Promise<{ summary: SprintSyncSummary; written: { url: string; status: "Open" | "Development" }[] }> {
   const admin = createAdminClient();
   const [{ data: lanes, error: lanesError }, { data: items, error: itemsError }] = await Promise.all([
@@ -639,8 +674,8 @@ async function syncSprintWithProject(
   }
 
   const deps: SprintSyncDeps = {
-    // Off until PROJECT_STATUS_WRITE=on: the sync then only reports what it would write to the Project.
-    writeEnabled: process.env.PROJECT_STATUS_WRITE === "on",
+    // Written by those who push (issue #22: no flag any more); a dev's sync only reports what it would write.
+    writeEnabled: push,
     // The newest add / move_lane row of each item is when the Roadmap last placed it.
     movedAt: async (ids) => {
       const found = new Map<string, string>();

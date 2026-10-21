@@ -12,10 +12,9 @@ import type { Effort } from "@/lib/types";
 export const GEOCLOUD_REPO = "Essencis-Labs/GeoCloudAI";
 const PROJECT_ID = "PVT_kwDODk7xnc4BGkj4"; // Essencis-Labs Project #7
 const STATUS_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zg3k_9Q";
-const STATUS_OPEN_OPTION = "f130aaf8";
-const STATUS_DEVELOPMENT_OPTION = "4e4b0563";
-// The two Statuses RoadS ever writes: Development is "in the current sprint", Open is everything else it plans.
-const STATUS_OPTIONS = { Open: STATUS_OPEN_OPTION, Development: STATUS_DEVELOPMENT_OPTION } as const;
+// The Statuses RoadS writes: Development is "in the current sprint", Open is everything else it plans, and an item's
+// own Blocker and Done (issue #22).
+const STATUS_OPTIONS = { Open: "f130aaf8", Development: "4e4b0563", Blocker: "95ee425e", Done: "9487135d" } as const;
 export type WritableStatus = keyof typeof STATUS_OPTIONS;
 export const PRIORIDADE_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhf1oXA";
 export const STACK_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhfusOE";
@@ -166,16 +165,43 @@ export async function createGeoCloudIssue(
   return { url: issue.html_url, number: issue.number, skipped };
 }
 
-export type IssueChange = { title?: string; body?: string; labels?: string[]; type?: string };
+export type IssueChange = {
+  title?: string;
+  body?: string;
+  labels?: string[];
+  type?: string;
+  state?: "open" | "closed";
+  state_reason?: "completed" | "reopened" | "not_planned";
+};
 
 /**
- * Writes what changed of an issue (the two-way sync of issue #22): its title, body, the whole list of its labels and
- * its native type by name; only the keys given are sent.
+ * Writes what changed of an issue (the two-way sync of issue #22): its title, body, the whole list of its labels, its
+ * native type by name, and its state with the reason (closed as completed, reopened); only the keys given are sent.
  */
 export async function updateIssue(token: string, number: number, change: IssueChange, port: GitHubPort = {}): Promise<void> {
   const body: IssueChange = {};
-  for (const key of ["title", "body", "labels", "type"] as const) if (change[key] !== undefined) Object.assign(body, { [key]: change[key] });
+  for (const key of ["title", "body", "labels", "type", "state", "state_reason"] as const) {
+    if (change[key] !== undefined) Object.assign(body, { [key]: change[key] });
+  }
   await github(token, `/repos/${GEOCLOUD_REPO}/issues/${number}`, { method: "PATCH", body }, port);
+}
+
+/** A Delete in RoadS: the issue gets `comment` (who deleted it), then is closed as not planned. Reopening it brings the item back. */
+export async function closeIssueAsNotPlanned(token: string, number: number, comment: string, port: GitHubPort = {}): Promise<void> {
+  await github(token, `/repos/${GEOCLOUD_REPO}/issues/${number}/comments`, { method: "POST", body: { body: comment } }, port);
+  await updateIssue(token, number, { state: "closed", state_reason: "not_planned" }, port);
+}
+
+/** Whether an issue is open or closed now (an item RoadS moved out of Done may hold a closed issue the sync didn't list). */
+export async function readIssueState(token: string, number: number, { fetch: fetchImpl = fetch }: GitHubPort = {}): Promise<"open" | "closed"> {
+  const res = await fetchImpl(`https://api.github.com/repos/${GEOCLOUD_REPO}/issues/${number}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`GitHub respondeu ${res.status} ao ler a issue`);
+  const json: { state?: string } = await res.json();
+  return json.state === "closed" ? "closed" : "open";
 }
 
 export type IssueChangeTimes = { titleAt: string | null; bodyAt: string | null; labelAt: string | null };
