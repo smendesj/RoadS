@@ -24,7 +24,10 @@ export type FieldSides = {
   roadsAt: string | null;
   /** When the field was last changed on GitHub (ISO), if known; only needed when both sides moved. */
   githubAt: string | null;
-  /** An empty value on GitHub is a gap RoadS fills with its own (Type, Stack, Priority, Effort), not a value to copy. */
+  /**
+   * An empty value on GitHub is a gap RoadS fills with its own (Type, Stack, Priority, Effort), not a value to copy; only
+   * with a value someone edited in RoadS (`roadsAt`), never with a default nobody chose, which waits for that edit.
+   */
   fillGap?: boolean;
 };
 
@@ -32,7 +35,7 @@ export type FieldDecision = "pull" | "push" | "none";
 
 export function decideField(f: FieldSides): FieldDecision {
   if (f.roads === f.github) return "none";
-  if (f.fillGap && f.github === "") return "push";
+  if (f.fillGap && f.github === "") return f.roadsAt ? "push" : "none";
   if (f.base === null) return "pull";
   const roadsMoved = f.roads !== f.base;
   const githubMoved = f.github !== f.base;

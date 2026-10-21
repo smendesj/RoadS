@@ -77,9 +77,13 @@ test("a body without a Solução section gets one at the end, and the rest stays
 
 // ---- Type, Stack, Priority and Effort (S3), with the labels they imply and the native type
 
-test("a field the issue leaves empty is a gap: RoadS fills it with its own value, even on the first sync", () => {
-  assert.equal(decideField({ roads: "High", base: null, github: "", roadsAt: null, githubAt: null, fillGap: true }), "push");
-  assert.equal(decideField({ roads: "High", base: "Low", github: "", roadsAt: null, githubAt: null, fillGap: true }), "push");
+test("a field the issue leaves empty is a gap: RoadS fills it with a value someone edited in RoadS, even on the first sync", () => {
+  assert.equal(decideField({ roads: "High", base: null, github: "", roadsAt: "2026-10-21T10:00:00Z", githubAt: null, fillGap: true }), "push");
+  assert.equal(decideField({ roads: "High", base: "Low", github: "", roadsAt: "2026-10-21T10:00:00Z", githubAt: null, fillGap: true }), "push");
+});
+
+test("a gap is never filled with a value nobody chose in RoadS (a default): it waits for someone to edit the field", () => {
+  assert.equal(decideField({ roads: "Medium", base: null, github: "", roadsAt: null, githubAt: null, fillGap: true }), "none");
   // Without the gap rule (Title, Description), an empty GitHub value is a value like any other.
   assert.equal(decideField({ roads: "Texto", base: null, github: "", roadsAt: null, githubAt: null }), "pull");
   // A RoadS without a value takes the issue's, as on any first sync.

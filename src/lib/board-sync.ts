@@ -377,7 +377,7 @@ type Admin = ReturnType<typeof createAdminClient>;
 // (src/lib/bilateral-sync.ts has the rule). The Description is the issue's "## Solução" section; the Type is its type:
 // label, and the issue's native type follows it; Stack, Priority and Effort are its card's fields on Project #7, matched
 // by id (Effort by its option's name, see EFFORT_FIELD_ID), and Stack and Priority carry the labels they imply (area:,
-// priority:high). A field the issue leaves empty is a gap RoadS fills with the item's own value; an option RoadS doesn't
+// priority:high). A field the issue leaves empty is a gap RoadS fills with a value edited in RoadS (never a default); an option RoadS doesn't
 // offer (a Stack named after a person) leaves the field alone. A value brought in is queued as a modify so FrontlightS
 // sees it, as titles always were; a value written to GitHub changes only that field of the issue (labels of other
 // families are kept). What the issue said is remembered per field (github_seen), and the title also in github_title,
@@ -566,7 +566,8 @@ async function syncIssueFields(
       // The labels the final values imply, and the native type the Type implies: written only by those who push.
       let gapsFilled = false;
       if (push) {
-        const final = (field: "tipo" | "stack" | "prioridade") => pulled[field] ?? row.values[field]?.roads ?? "";
+        // What the issue says once this sync is done: a value written to it, else what it already says.
+        const final = (field: "tipo" | "stack" | "prioridade") => (pushedFields.includes(field) ? row.values[field]?.roads : row.values[field]?.github) ?? "";
         const [t, s, p] = [final("tipo"), final("stack"), final("prioridade")];
         const tipo = isTipo(t) ? t : null;
         const labels = labelsAfter(
