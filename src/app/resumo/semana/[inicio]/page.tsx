@@ -5,9 +5,10 @@ import { shotPath } from "@/lib/progress-report";
 import { reportPeriodLabel } from "@/lib/progress/report-view";
 import { visualAlt, visualModel } from "@/lib/progress/visual";
 import { combineWeek } from "@/lib/progress/week";
+import { WEEK } from "@/lib/text/resumo";
 import { loadWeek, requireReportViewer, weekProduct, weekStartParam } from "../../data";
 
-export const metadata: Metadata = { title: "RoadS — Semana" };
+export const metadata: Metadata = { title: WEEK.pageTitle };
 
 // The week's presentation, for the Monday scrum: the reports SENT in the week that starts on that Monday, put
 // together (src/lib/progress/week.ts). Admin and scrum master, like the Resumo tab; everyone else is sent back.
@@ -40,7 +41,7 @@ export default async function WeekPage({
       content={week.content}
       shotUrls={shotUrls}
       visual={{ url: `/resumo/semana/${start}/uso?${query}`, title: visualModel(week.content).title, alt: visualAlt(week.content) }}
-      periodLabel={reportPeriodLabel(week.content.window)}
+      periodLabel={reportPeriodLabel(week.content.window, "en")}
     />
   );
 }

@@ -9,6 +9,8 @@ import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/l
 import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { isTestData, mayGetIssue } from "@/lib/test-data";
+import { commentAuthorName } from "@/lib/comment-author";
+import { assigneeKey, parseLogin } from "@/lib/assignee-sync";
 import { currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
 import { sprintLanesByDate, todayInSaoPaulo, weekDates, weekLanes, weekTitle } from "@/lib/sprint-week";
 import { weekRow } from "@/lib/week-plan";
@@ -32,7 +34,18 @@ type ItemRow = {
   status?: ItemStatus;
   created_by: string | null;
   created_at?: string;
-  notes: { id: string; author_role: string; created_at: string; body: string }[];
+  assignees?: string[] | null;
+  notes: {
+    id: string;
+    author_id: string | null;
+    author_role: string | null;
+    author_name: string | null;
+    github_login: string | null;
+    created_at: string;
+    updated_at: string | null;
+    deleted_at: string | null;
+    body: string;
+  }[];
 };
 
 function toRoadmapItem(row: ItemRow): RoadmapItem {
@@ -50,14 +63,19 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
     ...(row.status ? { state: row.status } : {}),
     createdBy: row.created_by,
     ...(row.created_at ? { createdAt: row.created_at } : {}),
+    assignees: row.assignees ?? [],
+    // A Comment deleted in RoadS is kept, hidden, until the sync deletes its comment on GitHub (comment-sync.ts).
     notes: row.notes
-      .slice()
+      .filter((n) => !n.deleted_at)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
       .map((n) => ({
         id: n.id,
-        author: (n.author_role === "scrum_master" ? "scrum_master" : "dev") as ViewAs,
+        author: (n.author_role === "dev" ? "dev" : "scrum_master") as ViewAs,
         when: n.created_at.slice(5, 10).split("-").reverse().join("/"),
         text: n.body,
+        authorId: n.author_id,
+        authorName: n.author_name ?? n.github_login,
+        edited: Boolean(n.updated_at),
       })),
   };
 }
@@ -76,7 +94,7 @@ export async function getRoadmapBoard(): Promise<{ lanes: Lane[]; groups: Roadma
 
   const { data: items, error: itemsError } = await supabase
     .from("roadmap_items")
-    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, status, created_by, created_at, notes:item_notes(id, author_role, created_at, body)")
+    .select("id, lane_id, sort_order, title, description, produto, prioridade, effort, github_issue_url, tipo, stack, status, created_by, created_at, assignees, notes:item_notes(id, author_id, author_role, author_name, github_login, created_at, updated_at, deleted_at, body)")
     .order("sort_order")
     .order("id");
   if (itemsError) throw itemsError;
@@ -141,7 +159,7 @@ async function queueChange(itemId: string | null, action: "add" | "modify" | "re
   await supabase.from("roadmap_sync_queue").insert({ item_id: itemId, action, payload });
 }
 
-// "+ Novo item", in the Kanban's Open: the one place an item is born, with no week, in a type lane (NEW_ITEM_LANE). The
+// "+ New item", in the Kanban's Open: the one place an item is born, with no week, in a type lane (NEW_ITEM_LANE). The
 // lane is the server's to choose, never the caller's; planning it is dragging it to a week afterwards.
 export async function createRoadmapItem(): Promise<RoadmapItem> {
   const { userId } = await requireScrumMasterActor();
@@ -195,13 +213,14 @@ async function getItemAccess(
       effort: Effort;
       status: ItemStatus;
       field_changed_at: Record<string, string> | null;
+      assignees: string[] | null;
     };
   }
 > {
   const supabase = await createServerSupabase();
   const { data: item, error } = await supabase
     .from("roadmap_items")
-    .select("lane_id, title, produto, description, github_issue_url, tipo, stack, prioridade, effort, status, created_by, field_changed_at")
+    .select("lane_id, title, produto, description, github_issue_url, tipo, stack, prioridade, effort, status, created_by, field_changed_at, assignees")
     .eq("id", itemId)
     .single();
   if (error) throw error;
@@ -224,6 +243,7 @@ export async function saveRoadmapItemEdit(
     note: string;
     activeView: ViewAs;
     content?: { title: string; description: string; produto: Produto; tipo: Tipo; stack: Stack };
+    assignees?: string[];
     /** The Status selector's choice (issue #22); absent, the Status and the week stay as they are. */
     status?: SelectorStatus;
   }
@@ -273,15 +293,29 @@ export async function saveRoadmapItemEdit(
     update.status = chosen.status;
     if (chosen.status !== access.item.status) changedAt.status = now;
   }
+  // Assignees (issue #23): GitHub logins, kept in lower case; their edit time settles them like the other fields.
+  if (input.assignees) {
+    const logins = [...new Set(input.assignees.map((l) => parseLogin(l)).filter((l): l is string => typeof l === "string"))];
+    if (assigneeKey(logins) !== assigneeKey(access.item.assignees ?? [])) {
+      update.assignees = logins;
+      changedAt.assignees = now;
+    }
+  }
   update.field_changed_at = changedAt;
 
   const { error: updateError } = await supabase.from("roadmap_items").update(update).eq("id", itemId);
   if (updateError) throw updateError;
 
   if (input.note.trim()) {
-    const { error: noteError } = await supabase
-      .from("item_notes")
-      .insert({ item_id: itemId, author_id: userId, author_role: authorRole, body: input.note.trim() });
+    // The name the Comment is signed with when the sync writes it on the issue (comment-sync.ts).
+    const { data: author } = await supabase.auth.getUser();
+    const { error: noteError } = await supabase.from("item_notes").insert({
+      item_id: itemId,
+      author_id: userId,
+      author_role: authorRole,
+      author_name: commentAuthorName(author.user, realRole),
+      body: input.note.trim(),
+    });
     if (noteError) throw noteError;
   }
 
@@ -316,7 +350,7 @@ export async function saveRoadmapItemEdit(
   });
 }
 
-// Every Roadmap item is a GitHub issue. A GeoCloud item saved without one (a "+ Novo item" once it
+// Every Roadmap item is a GitHub issue. A GeoCloud item saved without one (a "+ New item" once it
 // has a real title) gets its issue here, Open on Project #7 (Development if it is in the current sprint); test data
 // (src/lib/test-data.ts) never does. A failure doesn't fail the save: the
 // next board sync retries it.
@@ -378,7 +412,7 @@ async function dropFutureWeekIfEmpty(laneId: string) {
 }
 
 // Dropped on a card of a week (`beforeId`), the item goes right before it, also within the week it is already in;
-// anywhere else in a week ("Mover para" too), last. Its own number is written under the actor's session (the RLS of
+// anywhere else in a week ("Move to" too), last. Its own number is written under the actor's session (the RLS of
 // 0007 is the backstop); the neighbours it renumbers may be anyone's, so the server writes them with the service role,
 // only now that the item is known to be the actor's to move (src/lib/week-order.ts). A group keeps its own order.
 // Dropped on the Kanban (KANBAN), the item is unplanned into a type lane the server picks (unplanItem).
@@ -446,7 +480,7 @@ const GEOCLOUD_ISSUE = /github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i;
 
 // Unplanning: a card dropped from a week on the Kanban. Called only after getItemAccess said the item is the actor's to
 // move. The item goes to the type lane of its issue's type label (read from GitHub now; with no token, or when the read
-// fails, there is none), else of the type it is stored with, else where "+ Novo item" puts one (unplanLane in
+// fails, there is none), else of the type it is stored with, else where "+ New item" puts one (unplanLane in
 // src/lib/issue-lane.ts, the rule the sync releases an item by). The server picks it, never the caller. An item already
 // in no week stays. Queued like any move, with both lanes; the future week it left, now empty, goes. Leaving the
 // current week, the Project goes back to Open through the sprint sync (only with its write switch on); leaving a week

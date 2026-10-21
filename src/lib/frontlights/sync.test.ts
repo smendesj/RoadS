@@ -54,7 +54,7 @@ test("a snapshot from the future never counts as recent", async () => {
 test("a sync that fails says why, in the user's language, and never the board's cards", async () => {
   const { port } = deps(null, { ok: false, reason: "not_configured" });
   const answer = await syncBoardAnswer(port);
-  assert.deepEqual(answer, { ok: false, reason: "not_configured", message: "Sincronização do GitHub ainda não configurada (falta GITHUB_TOKEN no servidor)." });
+  assert.deepEqual(answer, { ok: false, reason: "not_configured", message: "GitHub Sync is not configured yet (GITHUB_TOKEN is missing on the server)." });
 });
 
 test("the answer never carries the titles of the board's cards", async () => {

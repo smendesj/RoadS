@@ -6,6 +6,7 @@ import {
   isConferenceCurrent,
   amountLabel,
   isUuid,
+  openTitles,
   partsLabel,
   previewDocument,
   reasonMessage,
@@ -181,6 +182,19 @@ test("the amount of a chip says parts and issues, with the singular where it is 
   assert.equal(amountLabel(1, 1), "1 parte em 1 issue");
   assert.equal(amountLabel(0, 0), "0 partes em 0 issues");
   assert.equal(amountLabel(1, 3), "1 parte em 3 issues");
+});
+
+test("the screens around the Prévia get the same labels in English; Portuguese stays the default", () => {
+  assert.equal(reportPeriodLabel({ start: "2026-09-28T00:00:00-03:00", end: "2026-09-30T00:00:00-03:00" }, "en"), "28/09 to 29/09");
+  assert.equal(reportPeriodLabel({ start: "2026-09-28T00:00:00-03:00", end: "2026-09-29T00:00:00-03:00" }, "en"), "28/09");
+  assert.equal(partsLabel({ total: 8, done: 3 }, "en"), "3 of 8 parts ready");
+  assert.equal(partsLabel({ total: 1, done: 0 }, "en"), "0 of 1 part ready");
+  assert.equal(partsLabel(null, "en"), null);
+  assert.equal(amountLabel(14, 6, "en"), "14 parts in 6 issues");
+  assert.equal(amountLabel(1, 1, "en"), "1 part in 1 issue");
+  const open = Array.from({ length: 10 }, (_, i) => ({ title: `T${i + 1}` }));
+  assert.equal(openTitles(open, 8, "en"), "T1; T2; T3; T4; T5; T6; T7; T8; and 2 more");
+  assert.equal(openTitles(open), "T1; T2; T3; T4; T5; T6; T7; T8; e mais 2");
 });
 
 const cover = (issue: number, remaining: number, total = 10) => ({

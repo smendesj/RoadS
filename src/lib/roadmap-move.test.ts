@@ -110,7 +110,7 @@ test("dropOrder: the item dropped before a card takes its place, and only the ne
   assert.deepEqual(dropOrder(stored(["a1", 0], ["a2", 1]), "g1a", "a1"), { sortOrder: 0, neighbors: [{ id: "a1", sortOrder: 1 }, { id: "a2", sortOrder: 2 }] });
 });
 
-test("dropOrder: with no card to go before, the item goes last (\"Mover para\", a drop on the empty part of a week, a new week)", () => {
+test("dropOrder: with no card to go before, the item goes last (\"Move to\", a drop on the empty part of a week, a new week)", () => {
   assert.deepEqual(dropOrder(stored(["a1", 0], ["a2", 1]), "g1a", null), { sortOrder: 2, neighbors: [] });
   assert.deepEqual(dropOrder([], "g1a", null), { sortOrder: 0, neighbors: [] });
 });

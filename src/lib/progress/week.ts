@@ -49,14 +49,14 @@ export function weekMeetingOf(period: { period_start: string; period_end: string
   return plusDays(weekOfPeriod(period), 7);
 }
 
-/** The sent list in weeks, in the order it came (newest first), each labelled Monday to Friday. */
+/** The sent list in weeks, in the order it came (newest first), each labelled Monday to Friday (a screen label, in English). */
 export function groupByWeek<T extends { period_start: string; period_end: string }>(list: T[]): { start: string; label: string; items: T[] }[] {
   const groups: { start: string; label: string; items: T[] }[] = [];
   for (const item of list) {
     const start = weekOfPeriod(item);
     let group = groups.find((g) => g.start === start);
     if (!group) {
-      group = { start, label: `Semana de ${ddmm(start)} a ${ddmm(plusDays(start, 4))}`, items: [] };
+      group = { start, label: `Week of ${ddmm(start)} to ${ddmm(plusDays(start, 4))}`, items: [] };
       groups.push(group);
     }
     group.items.push(item);

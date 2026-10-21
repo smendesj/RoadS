@@ -3,22 +3,38 @@
 import type { Effort, Prioridade, Produto, RoadmapItem } from "@/lib/types";
 import { isStack, isTipo, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } from "@/lib/issue-fields";
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
+import { ItemComment } from "@/components/ItemComment";
+import { assigneeNames } from "@/lib/assignee-sync";
 import type { SelectorStatus } from "@/lib/bilateral-sync";
+import { ACTION, FIELD } from "@/lib/text/common";
+import { deleteItemConfirm, ROADMAP } from "@/lib/text/roadmap";
 
 const PRIORIDADES: Prioridade[] = ["Critical", "High", "Medium", "Low"];
 const EFFORTS: Effort[] = ["Very High", "High", "Medium", "Low"];
 
-/** content is only present when the viewer may edit title/description/produto (admin, or RoadS-created items). */
+/** content is only present when the viewer may edit title/description/product (admin, or RoadS-created items). */
 export type EditDraft = {
   prioridade: Prioridade;
   effort: Effort;
   note: string;
   content?: { title: string; description: string; produto: Produto; tipo: Tipo; stack: Stack };
+  /** The Assignees being picked, as GitHub logins (issue #23). */
+  assignees?: string[];
   /** The Status selector (issue #22): Development and Open plan the item into or out of the current sprint. */
   status: SelectorStatus;
 };
 
 const STATUSES: SelectorStatus[] = ["Open", "Development", "Blocker", "Done"];
+
+/** The profiles to pick from, plus any login already assigned that no profile has (shown as the login). */
+function assigneeChoices(people: { login: string; name: string }[], current: string[]) {
+  const known = new Set(people.map((p) => p.login));
+  return [...people, ...current.filter((l) => !known.has(l)).map((l) => ({ login: l, name: l }))];
+}
+
+function peopleNames(people: { login: string; name: string }[]): Map<string, string> {
+  return new Map(people.map((p) => [p.login.toLowerCase(), p.name]));
+}
 
 export function ItemCard({
   item,
@@ -43,8 +59,17 @@ export function ItemCard({
   onSaveEdit,
   onCancelEdit,
   onDelete,
+  viewer = null,
+  onCommentsChanged = () => {},
+  people = [],
 }: {
+  /** Who can be an Assignee: the profiles tied to a GitHub login, with their names. */
+  people?: { login: string; name: string }[];
   item: RoadmapItem;
+  /** Who is looking: whoever wrote a Comment, and the admin, edit and delete it (ItemComment). */
+  viewer?: { id: string; role: string } | null;
+  /** A Comment was edited or deleted: the board reloads. */
+  onCommentsChanged?: () => void;
   canDrag: boolean;
   isEditing: boolean;
   editDraft: EditDraft | null;
@@ -52,8 +77,8 @@ export function ItemCard({
   weekLabel?: string | null;
   canDelete?: boolean;
   canEditContent?: boolean;
-  /** The lane the card is in and every lane it can go to — drive the "Mover para" select. A card in a week also lists
-   *  "Kanban (sem semana)" (KANBAN), which unplans it like a drop on the Kanban's Open. */
+  /** The lane the card is in and every lane it can go to — drive the "Move to" select. A card in a week also lists
+   *  "Kanban (no week)" (KANBAN), which unplans it like a drop on the Kanban's Open. */
   laneId?: string;
   moveTargets?: { id: string; label: string }[];
   onMoveTo?: (laneId: string) => void;
@@ -115,18 +140,20 @@ export function ItemCard({
         <span className={badgeClass(produtoTone(item.produto))}>{item.produto}</span>
         <span className={badgeClass(prioridadeTone(item.prioridade))}>{item.prioridade}</span>
         <span className={badgeClass(effortTone(item.effort))}>{item.effort}</span>
-        {(item.status === "done" || item.state === "Done") && <span className={badgeClass("green")}>Concluído</span>}
+        {(item.status === "done" || item.state === "Done") && <span className={badgeClass("green")}>{ROADMAP.done}</span>}
         {item.state === "Blocker" && <span className={badgeClass("red")}>Blocker</span>}
       </div>
 
       {item.desc && <p className="text-[13px] leading-snug text-rs-text-soft">{item.desc}</p>}
 
+      {item.assignees && item.assignees.length > 0 && (
+        <p data-assignees-shown className="text-xs text-rs-text-soft">
+          <span className="font-bold text-rs-text-faint">{FIELD.assignees}:</span> {assigneeNames(item.assignees, peopleNames(people)).join(", ")}
+        </p>
+      )}
+
       {item.notes.map((n) => (
-        <div key={n.id} className="rounded-lg bg-rs-lane p-2 text-xs text-rs-text">
-          <b>{n.author === "scrum_master" ? "Scrum Master" : "Dev"}</b>{" "}
-          <span className="text-rs-text-faint">· {n.when}</span>
-          <div>{n.text}</div>
-        </div>
+        <ItemComment key={n.id} note={n} viewer={viewer} onChanged={onCommentsChanged} />
       ))}
 
       {isEditing && editDraft && (
@@ -134,7 +161,7 @@ export function ItemCard({
           {content && (
             <>
               <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Título</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.title}</span>
                 <input
                   value={content.title}
                   onChange={(e) => setContent({ title: e.target.value })}
@@ -142,7 +169,7 @@ export function ItemCard({
                 />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Descrição</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.description}</span>
                 <textarea
                   value={content.description}
                   onChange={(e) => setContent({ description: e.target.value })}
@@ -152,7 +179,7 @@ export function ItemCard({
               </label>
               <div className="flex gap-2">
                 <label className="flex flex-1 flex-col gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Tipo</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.type}</span>
                   <select
                     value={content.tipo}
                     onChange={(e) => isTipo(e.target.value) && setContent({ tipo: e.target.value })}
@@ -166,7 +193,7 @@ export function ItemCard({
                   </select>
                 </label>
                 <label className="flex flex-1 flex-col gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Stack</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.stack}</span>
                   <select
                     value={content.stack}
                     onChange={(e) => isStack(e.target.value) && setContent({ stack: e.target.value })}
@@ -184,7 +211,7 @@ export function ItemCard({
           )}
           <div className="flex gap-2">
             <label className="flex flex-1 flex-col gap-1">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Prioridade</span>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.priority}</span>
               <select
                 value={editDraft.prioridade}
                 onChange={(e) => onDraftChange({ ...editDraft, prioridade: e.target.value as Prioridade })}
@@ -198,7 +225,7 @@ export function ItemCard({
               </select>
             </label>
             <label className="flex flex-1 flex-col gap-1">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Effort</span>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.effort}</span>
               <select
                 value={editDraft.effort}
                 onChange={(e) => onDraftChange({ ...editDraft, effort: e.target.value as Effort })}
@@ -213,7 +240,7 @@ export function ItemCard({
             </label>
           </div>
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Status</span>
+            <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.status}</span>
             <select
               value={editDraft.status}
               onChange={(e) => onDraftChange({ ...editDraft, status: e.target.value as SelectorStatus })}
@@ -226,11 +253,36 @@ export function ItemCard({
               ))}
             </select>
           </label>
+          {editDraft.assignees && (people.length > 0 || editDraft.assignees.length > 0) && (
+            <fieldset data-assignees className="flex flex-col gap-1">
+              <legend className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.assignees}</legend>
+              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                {assigneeChoices(people, editDraft.assignees).map((p) => (
+                  <label key={p.login} className="flex items-center gap-1.5 text-xs text-rs-text">
+                    <input
+                      type="checkbox"
+                      checked={editDraft.assignees!.includes(p.login)}
+                      onChange={(e) =>
+                        onDraftChange({
+                          ...editDraft,
+                          assignees: e.target.checked
+                            ? [...editDraft.assignees!, p.login]
+                            : editDraft.assignees!.filter((l) => l !== p.login),
+                        })
+                      }
+                    />
+                    {p.name}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
           <div className="flex flex-wrap gap-1.5 sm:flex-nowrap">
             <input
               value={editDraft.note}
               onChange={(e) => onDraftChange({ ...editDraft, note: e.target.value })}
-              placeholder="Escrever nota (opcional)..."
+              aria-label={ROADMAP.newComment}
+              placeholder={ROADMAP.commentPlaceholder}
               className="w-full min-w-0 flex-grow rounded-lg sm:w-auto border border-rs-border bg-rs-card px-2.5 py-2 text-base text-rs-text sm:text-xs"
             />
             <button
@@ -238,10 +290,10 @@ export function ItemCard({
               disabled={!!content && !content.title.trim()}
               className="rounded-lg bg-rs-brand px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
             >
-              Salvar
+              {ACTION.save}
             </button>
             <button onClick={onCancelEdit} className="rounded-lg px-2 py-2 text-xs font-bold text-rs-text-soft">
-              Cancelar
+              {ACTION.cancel}
             </button>
           </div>
         </div>
@@ -250,16 +302,16 @@ export function ItemCard({
       {canDrag && !isEditing && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <button onClick={onStartEdit} className="py-1 text-xs font-bold text-rs-brand-text">
-            {canEditContent ? "Editar" : "+ nota"}
+            {canEditContent ? ACTION.edit : ROADMAP.addComment}
           </button>
           {canDelete && (
             <button
               onClick={() => {
-                if (window.confirm(`Excluir "${item.title}"? Não dá pra desfazer.`)) onDelete();
+                if (window.confirm(deleteItemConfirm(item.title))) onDelete();
               }}
               className="py-1 text-xs font-bold text-red-600 dark:text-red-400"
             >
-              Excluir
+              {ACTION.delete}
             </button>
           )}
           {/* Below lg a select moves the card too, with a mouse; a touch screen holds and drags the card instead,
@@ -268,10 +320,10 @@ export function ItemCard({
             <select
               value=""
               onChange={(e) => e.target.value && onMoveTo(e.target.value)}
-              aria-label="Mover para"
+              aria-label={ROADMAP.moveTo}
               className="ml-auto min-w-0 max-w-[65%] rounded-lg border border-rs-border bg-rs-card px-2 py-1 text-base font-bold text-rs-text-soft sm:text-xs lg:hidden pointer-coarse:sr-only pointer-coarse:focus:not-sr-only"
             >
-              <option value="">Mover para…</option>
+              <option value="">{ROADMAP.moveToPlaceholder}</option>
               {moveTargets
                 .filter((t) => t.id !== laneId)
                 .map((t) => (

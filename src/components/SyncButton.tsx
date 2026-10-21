@@ -1,6 +1,8 @@
 "use client";
 
-// The one "Sincronizar" button, on the Dashboard and on the Roadmap alike: the same label, the same
+import { ACTION } from "@/lib/text/common";
+
+// The one "Sync" button, on the Dashboard and on the Roadmap alike: the same label, the same
 // icon, the same sync behind it (GitHub Project #7, then the Roadmap's issues).
 export function SyncButton({ onClick, isPending }: { onClick: () => void; isPending: boolean }) {
   return (
@@ -22,7 +24,7 @@ export function SyncButton({ onClick, isPending }: { onClick: () => void; isPend
       >
         <path d="M21 12a9 9 0 11-2.64-6.36M21 3v6h-6" />
       </svg>
-      {isPending ? "Sincronizando..." : "Sincronizar"}
+      {isPending ? ACTION.syncing : ACTION.sync}
     </button>
   );
 }

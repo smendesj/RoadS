@@ -4,10 +4,11 @@ import { ENTRY_STATUSES, localDay } from "../progress-report.ts";
 import type { EntryStatus, ProgressContent, ProgressReportRow, ReportWindow } from "../progress-report.ts";
 import { visibleOf } from "./shot-place.ts";
 
-/** What the card and the page say to an admin when no report exists yet (nothing was ever pushed). */
-export const EMPTY_REPORT_TEXT = "Nenhum rascunho ainda. Inicie o Frontlights e escolha atualizar o resumo para a diretoria.";
-/** What a scrum master sees when nothing has been sent yet: they never see drafts. */
-export const EMPTY_SENT_TEXT = "Nenhum resumo enviado ainda.";
+/**
+ * The language of a label: the Prévia (the e-mail and everything inside it) stays in Portuguese, the screens
+ * around it are in English (issue #23). Portuguese is the default, so the Prévia's calls never change.
+ */
+export type Lang = "pt" | "en";
 
 const SAO_PAULO = "America/Sao_Paulo";
 
@@ -48,32 +49,34 @@ export function formatStamp(iso: string | null | undefined): string {
  * midnight of the day after the last one), so the last day is the day of the instant just before it.
  * A one-day or empty window names a single day rather than a backwards range.
  */
-export function reportPeriodLabel(window: ReportWindow): string {
+export function reportPeriodLabel(window: ReportWindow, lang: Lang = "pt"): string {
   const start = Date.parse(window.start);
   const end = Date.parse(window.end);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return "—";
   const first = localDay(new Date(start));
   const last = localDay(new Date(end - 1));
   const dm = (day: string) => `${day.slice(8, 10)}/${day.slice(5, 7)}`;
-  return last > first ? `${dm(first)} a ${dm(last)}` : dm(first);
+  return last > first ? `${dm(first)} ${lang === "en" ? "to" : "a"} ${dm(last)}` : dm(first);
 }
 
 /** "3 de 8 partes prontas": how far a delivery made of parts has come, in plain words and with no issue number. */
-export function partsLabel(parts: { total: number; done: number } | null | undefined): string | null {
+export function partsLabel(parts: { total: number; done: number } | null | undefined, lang: Lang = "pt"): string | null {
   if (!parts || parts.total <= 0) return null;
+  if (lang === "en") return `${parts.done} of ${parts.total} ${parts.total === 1 ? "part" : "parts"} ready`;
   return `${parts.done} de ${parts.total} ${parts.total === 1 ? "parte pronta" : "partes prontas"}`;
 }
 
 /** "14 partes em 6 issues": the amount a chip of the e-mail names (parts: sub-issues or boxes of the acceptance criteria), with the singular where it is one. */
-export function amountLabel(parts: number, issues: number): string {
+export function amountLabel(parts: number, issues: number, lang: Lang = "pt"): string {
+  if (lang === "en") return `${parts} ${parts === 1 ? "part" : "parts"} in ${issues} ${issues === 1 ? "issue" : "issues"}`;
   return `${parts} ${parts === 1 ? "parte" : "partes"} em ${issues} ${issues === 1 ? "issue" : "issues"}`;
 }
 
 /** What is still open in a cover, as plain text: the titles in order, and past eight how many more there are. */
-export function openTitles(open: { title: string }[], shown = 8): string {
+export function openTitles(open: { title: string }[], shown = 8, lang: Lang = "pt"): string {
   const titles = open.map((o) => (typeof o.title === "string" ? o.title.trim() : "")).filter(Boolean);
   const more = titles.length - shown;
-  return titles.slice(0, shown).join("; ") + (more > 0 ? `; e mais ${more}` : "");
+  return titles.slice(0, shown).join("; ") + (more > 0 ? (lang === "en" ? `; and ${more} more` : `; e mais ${more}`) : "");
 }
 
 export type SprintChips = {

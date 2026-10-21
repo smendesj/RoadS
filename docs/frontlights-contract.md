@@ -186,6 +186,9 @@ resumo, nunca os cartões do quadro. Quem monta: `src/lib/frontlights/sync.ts`.
   passo todo falhou. Ausente quando nada mudou. As lacunas das issues (campo vazio, label implicada, tipo nativo)
   passam a ser preenchidas aqui, com um valor editado no RoadS (nunca um padrão): a rotina de lacunas do Frontlights deixa de ser
   necessária.
+- **`roadmap.comments`** e **`roadmap.assignees`** (opcionais, só contagens): a sincronização nos dois sentidos dos
+  Comments de cada item com os comentários da sua issue, e dos Assignees com os da issue (issue #23 do RoadS). `pulled`,
+  `pushed` e `failed` como em `roadmap.fields`, e `error` (texto) quando o passo todo falhou. Ausentes quando nada mudou.
 - **`roadmap.sprint`** (opcional, só contagens): o que a sincronização fez para manter o sprint atual do
   Roadmap (a semana cujas datas contêm hoje) e o Project em acordo. `pulled`: issues que o Project pôs no sprint atual;
   `released`: issues que o Project tirou dele (voltaram ao seu bloco); `written`: Statuses que o RoadS escreveu
@@ -493,3 +496,8 @@ repositório, `roads-script/push` e `roads-script/attach`.
   `roadmap.fields`; o `modify` pode trazer `status`. Um `remove` feito no app fecha a issue como not planned antes. A
   escrita de Status no Project deixa de depender de `PROJECT_STATUS_WRITE` e passa a seguir o papel de quem
   sincroniza. Nenhuma rota mudou e a `schemaVersion` segue 1.
+- **2026-10-21 (aditivo):** `roadmap.comments` e `roadmap.assignees` no resumo do `POST /sync-board`. O quadro passa a
+  usar os nomes em inglês: o campo Prioridade virou Priority, as opções de Stack em português foram renomeadas (os ids
+  continuam), e a opção Tests/Security do RoadS passa a se chamar Security Tests, também nos nomes guardados (migração
+  0042) e no que vem em `modify` e em `roadmap-state`. O campo próprio Repositório saiu do quadro (o Repository nativo
+  diz o mesmo), e o campo de data Week foi criado. Nenhuma rota mudou e a `schemaVersion` segue 1.

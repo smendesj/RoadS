@@ -195,7 +195,7 @@ test("one item that fails to move or to be written is counted and doesn't stop t
       throw new Error("db down");
     },
     writeStatus: async () => {
-      throw new Error("GitHub respondeu 502");
+      throw new Error("GitHub answered 502");
     },
   });
   const { summary, written } = await runSprintSync(MIXED, deps, NOW);

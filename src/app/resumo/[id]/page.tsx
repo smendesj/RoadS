@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
+import { RESUMO } from "@/lib/text/resumo";
 import { notFound } from "next/navigation";
 import { isUuid } from "@/lib/progress/report-view";
 import { loadReportById, loadSentList, requireReportViewer } from "../data";
 import { ResumoScreen } from "../screen";
 
-export const metadata: Metadata = { title: "RoadS — Resumo" };
+export const metadata: Metadata = { title: RESUMO.pageTitle };
 
 // One report by id, of any product. Next 16 hands `params` over as a Promise. A malformed id, an id that
 // does not exist and (for a scrum master) the id of a draft all end the same way: not found.

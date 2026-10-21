@@ -6,6 +6,7 @@ import { BrandMark } from "@/components/BrandMark";
 import { useRouter } from "next/navigation";
 import { touchActivity } from "@/lib/idle-storage";
 import { createClient } from "@/lib/supabase/client";
+import { AUTH } from "@/lib/text/account";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -23,7 +24,7 @@ export default function LoginPage() {
     const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
     if (signInError || !data.user) {
-      setError("E-mail ou senha incorretos.");
+      setError(AUTH.wrongCredentials);
       setLoading(false);
       return;
     }
@@ -47,7 +48,7 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">
-            <span className="text-[13px] font-semibold text-rs-text-soft">E-mail</span>
+            <span className="text-[13px] font-semibold text-rs-text-soft">{AUTH.email}</span>
             <input
               type="email"
               required
@@ -57,7 +58,7 @@ export default function LoginPage() {
             />
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[13px] font-semibold text-rs-text-soft">Senha</span>
+            <span className="text-[13px] font-semibold text-rs-text-soft">{AUTH.password}</span>
             <input
               type="password"
               required
@@ -74,14 +75,14 @@ export default function LoginPage() {
             disabled={loading}
             className="rounded-lg bg-rs-brand py-2.5 text-sm font-bold text-white disabled:opacity-60"
           >
-            {loading ? "Entrando..." : "Entrar"}
+            {loading ? AUTH.signingIn : AUTH.signIn}
           </button>
         </form>
 
         <p className="text-center text-[13px] text-rs-text-soft">
-          Não tem conta?{" "}
+          {AUTH.noAccount}{" "}
           <Link href="/cadastro" className="font-bold text-rs-brand-text">
-            Cadastrar
+            {AUTH.signUp}
           </Link>
         </p>
       </div>

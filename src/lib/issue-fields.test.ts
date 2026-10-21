@@ -33,7 +33,7 @@ test("the Stacks are named in English, each still on the board's option id it al
     "Frontend/Backend",
     "Backend/IA",
     "Tests",
-    "Tests/Security",
+    "Security Tests",
     "Infra",
     "Mobile",
   ]);

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { BrandMark } from "@/components/BrandMark";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { AUTH } from "@/lib/text/account";
 import { emailDomainHint, isAllowedEmail, isValidPassword, PASSWORD_HINT } from "@/lib/validation";
 
 export default function CadastroPage() {
@@ -21,7 +22,7 @@ export default function CadastroPage() {
     setNotice(null);
 
     if (!isAllowedEmail(email)) {
-      setError(`Use um e-mail ${emailDomainHint()}.`);
+      setError(AUTH.allowedEmailOnly(emailDomainHint()));
       return;
     }
     if (!isValidPassword(password)) {
@@ -35,7 +36,7 @@ export default function CadastroPage() {
     setLoading(false);
 
     if (signUpError) {
-      setError(signUpError.message === "User already registered" ? "Esse e-mail já tem cadastro." : signUpError.message);
+      setError(signUpError.message === "User already registered" ? AUTH.alreadyRegistered : signUpError.message);
       return;
     }
 
@@ -46,7 +47,7 @@ export default function CadastroPage() {
     }
 
     // Email confirmation is on for this project — no session until the user clicks the link.
-    setNotice("Cadastro criado. Confira seu e-mail para confirmar a conta antes de entrar.");
+    setNotice(AUTH.checkEmail);
   }
 
   return (
@@ -59,19 +60,19 @@ export default function CadastroPage() {
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <label className="flex flex-col gap-1.5">
-              <span className="text-[13px] font-semibold text-rs-text-soft">E-mail</span>
+              <span className="text-[13px] font-semibold text-rs-text-soft">{AUTH.email}</span>
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder={`voce${emailDomainHint()}`}
+                placeholder={AUTH.emailPlaceholder(emailDomainHint())}
                 className="rounded-lg border border-rs-border bg-rs-bg px-3.5 py-2.5 text-sm text-rs-text"
               />
-              <span className="text-xs text-rs-text-faint">Só e-mails {emailDomainHint()}.</span>
+              <span className="text-xs text-rs-text-faint">{AUTH.onlyAllowedEmails(emailDomainHint())}</span>
             </label>
             <label className="flex flex-col gap-1.5">
-              <span className="text-[13px] font-semibold text-rs-text-soft">Senha</span>
+              <span className="text-[13px] font-semibold text-rs-text-soft">{AUTH.password}</span>
               <input
                 type="password"
                 required
@@ -89,15 +90,15 @@ export default function CadastroPage() {
               disabled={loading}
               className="rounded-lg bg-rs-brand py-2.5 text-sm font-bold text-white disabled:opacity-60"
             >
-              {loading ? "Criando conta..." : "Cadastrar"}
+              {loading ? AUTH.creatingAccount : AUTH.signUp}
             </button>
           </form>
         )}
 
         <p className="text-center text-[13px] text-rs-text-soft">
-          Já tem conta?{" "}
+          {AUTH.haveAccount}{" "}
           <Link href="/login" className="font-bold text-rs-brand-text">
-            Entrar
+            {AUTH.signIn}
           </Link>
         </p>
       </div>

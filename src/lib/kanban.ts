@@ -5,12 +5,12 @@
 //
 // Open has every card Open on the Project, in the order of the Project's Kanban view, each tied to the Roadmap item of
 // the same issue (an issue no item holds, one with no type label, is shown but can't be planned). Before them come
-// the items with no issue on the board, newest first: a "+ Novo item" draft, and an item whose issue the last sync did
+// the items with no issue on the board, newest first: a "+ New item" draft, and an item whose issue the last sync did
 // not see yet (just opened on saving it). A card whose item is in a week stays in Open, labelled with that week
 // ("▸ Sprint 19/10"); dragged again, it goes to another week.
 //
 // Done has what went to Done in the last DONE_WINDOW_DAYS days, counted from when the card's Status changed on the
-// Project (`statusAt`, stored with the snapshot since 16/10/2026), latest first; "Ver todas" shows all of them.
+// Project (`statusAt`, stored with the snapshot since 16/10/2026), latest first; "Show all" shows all of them.
 // Pure, so the rules run under test without a screen or a database.
 
 import { statusByUrl } from "./board.ts";

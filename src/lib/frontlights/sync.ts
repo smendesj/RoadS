@@ -1,4 +1,4 @@
-// POST /api/frontlights/sync-board: the same sync as the Sincronizar button, with the same 30 s cooldown (the
+// POST /api/frontlights/sync-board: the same sync as the Sync button, with the same 30 s cooldown (the
 // token's GitHub quota is shared with the daily cron and with whoever presses the button). A second call
 // right after one answers from the last snapshot and says ran: false. The answer is a summary of what the
 // Roadmap took in, never the board's cards. The sync itself and the clock come in through SyncDeps, so the
