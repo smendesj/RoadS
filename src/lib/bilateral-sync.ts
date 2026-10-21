@@ -45,6 +45,12 @@ export function decideField(f: FieldSides): FieldDecision {
   return "pull";
 }
 
+/** Whether two bases hold the same fields with the same values: an item whose base didn't change isn't written again. */
+export function sameBase(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => Object.hasOwn(b, k) && a[k] === b[k]);
+}
+
 /** The Type an issue's labels give: its first type: label RoadS knows (type:epic is a block, not a Type). */
 export function tipoOfLabels(labels: string[]): Tipo | null {
   for (const l of labels) {

@@ -829,8 +829,13 @@ async function seedBoard() {
     // ------------------------------------------------ delete: own yes, others no; from the card in Open
     const toDelete = openCard("[TESTE] criado e editado pelo SM");
     await btn(toDelete, "Excluir").click();
-    await sleep(2000);
-    const { data: gone } = await svc.from("roadmap_items").select("id").eq("id", created.id);
+    // The delete lands after the card leaves the screen (an issue would be closed first): wait for it, up to 15 s.
+    let gone = [];
+    for (let i = 0; i < 30; i++) {
+      ({ data: gone } = await svc.from("roadmap_items").select("id").eq("id", created.id));
+      if (!gone?.length) break;
+      await sleep(500);
+    }
     expect("delete (Excluir on the Open card): own item is removed, from Open and from its week", gone.length === 0 &&
       (await count(page.locator(`[data-item-id="${created.id}"]`))) === 0);
     expect("delete: the admin's item survives, the seeded one has no Excluir", (await svc.from("roadmap_items").select("id").eq("id", L.ids.adminItem)).data.length === 1);
