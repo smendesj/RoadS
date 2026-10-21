@@ -1,6 +1,6 @@
 import "server-only";
 
-import { issueLabels, PRIORIDADE_OPTION_IDS, REPOSITORIO_GEOCLOUD_OPTION_ID, STACK_OPTION_IDS, type NewIssueFields } from "@/lib/issue-fields";
+import { issueLabels, PRIORIDADE_OPTION_IDS, STACK_OPTION_IDS, type NewIssueFields } from "@/lib/issue-fields";
 import type { Effort } from "@/lib/types";
 
 // GitHub writes the Roadmap needs. GeoCloud items are GeoCloud issues: born in
@@ -18,12 +18,16 @@ const STATUS_DEVELOPMENT_OPTION = "4e4b0563";
 const STATUS_OPTIONS = { Open: STATUS_OPEN_OPTION, Development: STATUS_DEVELOPMENT_OPTION } as const;
 export type WritableStatus = keyof typeof STATUS_OPTIONS;
 const PRIORIDADE_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhf1oXA";
-const REPOSITORIO_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhf1mt4";
 const STACK_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhfusOE";
 const DESCRIPTION_FIELD_ID = "PVTF_lADODk7xnc4BGkj4zhfubog";
+// The board's own "Repositório" field is never written: the product comes from the native Repository field, so the
+// board can drop the custom one (issue #22).
 
-async function github(token: string, path: string, init: { method: string; body: unknown }) {
-  const res = await fetch(`https://api.github.com${path}`, {
+/** The network, as a port: every GitHub call below takes it, so the tests run against a fake GitHub. */
+export type GitHubPort = { fetch?: typeof fetch };
+
+async function github(token: string, path: string, init: { method: string; body: unknown }, { fetch: fetchImpl = fetch }: GitHubPort = {}) {
+  const res = await fetchImpl(`https://api.github.com${path}`, {
     method: init.method,
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "Content-Type": "application/json" },
     body: JSON.stringify(init.body),
@@ -75,58 +79,111 @@ function issueBody(description: string, effort: Effort): string {
 }
 
 /**
+ * The board as it is now: each field's id with the ids of its options (null for a field without options, such as
+ * a text field). RoadS matches fields and options by id, and a value whose option the board no longer has is
+ * skipped instead of written, so renaming a field or an option on GitHub never breaks RoadS.
+ */
+export async function readBoardLayout(token: string, port: GitHubPort = {}): Promise<Map<string, Set<string> | null>> {
+  const json = await github(
+    token,
+    "/graphql",
+    {
+      method: "POST",
+      body: {
+        query: `query($project: ID!) { node(id: $project) { ... on ProjectV2 { fields(first: 50) { nodes {
+          ... on ProjectV2FieldCommon { id name }
+          ... on ProjectV2SingleSelectField { options { id name } }
+        } } } } }`,
+        variables: { project: PROJECT_ID },
+      },
+    },
+    port
+  );
+  const nodes: { id?: string; options?: { id: string }[] }[] = json?.data?.node?.fields?.nodes ?? [];
+  return new Map(nodes.filter((n) => n.id).map((n) => [n.id!, n.options ? new Set(n.options.map((o) => o.id)) : null]));
+}
+
+type FieldValue = { singleSelectOptionId: string } | { text: string };
+
+/**
  * Opens the issue with its labels and puts it on Project #7 with every field it can fill: Status (Open
- * unless it is born in the current sprint), Prioridade, Repositório GeoCloud, Stack and Description.
- * Effort has no options on the board yet, so it goes in the issue body. Returns its URL and number.
+ * unless it is born in the current sprint), Prioridade, Stack and Description, each matched by id against the
+ * live board. Effort has no options on the board yet, so it goes in the issue body. Returns its URL, number and
+ * the names of the fields it skipped because the board no longer has the field or the option.
  */
 export async function createGeoCloudIssue(
   token: string,
   fields: NewIssueFields,
-  status: WritableStatus = "Open"
-): Promise<{ url: string; number: number }> {
+  status: WritableStatus = "Open",
+  port: GitHubPort = {}
+): Promise<{ url: string; number: number; skipped: string[] }> {
   const { title, description, prioridade, effort, tipo, stack } = fields;
-  const issue = await github(token, `/repos/${GEOCLOUD_REPO}/issues`, {
-    method: "POST",
-    body: { title, body: issueBody(description, effort), labels: issueLabels(tipo, stack, prioridade) },
-  });
+  const issue = await github(
+    token,
+    `/repos/${GEOCLOUD_REPO}/issues`,
+    { method: "POST", body: { title, body: issueBody(description, effort), labels: issueLabels(tipo, stack, prioridade) } },
+    port
+  );
 
-  const added = await github(token, "/graphql", {
-    method: "POST",
-    body: {
-      query: `mutation($project: ID!, $content: ID!) {
+  const added = await github(
+    token,
+    "/graphql",
+    {
+      method: "POST",
+      body: {
+        query: `mutation($project: ID!, $content: ID!) {
         addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } }
       }`,
-      variables: { project: PROJECT_ID, content: issue.node_id },
+        variables: { project: PROJECT_ID, content: issue.node_id },
+      },
     },
-  });
+    port
+  );
   const item: string = added.data.addProjectV2ItemById.item.id;
 
-  const select = (field: string, option: string) => setField(token, item, field, { singleSelectOptionId: option });
-  await select(STATUS_FIELD_ID, STATUS_OPTIONS[status]);
-  await select(PRIORIDADE_FIELD_ID, PRIORIDADE_OPTION_IDS[prioridade]);
-  await select(REPOSITORIO_FIELD_ID, REPOSITORIO_GEOCLOUD_OPTION_ID);
-  await select(STACK_FIELD_ID, STACK_OPTION_IDS[stack]);
-  await setField(token, item, DESCRIPTION_FIELD_ID, { text: description.trim() || title });
+  const layout = await readBoardLayout(token, port);
+  const wanted: [string, string, FieldValue][] = [
+    ["Status", STATUS_FIELD_ID, { singleSelectOptionId: STATUS_OPTIONS[status] }],
+    ["Prioridade", PRIORIDADE_FIELD_ID, { singleSelectOptionId: PRIORIDADE_OPTION_IDS[prioridade] }],
+    ["Stack", STACK_FIELD_ID, { singleSelectOptionId: STACK_OPTION_IDS[stack] }],
+    ["Description", DESCRIPTION_FIELD_ID, { text: description.trim() || title }],
+  ];
+  const skipped: string[] = [];
+  for (const [name, field, value] of wanted) {
+    if (!fitsBoard(layout, field, value)) skipped.push(name);
+    else await setField(token, item, field, value, port);
+  }
 
-  return { url: issue.html_url, number: issue.number };
+  return { url: issue.html_url, number: issue.number, skipped };
+}
+
+function fitsBoard(layout: Map<string, Set<string> | null>, field: string, value: FieldValue): boolean {
+  if (!layout.has(field)) return false;
+  const options = layout.get(field);
+  return "singleSelectOptionId" in value ? Boolean(options?.has(value.singleSelectOptionId)) : options === null;
 }
 
 /**
  * Writes a card's Status on Project #7: the sprint sync's one write to a card that already exists. `projectItemId`
  * is the card's id on the Project (projectCard in board.ts), not the issue's; callers only ever hold GeoCloud cards.
  */
-export async function setProjectStatus(token: string, projectItemId: string, status: WritableStatus): Promise<void> {
-  await setField(token, projectItemId, STATUS_FIELD_ID, { singleSelectOptionId: STATUS_OPTIONS[status] });
+export async function setProjectStatus(token: string, projectItemId: string, status: WritableStatus, port: GitHubPort = {}): Promise<void> {
+  await setField(token, projectItemId, STATUS_FIELD_ID, { singleSelectOptionId: STATUS_OPTIONS[status] }, port);
 }
 
-function setField(token: string, item: string, field: string, value: { singleSelectOptionId: string } | { text: string }) {
-  return github(token, "/graphql", {
-    method: "POST",
-    body: {
-      query: `mutation($project: ID!, $item: ID!, $field: ID!, $value: ProjectV2FieldValue!) {
+function setField(token: string, item: string, field: string, value: FieldValue, port: GitHubPort = {}) {
+  return github(
+    token,
+    "/graphql",
+    {
+      method: "POST",
+      body: {
+        query: `mutation($project: ID!, $item: ID!, $field: ID!, $value: ProjectV2FieldValue!) {
         updateProjectV2ItemFieldValue(input: { projectId: $project, itemId: $item, fieldId: $field, value: $value }) { projectV2Item { id } }
       }`,
-      variables: { project: PROJECT_ID, item, field, value },
+        variables: { project: PROJECT_ID, item, field, value },
+      },
     },
-  });
+    port
+  );
 }

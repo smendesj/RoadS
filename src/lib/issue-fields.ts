@@ -36,8 +36,6 @@ export const PRIORIDADE_OPTION_IDS: Record<Prioridade, string> = {
   Low: "77fe47cd",
 };
 
-export const REPOSITORIO_GEOCLOUD_OPTION_ID = "80e4e855";
-
 const AREAS: Partial<Record<Stack, ("frontend" | "backend")[]>> = {
   Backend: ["backend"],
   "Banco de dados": ["backend"],
