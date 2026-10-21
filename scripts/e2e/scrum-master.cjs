@@ -263,7 +263,10 @@ async function seedBoard() {
     const { data: editedNote } = await svc.from("item_notes").select("body, updated_at, deleted_at").eq("item_id", created.id);
     expect("Comment: the edit is saved with its time, to go to the issue on the next sync",
       editedNote.length === 1 && editedNote[0].body === "[TESTE] primeira nota, editada" && editedNote[0].updated_at && !editedNote[0].deleted_at, JSON.stringify(editedNote));
-    expect("Comment: an edited one says so", (await count(openCard("[TESTE] criado e editado pelo SM").locator("[data-comment-id]", { hasText: "edited" }))) === 1);
+    // The mark comes with the board the edit reloads, a moment after the text itself.
+    const editedMark = openCard("[TESTE] criado e editado pelo SM").locator("[data-comment-id]", { hasText: "· edited" });
+    await editedMark.waitFor({ timeout: 15000 }).catch(() => {});
+    expect("Comment: an edited one says so", (await count(editedMark)) === 1);
     const editedComment = openCard("[TESTE] criado e editado pelo SM").locator("[data-comment-id]", { hasText: "[TESTE] primeira nota, editada" });
     await btn(editedComment, "Delete").click();
     expect("Comment: Delete asks first, in the card", (await count(editedComment.getByText("Delete this Comment?"))) === 1);
