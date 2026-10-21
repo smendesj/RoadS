@@ -265,7 +265,7 @@ async function seedBoard() {
     // chosen here). Done and Blocker are the item's own, shown on its card; the sync takes them to the issue.
     const setStatus = async (status) => {
       await btn(openCard("[TESTE] criado e editado pelo SM"), "Editar").click();
-      const panel = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
+      const panel = page.locator('div[draggable="false"]:has(input[aria-label="New Comment"])');
       const offered = await labelled(panel, "Status").locator("option").allTextContents();
       await labelled(panel, "Status").selectOption(status);
       await btn(panel, "Salvar").click();
