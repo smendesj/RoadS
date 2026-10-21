@@ -45,6 +45,15 @@ export function decideField(f: FieldSides): FieldDecision {
   return "pull";
 }
 
+/**
+ * Effort's two sides (issue #23): GitHub's is the organization's issue field on the issue, "" when the issue leaves it
+ * empty (a gap). GitHub doesn't tell when it changed, so that time is unknown and, both sides moved, the issue wins.
+ * Null when the issue's Effort wasn't read: Effort waits for the next sync instead of reading as a difference.
+ */
+export function effortSides(roads: string, read: { effort: string | null } | undefined): { roads: string; github: string; githubAt: null } | null {
+  return read ? { roads, github: read.effort ?? "", githubAt: null } : null;
+}
+
 /** Whether two bases hold the same fields with the same values: an item whose base didn't change isn't written again. */
 export function sameBase(a: Record<string, string>, b: Record<string, string>): boolean {
   const keys = Object.keys(a);
@@ -124,6 +133,14 @@ export function statusOfIssue({ closed, card }: { closed: boolean; card: CardSta
 }
 
 /**
+ * The Status decision for an item whose issue is closed (not among the open issues the sync reads): the closed issue is
+ * Done, so an item RoadS didn't move becomes Done, and an item taken out of Done in RoadS reopens the issue.
+ */
+export function closedIssueStatus(f: { roads: ItemStatus; base: string | null; roadsAt: string | null }): FieldDecision {
+  return decideField({ roads: f.roads, base: f.base, github: "Done", roadsAt: f.roadsAt, githubAt: null });
+}
+
+/**
  * What GitHub gets when RoadS's Status wins over the issue's: Done closes the issue as completed, leaving Done reopens
  * it, and the card's Status follows (an open item is Development in the current sprint, Open outside it).
  */
@@ -149,9 +166,10 @@ export function storedStatus(choice: SelectorStatus, inCurrentSprint: boolean): 
   return { status: choice, move: null };
 }
 
-/** The Comment a Delete leaves on the issue it closes; the profile has no name, so it names the role. */
-export function deletionComment(role: "admin" | "scrum_master"): string {
-  return `Deleted in RoadS by ${role === "admin" ? "an admin" : "a scrum master"}: this issue was closed as not planned.`;
+/** The Comment a Delete leaves on the issue it closes: who deleted it, by the profile's GitHub login, else by the role. */
+export function deletionComment(role: "admin" | "scrum_master", login: string | null): string {
+  const who = login ? `@${login}` : role === "admin" ? "an admin" : "a scrum master";
+  return `Deleted in RoadS by ${who}: this issue was closed as not planned.`;
 }
 
 /** Who may write to GitHub through a sync: scrum masters, admins and the daily cron. A dev's press only pulls. */

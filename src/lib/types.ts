@@ -20,7 +20,7 @@ export type AppUser = {
 };
 export type Produto = "GeoCloud"; // RoadS only handles GeoCloud; ELIMS issues are never pulled in.
 export type Prioridade = "Critical" | "High" | "Medium" | "Low";
-export type Effort = "Low" | "Medium" | "High" | "Very High";
+export type Effort = "Low" | "Medium" | "High";
 
 /** A Comment of an item: written in RoadS by a profile, or on the issue by a GitHub login (issue #23). */
 export type Note = {
