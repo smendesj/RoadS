@@ -45,6 +45,15 @@ export function decideField(f: FieldSides): FieldDecision {
   return "pull";
 }
 
+/**
+ * Effort's two sides (issue #23): GitHub's is the organization's issue field on the issue, "" when the issue leaves it
+ * empty (a gap). GitHub doesn't tell when it changed, so that time is unknown and, both sides moved, the issue wins.
+ * Null when the issue's Effort wasn't read: Effort waits for the next sync instead of reading as a difference.
+ */
+export function effortSides(roads: string, read: { effort: string | null } | undefined): { roads: string; github: string; githubAt: null } | null {
+  return read ? { roads, github: read.effort ?? "", githubAt: null } : null;
+}
+
 /** Whether two bases hold the same fields with the same values: an item whose base didn't change isn't written again. */
 export function sameBase(a: Record<string, string>, b: Record<string, string>): boolean {
   const keys = Object.keys(a);

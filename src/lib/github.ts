@@ -18,9 +18,10 @@ const STATUS_OPTIONS = { Open: "f130aaf8", Development: "4e4b0563", Blocker: "95
 export type WritableStatus = keyof typeof STATUS_OPTIONS;
 export const PRIORIDADE_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhf1oXA";
 export const STACK_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhfusOE";
-// Effort's options are created on the board once (issue #22), so their ids aren't known here: its values are matched by
-// the option's name (Low, Medium, High, Very High) against the live board, the one field matched that way.
-export const EFFORT_FIELD_ID = "PVTSSF_lADODk7xnc4BGkj4zhhJBPw";
+// Effort is not a Project field: the board's Effort only mirrors the organization's issue field, whose value lives on the
+// issue itself (issue #23). It is read and written there, its options by id.
+const EFFORT_ISSUE_FIELD_ID = "IFSS_kgDOAjkpfQ";
+const EFFORT_OPTION_IDS: Record<Effort, string> = { High: "IFSSO_kgDOA-Pwsw", Medium: "IFSSO_kgDOA-PwtA", Low: "IFSSO_kgDOA-PwtQ" };
 const DESCRIPTION_FIELD_ID = "PVTF_lADODk7xnc4BGkj4zhfubog";
 // The board's own "Repositório" field is never written: the product comes from the native Repository field, so the
 // board can drop the custom one (issue #22).
@@ -128,10 +129,10 @@ export async function readBoardFields(
 type FieldValue = { singleSelectOptionId: string } | { text: string } | { date: string };
 
 /**
- * Opens the issue with its labels and puts it on Project #7 with every field it can fill: Status (Open
- * unless it is born in the current sprint), Prioridade, Stack and Description, each matched by id against the
- * live board. Effort has no options on the board yet, so it goes in the issue body. Returns its URL, number and
- * the names of the fields it skipped because the board no longer has the field or the option.
+ * Opens the issue with its labels and its Effort (the issue's own field), and puts it on Project #7 with every field
+ * it can fill: Status (Open unless it is born in the current sprint), Prioridade, Stack and Description, each matched
+ * by id against the live board. Returns its URL, number and the names of the fields it skipped: an Effort GitHub
+ * refused, or a field or option the board no longer has.
  */
 export async function createGeoCloudIssue(
   token: string,
@@ -146,6 +147,8 @@ export async function createGeoCloudIssue(
     { method: "POST", body: { title, body: issueBody(description, effort), labels: issueLabels(tipo, stack, prioridade) } },
     port
   );
+  const skipped: string[] = [];
+  await setIssueEffort(token, issue.node_id, effort, port).catch(() => skipped.push("Effort"));
 
   const added = await github(
     token,
@@ -170,7 +173,6 @@ export async function createGeoCloudIssue(
     ["Stack", STACK_FIELD_ID, { singleSelectOptionId: STACK_OPTION_IDS[stack] }],
     ["Description", DESCRIPTION_FIELD_ID, { text: description.trim() || title }],
   ];
-  const skipped: string[] = [];
   for (const [name, field, value] of wanted) {
     if (!fitsBoard(layout, field, value)) skipped.push(name);
     else await setField(token, item, field, value, port);
@@ -349,6 +351,65 @@ export async function setIssueAssignees(token: string, number: number, logins: s
   await github(token, `/repos/${GEOCLOUD_REPO}/issues/${number}`, { method: "PATCH", body: { assignees: logins } }, port);
 }
 
+/**
+ * The Effort of each issue, from the organization's issue field, with the issue's node id (what a write needs), read
+ * in one request; null when the issue leaves it empty. An issue not found, or whose Effort holds an option RoadS
+ * doesn't offer, is left out, so its Effort is left alone.
+ */
+export async function readIssueEfforts(
+  token: string,
+  numbers: number[],
+  port: GitHubPort = {}
+): Promise<Map<number, { issueId: string; effort: Effort | null }>> {
+  const efforts = new Map<number, { issueId: string; effort: Effort | null }>();
+  if (!numbers.length) return efforts;
+  const [owner, name] = GEOCLOUD_REPO.split("/");
+  const fields = numbers
+    .map(
+      (n) => `i${n}: issue(number: ${Number(n)}) { id issueFieldValues(first: 20) { nodes { __typename
+        ... on IssueFieldSingleSelectValue { name optionId field { ... on IssueFieldSingleSelect { id name } } } } } }`
+    )
+    .join("\n");
+  const json = await github(
+    token,
+    "/graphql",
+    { method: "POST", body: { query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`, variables: { owner, name } } },
+    port
+  );
+  type Value = { optionId?: string; name?: string; field?: { id?: string } };
+  const repo: Record<string, { id: string; issueFieldValues?: { nodes: Value[] } } | null> = json?.data?.repository ?? {};
+  for (const n of numbers) {
+    const issue = repo[`i${n}`];
+    if (!issue) continue;
+    const value = issue.issueFieldValues?.nodes?.find((v) => v?.field?.id === EFFORT_ISSUE_FIELD_ID);
+    if (!value) {
+      efforts.set(n, { issueId: issue.id, effort: null });
+      continue;
+    }
+    const effort = (Object.keys(EFFORT_OPTION_IDS) as Effort[]).find((e) => EFFORT_OPTION_IDS[e] === value.optionId);
+    if (effort) efforts.set(n, { issueId: issue.id, effort });
+  }
+  return efforts;
+}
+
+/** Writes an issue's Effort to the organization's issue field by the option's id (`issueId` is the issue's node id); null clears it. */
+export async function setIssueEffort(token: string, issueId: string, effort: Effort | null, port: GitHubPort = {}): Promise<void> {
+  const body = effort
+    ? {
+        query: `mutation($issueId: ID!, $fieldId: ID!, $optionId: ID!) {
+        setIssueFieldValue(input: { issueId: $issueId, issueFields: [{ fieldId: $fieldId, singleSelectOptionId: $optionId }] }) { issue { number } }
+      }`,
+        variables: { issueId, fieldId: EFFORT_ISSUE_FIELD_ID, optionId: EFFORT_OPTION_IDS[effort] },
+      }
+    : {
+        query: `mutation($issueId: ID!, $fieldId: ID!) {
+        deleteIssueFieldValue(input: { issueId: $issueId, fieldId: $fieldId }) { success }
+      }`,
+        variables: { issueId, fieldId: EFFORT_ISSUE_FIELD_ID },
+      };
+  await github(token, "/graphql", { method: "POST", body }, port);
+}
+
 function fitsBoard(layout: Map<string, Set<string> | null>, field: string, value: FieldValue): boolean {
   if (!layout.has(field)) return false;
   const options = layout.get(field);
@@ -363,7 +424,7 @@ export async function setProjectStatus(token: string, projectItemId: string, sta
   await setField(token, projectItemId, STATUS_FIELD_ID, { singleSelectOptionId: STATUS_OPTIONS[status] }, port);
 }
 
-/** Writes one single-select field of a card on Project #7, field and option by id (Stack, Priority, Effort). */
+/** Writes one single-select field of a card on Project #7, field and option by id (Stack, Priority). */
 export async function setProjectOption(token: string, projectItemId: string, field: string, optionId: string, port: GitHubPort = {}): Promise<void> {
   await setField(token, projectItemId, field, { singleSelectOptionId: optionId }, port);
 }

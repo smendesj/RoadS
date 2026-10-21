@@ -5,7 +5,7 @@ import { withIssueStatus } from "@/lib/board";
 import type { SyncColumn } from "@/lib/board-sync";
 import { deletionComment, storedStatus, type ItemStatus, type SelectorStatus } from "@/lib/bilateral-sync";
 import { closeIssueAsNotPlanned, createGeoCloudIssue, readIssueLabels } from "@/lib/github";
-import { isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
+import { isEffort, isStack, isTipo, type NewIssueFields, type Stack, type Tipo } from "@/lib/issue-fields";
 import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { isTestData, mayGetIssue } from "@/lib/test-data";
@@ -259,6 +259,8 @@ export async function saveRoadmapItemEdit(
   // scrum_master regardless of what the client claims, so it can't be spoofed as a dev note.
   const authorRole = realRole === "admin" ? input.activeView : "scrum_master";
 
+  // Effort is High, Medium or Low, the options of the organization's issue field it syncs with (issue #23).
+  if (!isEffort(input.effort)) throw new Error("invalid_effort");
   if (input.status !== undefined && !["Open", "Development", "Blocker", "Done"].includes(input.status)) throw new Error("invalid_status");
   const current = await currentSprintLane(supabase).catch(() => null);
   const inCurrentSprint = access.item.lane_id === current?.id;

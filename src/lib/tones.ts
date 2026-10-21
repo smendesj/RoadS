@@ -18,7 +18,7 @@ export function prioridadeTone(p: Prioridade): Tone {
 }
 
 export function effortTone(e: Effort): Tone {
-  return { Low: "green", Medium: "amber", High: "red", "Very High": "pink" }[e] as Tone;
+  return { Low: "green", Medium: "amber", High: "red" }[e] as Tone;
 }
 
 export function produtoTone(_p: Produto): Tone {

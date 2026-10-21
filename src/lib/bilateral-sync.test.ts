@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   decideField,
   deletionComment,
+  effortSides,
   extractSolucao,
   labelsAfter,
   mayPush,
@@ -224,4 +225,24 @@ test("an issue closed on GitHub makes its item Done, whether the base was Open o
 test("an item taken out of Done in RoadS reopens its closed issue, and a Done item has nothing to do", () => {
   assert.equal(closedIssueStatus({ roads: "Open", base: "Done", roadsAt: "2026-10-21T10:00:00Z" }), "push");
   assert.equal(closedIssueStatus({ roads: "Done", base: "Open", roadsAt: null }), "none");
+});
+
+// ---- Effort (P1): the organization's issue field, whose change time GitHub doesn't tell
+
+test("Effort's GitHub side is the issue's field: an empty one is a gap, and its time of change is unknown", () => {
+  assert.deepEqual(effortSides("High", { effort: "Low" }), { roads: "High", github: "Low", githubAt: null });
+  assert.deepEqual(effortSides("High", { effort: null }), { roads: "High", github: "", githubAt: null });
+});
+
+test("an Effort the sync couldn't read is no side at all: it waits for the next sync instead of reading as a difference", () => {
+  assert.equal(effortSides("High", undefined), null);
+});
+
+test("an empty Effort on the issue is filled only with an Effort edited in RoadS, and with both moved the issue wins", () => {
+  const gap = effortSides("Medium", { effort: null })!;
+  assert.equal(decideField({ ...gap, base: null, roadsAt: "2026-10-21T10:00:00Z", fillGap: true }), "push");
+  assert.equal(decideField({ ...gap, base: null, roadsAt: null, fillGap: true }), "none");
+  const both = effortSides("High", { effort: "Low" })!;
+  assert.equal(decideField({ ...both, base: "Medium", roadsAt: "2026-10-21T10:00:00Z", fillGap: true }), "pull");
+  assert.equal(decideField({ ...effortSides("High", { effort: "Medium" })!, base: "Medium", roadsAt: "2026-10-21T10:00:00Z", fillGap: true }), "push");
 });
