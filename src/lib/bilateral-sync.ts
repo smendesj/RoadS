@@ -82,6 +82,50 @@ export function labelsAfter(
   return next;
 }
 
+// ---- Status (S4). An item's own Status is Open, Blocker or Done. Development is not a Status RoadS keeps: it is being
+// in the current sprint, which the sprint sync (sprint-status-sync.ts) keeps in step with the Project, as since 06/10.
+
+export type ItemStatus = "Open" | "Blocker" | "Done";
+export type SelectorStatus = "Open" | "Development" | "Blocker" | "Done";
+type CardStatus = "Open" | "Development" | "Blocker" | "Done";
+
+/** The issue's Status as RoadS compares it: Done when the issue is closed or its card says Done, Blocker when the card says so. */
+export function statusOfIssue({ closed, card }: { closed: boolean; card: CardStatus | null }): ItemStatus {
+  if (closed || card === "Done") return "Done";
+  return card === "Blocker" ? "Blocker" : "Open";
+}
+
+/**
+ * What GitHub gets when RoadS's Status wins over the issue's: Done closes the issue as completed, leaving Done reopens
+ * it, and the card's Status follows (an open item is Development in the current sprint, Open outside it).
+ */
+export function statusWrites(
+  roads: ItemStatus,
+  github: ItemStatus,
+  inCurrentSprint: boolean
+): { issue: { state: "open" | "closed"; state_reason: "completed" | "reopened" } | null; card: CardStatus } {
+  if (roads === "Done") return { issue: { state: "closed", state_reason: "completed" }, card: "Done" };
+  const issue = github === "Done" ? ({ state: "open", state_reason: "reopened" } as const) : null;
+  return { issue, card: roads === "Blocker" ? "Blocker" : inCurrentSprint ? "Development" : "Open" };
+}
+
+/** The selector's value for an item: its Done or Blocker, else Development in the current sprint and Open outside it. */
+export function selectorStatus(status: ItemStatus, inCurrentSprint: boolean): SelectorStatus {
+  return status === "Open" && inCurrentSprint ? "Development" : status;
+}
+
+/** What a choice in the selector stores, and the move it makes: Development and Open are where the item is planned. */
+export function storedStatus(choice: SelectorStatus, inCurrentSprint: boolean): { status: ItemStatus; move: "into_sprint" | "out_of_sprint" | null } {
+  if (choice === "Development") return { status: "Open", move: inCurrentSprint ? null : "into_sprint" };
+  if (choice === "Open") return { status: "Open", move: inCurrentSprint ? "out_of_sprint" : null };
+  return { status: choice, move: null };
+}
+
+/** The Comment a Delete leaves on the issue it closes; the profile has no name, so it names the role. */
+export function deletionComment(role: "admin" | "scrum_master"): string {
+  return `Deleted in RoadS by ${role === "admin" ? "an admin" : "a scrum master"}: this issue was closed as not planned.`;
+}
+
 /** Who may write to GitHub through a sync: scrum masters, admins and the daily cron. A dev's press only pulls. */
 export function mayPush(role: string | null): boolean {
   return role === "admin" || role === "scrum_master" || role === "cron";

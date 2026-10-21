@@ -12,7 +12,43 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
-const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions } = await import("./github.ts");
+const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState } =
+  await import("./github.ts");
+
+test("closing and reopening an issue sends its state and the reason in the same edit", async () => {
+  const gh = recordingGitHub();
+  await updateIssue("token-sintetico", 900001, { state: "closed", state_reason: "completed" }, { fetch: gh.fetch });
+  await updateIssue("token-sintetico", 900001, { state: "open", state_reason: "reopened" }, { fetch: gh.fetch });
+  assert.deepEqual(gh.calls.map((c) => [c.method, c.body]), [
+    ["PATCH", { state: "closed", state_reason: "completed" }],
+    ["PATCH", { state: "open", state_reason: "reopened" }],
+  ]);
+});
+
+test("Blocker and Done are written to the card's Status by their option ids", async () => {
+  const gh = recordingGitHub();
+  await setProjectStatus("token-sintetico", "PVTI_card", "Blocker", { fetch: gh.fetch });
+  await setProjectStatus("token-sintetico", "PVTI_card", "Done", { fetch: gh.fetch });
+  const values = gh.calls.map((c) => (c.body as { variables: { value: unknown } }).variables.value);
+  assert.deepEqual(values, [{ singleSelectOptionId: "95ee425e" }, { singleSelectOptionId: "9487135d" }]);
+});
+
+test("a Delete comments first and then closes the issue as not planned", async () => {
+  const gh = recordingGitHub();
+  await closeIssueAsNotPlanned("token-sintetico", 900001, "Deleted in RoadS by an admin.", { fetch: gh.fetch });
+  assert.deepEqual(gh.calls.map((c) => [c.method, c.url.replace(/^.*\/issues\//, ""), c.body]), [
+    ["POST", "900001/comments", { body: "Deleted in RoadS by an admin." }],
+    ["PATCH", "900001", { state: "closed", state_reason: "not_planned" }],
+  ]);
+});
+
+test("an issue's state is read as closed or open", async () => {
+  const closed = recordingGitHub(() => ({ state: "closed" }));
+  assert.equal(await readIssueState("token-sintetico", 900001, { fetch: closed.fetch }), "closed");
+  assert.equal(closed.calls[0].method, "GET");
+  const open = recordingGitHub(() => ({ state: "open" }));
+  assert.equal(await readIssueState("token-sintetico", 900001, { fetch: open.fetch }), "open");
+});
 
 /** A GitHub that records each request (method, path, body) and answers with `answer`. */
 function recordingGitHub(answer: (url: string, body: { query?: string; variables?: Record<string, unknown> }) => unknown = () => ({})) {
