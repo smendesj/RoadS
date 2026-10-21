@@ -30,8 +30,9 @@ import "server-only";
 // endpoint any signed-in user can call directly, and syncBoard authorizes nobody (the cron has no
 // session) and writes with the admin client.
 
-import { createGeoCloudIssue, GEOCLOUD_REPO, setProjectStatus } from "@/lib/github";
-import { importableIssues, mayGetIssue } from "@/lib/test-data";
+import { createGeoCloudIssue, GEOCLOUD_REPO, readIssueChangeTimes, setProjectStatus, updateIssue } from "@/lib/github";
+import { importableIssues, isTestData, mayGetIssue } from "@/lib/test-data";
+import { decideField, extractSolucao, replaceSolucao } from "@/lib/bilateral-sync";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
 import { laneForLabels, releaseLane, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
@@ -39,7 +40,6 @@ import { moveLanePayload } from "@/lib/move-payload";
 import { planRotation, rotationIsIdle } from "@/lib/sprint-rotation";
 import { todayInSaoPaulo, weekLanes } from "@/lib/sprint-week";
 import { parseSlices, slicesQuery } from "@/lib/slices";
-import { planTitleFollow, type TitleCandidate } from "@/lib/title-follow";
 import { removeClosedBeforeTheirWeek as runClosedRemoval, type ClosedRemovalDeps } from "@/lib/closed-before-week";
 import { currentSprintIn, currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
 import { EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintSyncDeps, type SprintSyncSummary } from "@/lib/sprint-status-sync";
@@ -76,7 +76,11 @@ export type RoadmapReconcile = {
   sprint?: SprintSyncSummary;
   /** How many Roadmap titles followed a rename of their issue on GitHub. */
   retitled?: number;
+  /** The two-way sync of Title and Description: values brought in, written to GitHub and failed; absent when none. */
+  fields?: FieldsSummary;
 };
+
+export type FieldsSummary = { pulled: number; pushed: number; failed: number; error?: string };
 
 export type SyncResult =
   | { ok: true; columns: SyncColumn[]; syncedAt: string; roadmap: RoadmapReconcile; /** The brake answered with the last snapshot: nothing was read from GitHub, and it lets go in `retryInMs`. */ cached?: true; retryInMs?: number }
@@ -107,7 +111,9 @@ const MAX_RUN_MS = 2 * 60_000;
 
 // The one door to the sync, for every caller: the brake and the claim of src/lib/sync-claim.ts in front of the run.
 // `brakeMs` is the caller's brake: 30 s for a press, FrontlightS and the cron; 5 min for a page's own sync.
-export async function syncBoard({ brakeMs = SYNC_COOLDOWN_MS }: { brakeMs?: number } = {}): Promise<SyncResult> {
+// `push`: whether this run may write RoadS edits to GitHub (src/lib/bilateral-sync.ts, mayPush): the cron and
+// FrontlightS do, a press does when the one pressing is a scrum master or an admin; otherwise the run only pulls.
+export async function syncBoard({ brakeMs = SYNC_COOLDOWN_MS, push = true }: { brakeMs?: number; push?: boolean } = {}): Promise<SyncResult> {
   // Lazily, inside the catch below: a server without the service key answers { ok: false } instead of throwing.
   let client: ReturnType<typeof createAdminClient> | null = null;
   const admin = () => (client ??= createAdminClient());
@@ -129,13 +135,13 @@ export async function syncBoard({ brakeMs = SYNC_COOLDOWN_MS }: { brakeMs?: numb
         const { error } = await admin().rpc("finish_board_sync", { p_claimed_at: claimedAt });
         if (error) throw error;
       },
-      run: runBoardSync,
+      run: () => runBoardSync({ push }),
     },
     { brakeMs }
   ).catch((e): SyncResult => ({ ok: false, reason: "error", message: e instanceof Error ? e.message : "Erro ao sincronizar." }));
 }
 
-async function runBoardSync(): Promise<SyncResult> {
+async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
   const token = process.env.GITHUB_TOKEN;
   if (!token) return { ok: false, reason: "not_configured" };
 
@@ -238,13 +244,16 @@ async function runBoardSync(): Promise<SyncResult> {
       console.error("syncBoard: failed to persist snapshot", persistError);
     }
 
-    // An issue renamed on GitHub renames its item in the Roadmap; a failure here doesn't fail the board sync.
-    const retitled = cards.size
-      ? await readOpen().then(followIssueTitles).catch((e) => {
-          console.error("syncBoard: following issue titles failed", e);
-          return 0;
-        })
-      : 0;
+    // Title and Description go both ways between each item and its issue; a failure here doesn't fail the board sync.
+    const fields: (FieldsSummary & { retitled?: number }) | null = cards.size
+      ? await readOpen()
+          .then((open) => syncIssueFields(token, open, push))
+          .catch((e) => {
+            console.error("syncBoard: two-way fields failed", e);
+            return { pulled: 0, pushed: 0, failed: 0, error: e instanceof Error ? e.message : "Erro ao sincronizar os campos." };
+          })
+      : null;
+    const retitled = fields?.retitled ?? 0;
 
     // The Roadmap follows the repo's open issues; a failure here doesn't fail the board sync.
     const roadmap: RoadmapReconcile = await reconcileRoadmapWithIssues(token, onProject, readOpen, cards).catch((e) => {
@@ -256,7 +265,16 @@ async function runBoardSync(): Promise<SyncResult> {
     // settled which issues are in the sprint; a failure keeps the slices of the last sync.
     await syncSlices(token).catch((e) => console.error("syncBoard: slices failed", e));
 
-    return { ok: true, columns, syncedAt, roadmap: { ...roadmap, ...(sprint ? { sprint } : {}), ...(retitled ? { retitled } : {}) } };
+    const fieldCounts: FieldsSummary | null =
+      fields && (fields.pulled || fields.pushed || fields.failed || fields.error)
+        ? { pulled: fields.pulled, pushed: fields.pushed, failed: fields.failed, ...(fields.error ? { error: fields.error } : {}) }
+        : null;
+    return {
+      ok: true,
+      columns,
+      syncedAt,
+      roadmap: { ...roadmap, ...(sprint ? { sprint } : {}), ...(retitled ? { retitled } : {}), ...(fieldCounts ? { fields: fieldCounts } : {}) },
+    };
   } catch (e) {
     return { ok: false, reason: "error", message: e instanceof Error ? e.message : "Erro desconhecido" };
   }
@@ -348,51 +366,99 @@ async function rotateSprints(doneUrls: Set<string>, now = new Date()): Promise<v
 
 type Admin = ReturnType<typeof createAdminClient>;
 
-// An issue renamed on GitHub renames its item in the Roadmap (src/lib/title-follow.ts has the rule). Each rename is
-// queued as a modify so FrontlightS writes the new title; if the queue refuses, the title goes back and the next
-// sync tries again. What every issue is called is remembered per item, to tell a rename from a title a person wrote.
-async function followIssueTitles(open: OpenIssue[]): Promise<number> {
+// Title and Description go both ways between each item and its open issue (src/lib/bilateral-sync.ts has the rule;
+// the Description is the issue's "## Solução" section). A value brought in is queued as a modify so FrontlightS
+// sees it, as titles always were; a value written to GitHub changes only that field of the issue. What the issue
+// said is remembered per field (github_seen), and the title also in github_title, which older readers use. One item
+// failing is counted and the others go on.
+type SyncedField = "title" | "description";
+
+async function syncIssueFields(token: string, open: OpenIssue[], push: boolean): Promise<FieldsSummary & { retitled: number }> {
   const admin = createAdminClient();
-  const { data: items, error } = await admin.from("roadmap_items").select("id, title, github_title, github_issue_url");
+  const { data: items, error } = await admin
+    .from("roadmap_items")
+    .select("id, title, description, github_issue_url, github_seen, field_changed_at");
   if (error) throw error;
 
   const byNumber = new Map(open.map((i) => [i.number, i]));
-  const candidates: TitleCandidate[] = [];
+  type Row = { id: string; number: number; issue: OpenIssue; seen: Record<string, string>; changedAt: Record<string, string>; values: Record<SyncedField, { roads: string; github: string }> };
+  const rows: Row[] = [];
   for (const item of items ?? []) {
-    const issue = byNumber.get(Number(item.github_issue_url?.match(ISSUE_URL)?.[1]));
-    if (issue) candidates.push({ id: item.id, title: item.title, githubTitle: item.github_title, issueTitle: issue.title });
-  }
-  const plan = planTitleFollow(candidates);
-  const before = new Map(candidates.map((c) => [c.id, c]));
-  const renamed = new Set(plan.rename.map((r) => r.id));
-
-  let done = 0;
-  for (const r of plan.rename) {
-    const seen = plan.seen.find((x) => x.id === r.id)!.githubTitle;
-    const { error: updateError } = await admin.from("roadmap_items").update({ title: r.to, github_title: seen }).eq("id", r.id);
-    if (updateError) throw updateError;
-    const { error: queueError } = await admin.from("roadmap_sync_queue").insert({
-      item_id: r.id,
-      action: "modify",
-      payload: { title: r.to, reason: "title follows the issue on GitHub" },
+    if (isTestData(item.title)) continue;
+    const number = Number(item.github_issue_url?.match(ISSUE_URL)?.[1]);
+    const issue = byNumber.get(number);
+    if (!issue) continue;
+    const seen: Record<string, string> = { ...((item.github_seen as Record<string, string> | null) ?? {}) };
+    // A body without a Solução section says nothing about the Description: it reads as unchanged on GitHub.
+    const githubDescription = extractSolucao(issue.body) ?? seen.description ?? item.description ?? "";
+    rows.push({
+      id: item.id,
+      number,
+      issue,
+      seen,
+      changedAt: (item.field_changed_at as Record<string, string> | null) ?? {},
+      values: {
+        title: { roads: item.title, github: issue.title.trim() },
+        description: { roads: item.description ?? "", github: githubDescription },
+      },
     });
-    if (queueError) {
-      await admin.from("roadmap_items").update({ title: r.from, github_title: before.get(r.id)!.githubTitle }).eq("id", r.id);
-      throw queueError;
-    }
-    done++;
   }
 
-  const onlySeen = plan.seen.filter((x) => !renamed.has(x.id));
-  for (let i = 0; i < onlySeen.length; i += 10) {
-    await Promise.all(
-      onlySeen.slice(i, i + 10).map(async (x) => {
-        const { error: seenError } = await admin.from("roadmap_items").update({ github_title: x.githubTitle }).eq("id", x.id);
-        if (seenError) throw seenError;
-      })
-    );
+  const decide = (row: Row, field: SyncedField, times?: { titleAt: string | null; bodyAt: string | null }) =>
+    decideField({
+      roads: row.values[field].roads,
+      base: field in row.seen ? row.seen[field] : null,
+      github: row.values[field].github,
+      roadsAt: row.changedAt[field] ?? null,
+      githubAt: (field === "title" ? times?.titleAt : times?.bodyAt) ?? null,
+    });
+  // GitHub's change times are read only for the fields both sides moved, the one case the rule needs them.
+  const bothMoved = rows.filter((r) =>
+    (["title", "description"] as const).some((f) => f in r.seen && r.values[f].roads !== r.seen[f] && r.values[f].github !== r.seen[f] && r.values[f].roads !== r.values[f].github)
+  );
+  const times = bothMoved.length ? await readIssueChangeTimes(token, bothMoved.map((r) => r.number)) : new Map();
+
+  const summary = { pulled: 0, pushed: 0, failed: 0, retitled: 0 };
+  for (const row of rows) {
+    try {
+      const pulled: Partial<Record<SyncedField, string>> = {};
+      const pushed: { title?: string; body?: string } = {};
+      const seen = { ...row.seen };
+      for (const field of ["title", "description"] as const) {
+        const { roads, github } = row.values[field];
+        const decision = decide(row, field, times.get(row.number));
+        if (decision === "pull") {
+          pulled[field] = github;
+          seen[field] = github;
+        } else if (decision === "push" && push) {
+          if (field === "title") pushed.title = roads;
+          else pushed.body = replaceSolucao(row.issue.body, roads);
+          seen[field] = roads;
+        } else if (decision === "none") {
+          seen[field] = github;
+        }
+      }
+      if (pushed.title !== undefined || pushed.body !== undefined) await updateIssue(token, row.number, pushed);
+      const update: Record<string, unknown> = { github_seen: seen, github_title: seen.title ?? null, ...pulled };
+      const { error: updateError } = await admin.from("roadmap_items").update(update).eq("id", row.id);
+      if (updateError) throw updateError;
+      if (Object.keys(pulled).length) {
+        const { error: queueError } = await admin.from("roadmap_sync_queue").insert({
+          item_id: row.id,
+          action: "modify",
+          payload: { ...pulled, reason: "field follows the issue on GitHub" },
+        });
+        if (queueError) throw queueError;
+      }
+      summary.pulled += Object.keys(pulled).length;
+      if (pulled.title !== undefined) summary.retitled++;
+      summary.pushed += (pushed.title !== undefined ? 1 : 0) + (pushed.body !== undefined ? 1 : 0);
+    } catch (e) {
+      console.error("syncBoard: two-way fields failed for an item", e);
+      summary.failed++;
+    }
   }
-  return done;
+  return summary;
 }
 
 // The parts of the issues in the current sprint (the boxes of their acceptance criteria and their open sub-issues),

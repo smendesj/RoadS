@@ -12,7 +12,42 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
-const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue } = await import("./github.ts");
+const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes } = await import("./github.ts");
+
+/** A GitHub that records each request (method, path, body) and answers with `answer`. */
+function recordingGitHub(answer: (url: string, body: { query?: string; variables?: Record<string, unknown> }) => unknown = () => ({})) {
+  const calls: { method: string; url: string; body: unknown }[] = [];
+  const fetchImpl = (async (url: string, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({ method: init?.method ?? "GET", url, body });
+    return new Response(JSON.stringify(answer(url, body ?? {})), { status: 200 });
+  }) as typeof fetch;
+  return { fetch: fetchImpl, calls };
+}
+
+test("pushing a title and a body edits exactly those two fields of the issue, and nothing else", async () => {
+  const gh = recordingGitHub();
+  await updateIssue("token-sintetico", 900001, { title: "Título novo", body: "## Solução\n\nTexto." }, { fetch: gh.fetch });
+  assert.equal(gh.calls.length, 1);
+  assert.equal(gh.calls[0].method, "PATCH");
+  assert.match(gh.calls[0].url, /\/repos\/[^/]+\/[^/]+\/issues\/900001$/);
+  assert.deepEqual(gh.calls[0].body, { title: "Título novo", body: "## Solução\n\nTexto." });
+});
+
+test("the time of each issue's last rename and last body edit is read in one request", async () => {
+  const gh = recordingGitHub(() => ({
+    data: {
+      repository: {
+        i900001: { lastEditedAt: "2026-10-21T10:00:00Z", timelineItems: { nodes: [{ createdAt: "2026-10-21T09:00:00Z" }] } },
+        i900002: { lastEditedAt: null, timelineItems: { nodes: [] } },
+      },
+    },
+  }));
+  const times = await readIssueChangeTimes("token-sintetico", [900001, 900002], { fetch: gh.fetch });
+  assert.equal(gh.calls.length, 1);
+  assert.deepEqual(times.get(900001), { titleAt: "2026-10-21T09:00:00Z", bodyAt: "2026-10-21T10:00:00Z" });
+  assert.deepEqual(times.get(900002), { titleAt: null, bodyAt: null });
+});
 
 // Synthetic ids of a board like Project #7: what matters is that the fields are matched by these ids.
 const BOARD = {

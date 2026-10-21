@@ -157,6 +157,44 @@ export async function createGeoCloudIssue(
   return { url: issue.html_url, number: issue.number, skipped };
 }
 
+/** Writes an issue's title and/or body (the two-way sync of issue #22); nothing else of the issue is sent. */
+export async function updateIssue(token: string, number: number, change: { title?: string; body?: string }, port: GitHubPort = {}): Promise<void> {
+  const body: { title?: string; body?: string } = {};
+  if (change.title !== undefined) body.title = change.title;
+  if (change.body !== undefined) body.body = change.body;
+  await github(token, `/repos/${GEOCLOUD_REPO}/issues/${number}`, { method: "PATCH", body }, port);
+}
+
+/** When each issue was last renamed and its body last edited, read in one request; null when it never was. */
+export async function readIssueChangeTimes(
+  token: string,
+  numbers: number[],
+  port: GitHubPort = {}
+): Promise<Map<number, { titleAt: string | null; bodyAt: string | null }>> {
+  const times = new Map<number, { titleAt: string | null; bodyAt: string | null }>();
+  if (!numbers.length) return times;
+  const [owner, name] = GEOCLOUD_REPO.split("/");
+  const fields = numbers
+    .map(
+      (n) => `i${n}: issue(number: ${Number(n)}) { lastEditedAt
+        timelineItems(itemTypes: [RENAMED_TITLE_EVENT], last: 1) { nodes { ... on RenamedTitleEvent { createdAt } } } }`
+    )
+    .join("\n");
+  const json = await github(
+    token,
+    "/graphql",
+    { method: "POST", body: { query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`, variables: { owner, name } } },
+    port
+  );
+  const repo: Record<string, { lastEditedAt: string | null; timelineItems?: { nodes: { createdAt?: string }[] } } | null> =
+    json?.data?.repository ?? {};
+  for (const n of numbers) {
+    const issue = repo[`i${n}`];
+    times.set(n, { titleAt: issue?.timelineItems?.nodes?.[0]?.createdAt ?? null, bodyAt: issue?.lastEditedAt ?? null });
+  }
+  return times;
+}
+
 function fitsBoard(layout: Map<string, Set<string> | null>, field: string, value: FieldValue): boolean {
   if (!layout.has(field)) return false;
   const options = layout.get(field);

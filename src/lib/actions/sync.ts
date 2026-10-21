@@ -6,6 +6,7 @@
 
 import { syncBoard, type SyncColumn, type SyncResult } from "@/lib/board-sync";
 import { cooldownFor } from "@/lib/auto-sync";
+import { mayPush } from "@/lib/bilateral-sync";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 import type { SliceGroup } from "@/lib/slices";
 
@@ -26,7 +27,8 @@ export async function syncBoardAsViewer(opts?: { auto?: boolean }): Promise<Sync
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
   if (!profile?.role) return { ok: false, reason: "unauthenticated", message: "Entre para sincronizar o board." };
 
-  return syncBoard({ brakeMs: cooldownFor({ auto }) });
+  // Anyone may press; only a scrum master or an admin's press writes RoadS edits to GitHub (a dev's only pulls).
+  return syncBoard({ brakeMs: cooldownFor({ auto }), push: mayPush(profile.role) });
 }
 
 export async function getLatestBoardSnapshot(): Promise<{ columns: SyncColumn[]; syncedAt: string; slices: SliceGroup[] } | null> {

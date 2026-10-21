@@ -180,13 +180,22 @@ async function getItemAccess(
   actor: { userId: string; realRole: "scrum_master" | "admin" }
 ): Promise<
   ItemAccess & {
-    item: { lane_id: string; title: string; produto: Produto; description: string; github_issue_url: string | null; tipo: Tipo | null; stack: Stack | null };
+    item: {
+      lane_id: string;
+      title: string;
+      produto: Produto;
+      description: string;
+      github_issue_url: string | null;
+      tipo: Tipo | null;
+      stack: Stack | null;
+      field_changed_at: Record<string, string> | null;
+    };
   }
 > {
   const supabase = await createServerSupabase();
   const { data: item, error } = await supabase
     .from("roadmap_items")
-    .select("lane_id, title, produto, description, github_issue_url, tipo, stack, created_by")
+    .select("lane_id, title, produto, description, github_issue_url, tipo, stack, created_by, field_changed_at")
     .eq("id", itemId)
     .single();
   if (error) throw error;
@@ -233,6 +242,12 @@ export async function saveRoadmapItemEdit(
     if (!title) throw new Error("title_required");
     update.title = title;
     update.description = input.content.description.trim();
+    // When each field was last edited here: the two-way sync settles a field both sides changed by these times.
+    const changedAt = { ...(access.item.field_changed_at ?? {}) };
+    const now = update.updated_at as string;
+    if (title !== access.item.title) changedAt.title = now;
+    if (update.description !== access.item.description) changedAt.description = now;
+    update.field_changed_at = changedAt;
     update.produto = input.content.produto;
     if (!isTipo(input.content.tipo) || !isStack(input.content.stack)) throw new Error("type_and_stack_required");
     update.tipo = input.content.tipo;
