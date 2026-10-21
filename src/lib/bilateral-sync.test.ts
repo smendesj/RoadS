@@ -17,7 +17,15 @@ import {
   weekOfIssue,
   weekOfLane,
   weekPull,
+  sameBase,
 } from "./bilateral-sync.ts";
+
+test("a base with the same fields and values is the same, whatever their order, so the item is not written again", () => {
+  assert.equal(sameBase({ title: "T", stack: "Backend" }, { stack: "Backend", title: "T" }), true);
+  assert.equal(sameBase({ title: "T" }, { title: "T", stack: "Backend" }), false);
+  assert.equal(sameBase({ title: "T" }, { title: "U" }), false);
+  assert.equal(sameBase({}, {}), true);
+});
 
 const at = (h: number) => `2026-10-21T${String(h).padStart(2, "0")}:00:00Z`;
 

@@ -32,7 +32,7 @@ import "server-only";
 
 import { createGeoCloudIssue, EFFORT_FIELD_ID, GEOCLOUD_REPO, PRIORIDADE_FIELD_ID, clearProjectField, readBoardFields, readIssueChangeTimes, readIssueState, setProjectDate, setProjectOption, setProjectStatus, STACK_FIELD_ID, updateIssue, type IssueChange, type IssueChangeTimes } from "@/lib/github";
 import { importableIssues, isTestData, mayGetIssue } from "@/lib/test-data";
-import { decideField, extractSolucao, labelsAfter, nativeTypeOf, replaceSolucao, statusOfIssue, statusWrites, tipoOfLabels, weekOfIssue, weekOfLane, weekPull, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
+import { decideField, extractSolucao, labelsAfter, sameBase, nativeTypeOf, replaceSolucao, statusOfIssue, statusWrites, tipoOfLabels, weekOfIssue, weekOfLane, weekPull, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isEffort, isStack, isTipo, PRIORIDADE_OPTION_IDS, prioridadeOfOption, STACK_OPTION_IDS, stackOfOption, type Stack } from "@/lib/issue-fields";
 import type { Prioridade } from "@/lib/types";
@@ -47,7 +47,8 @@ import { EMPTY_SPRINT_SUMMARY, runSprintSync, type SprintCandidate, type SprintS
 import { createAdminClient } from "@/lib/supabase/admin";
 import { deleteFutureWeekIfEmpty, deleteWeekIfEmpty, ensureWeekLane } from "@/lib/week-lanes";
 import { brakedSync } from "@/lib/sync-claim";
-import { SYNC_COOLDOWN_MS } from "@/lib/sync-cooldown";
+import { inPool } from "@/lib/pool";
+import { SYNC_COOLDOWN_MS, SYNC_MAX_DURATION_S } from "@/lib/sync-cooldown";
 
 const STATUS_META: Record<string, { key: string; tone: "neutral" | "brand" | "red" | "green" }> = {
   Open: { key: "open", tone: "neutral" },
@@ -113,8 +114,12 @@ const QUERY = `
   }
 `;
 
-/** A claimed run that hasn't finished after this long is taken as stuck (a function killed by its timeout). */
-const MAX_RUN_MS = 2 * 60_000;
+/**
+ * A claimed run that hasn't finished after this long is taken as stuck (a function killed by its timeout): the same
+ * as SYNC_MAX_DURATION_S, the maxDuration of every route and page that syncs, so a run still alive is never taken as
+ * stuck and run twice.
+ */
+const MAX_RUN_MS = SYNC_MAX_DURATION_S * 1000;
 
 // The one door to the sync, for every caller: the brake and the claim of src/lib/sync-claim.ts in front of the run.
 // `brakeMs` is the caller's brake: 30 s for a press, FrontlightS and the cron; 5 min for a page's own sync.
@@ -386,6 +391,8 @@ type SyncedField = "title" | "description" | "tipo" | "stack" | "prioridade" | "
 const ISSUE_FIELDS = ["title", "description", "tipo"] as const;
 const BOARD_FIELDS = { stack: STACK_FIELD_ID, prioridade: PRIORIDADE_FIELD_ID, effort: EFFORT_FIELD_ID } as const;
 type BoardField = keyof typeof BOARD_FIELDS;
+/** How many items the field sync handles at once: few enough for GitHub's limits on writes. */
+const FIELDS_POOL = 6;
 
 async function syncIssueFields(
   token: string,
@@ -508,8 +515,17 @@ async function syncIssueFields(
     return true;
   }
 
+  // The items go a few at a time (one by one, a round of a hundred took tens of seconds); the moves into a week
+  // still go one after another, so two items going to the same week never take the same place in it.
+  let moves: Promise<unknown> = Promise.resolve();
+  const oneMoveAtATime = <T>(move: () => Promise<T>): Promise<T> => {
+    const done = moves.then(move);
+    moves = done.catch(() => {});
+    return done;
+  };
+
   const summary = { pulled: 0, pushed: 0, failed: 0, retitled: 0 };
-  for (const row of rows) {
+  await inPool(rows, FIELDS_POOL, async (row) => {
     try {
       const pulled: Partial<Record<SyncedField, string>> = {};
       const change: IssueChange = {};
@@ -587,10 +603,14 @@ async function syncIssueFields(
         if (cardWeek) await setProjectDate(token, row.card!.itemId, weekField!, cardWeek);
         else await clearProjectField(token, row.card!.itemId, weekField!);
       }
-      if (weekMove && (await moveToWeek(row, weekMove))) summary.pulled++;
-      const update: Record<string, unknown> = { github_seen: seen, github_title: seen.title ?? null, ...pulled };
-      const { error: updateError } = await admin.from("roadmap_items").update(update).eq("id", row.id);
-      if (updateError) throw updateError;
+      const move = weekMove;
+      if (move && (await oneMoveAtATime(() => moveToWeek(row, move)))) summary.pulled++;
+      // Written only when something changed: the base, or a value brought in.
+      if (Object.keys(pulled).length || !sameBase(seen, row.seen)) {
+        const update: Record<string, unknown> = { github_seen: seen, github_title: seen.title ?? null, ...pulled };
+        const { error: updateError } = await admin.from("roadmap_items").update(update).eq("id", row.id);
+        if (updateError) throw updateError;
+      }
       if (Object.keys(pulled).length) {
         const { error: queueError } = await admin.from("roadmap_sync_queue").insert({
           item_id: row.id,
@@ -607,7 +627,7 @@ async function syncIssueFields(
       console.error("syncBoard: two-way fields failed for an item", e);
       summary.failed++;
     }
-  }
+  });
 
   // An item taken out of Done in RoadS holds a closed issue, which isn't among the open ones read above: it is read on
   // its own and reopened, and its card follows. Only those who push do this.

@@ -8,6 +8,9 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "RoadS — Dashboard" };
 
+// Its server actions sync the board. A sync may run this long (SYNC_MAX_DURATION_S in src/lib/sync-cooldown.ts; Next reads only a literal here).
+export const maxDuration = 300;
+
 export default async function DashboardPage() {
   const viewer = await getViewerOrReset();
   const roleLabel = labelFor(viewer?.role ?? null);
