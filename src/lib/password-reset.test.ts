@@ -79,21 +79,21 @@ test("temporary passwords are long, URL-safe, different every time, and satisfy 
 });
 
 test("the per-person cooldown (one e-mail a minute) is explained as such", () => {
-  const tooSoon = /uma vez por minuto/;
+  const tooSoon = /once a minute/;
   assert.match(resetFailureMessage({ status: 429, code: "over_email_send_rate_limit", message: "For security purposes, you can only request this after 55 seconds." }), tooSoon);
   assert.match(resetFailureMessage(new Error("For security purposes, you can only request this after 12 seconds.")), tooSoon);
 });
 
 test("the project-wide e-mail cap is explained as that, not as the per-person minute", () => {
-  const cap = /limite de e-mails de autenticação do projeto/;
+  const cap = /project's authentication email limit/;
   assert.match(resetFailureMessage({ status: 429, code: "over_email_send_rate_limit", message: "email rate limit exceeded" }), cap);
   assert.match(resetFailureMessage(new Error("email rate limit exceeded")), cap);
-  assert.doesNotMatch(resetFailureMessage(new Error("email rate limit exceeded")), /uma vez por minuto/);
+  assert.doesNotMatch(resetFailureMessage(new Error("email rate limit exceeded")), /once a minute/);
 });
 
 test("an unknown account and any other failure each get a plain line, never the raw error", () => {
-  assert.equal(resetFailureMessage(new Error("user_not_found")), "Usuário não encontrado.");
+  assert.equal(resetFailureMessage(new Error("user_not_found")), "User not found.");
   const other = resetFailureMessage(new Error('relation "profiles" does not exist'));
-  assert.equal(other, "Não foi possível concluir o reset agora. Tente de novo.");
+  assert.equal(other, "Couldn't complete the reset right now. Try again.");
   assert.doesNotMatch(other, /relation|profiles/);
 });

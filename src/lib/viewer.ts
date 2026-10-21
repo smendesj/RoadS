@@ -1,4 +1,6 @@
 import { isAvatarId } from "./avatars.ts";
+import { ROLE_LABEL } from "./text/account.ts";
+import { VISITOR } from "./text/common.ts";
 import type { Role } from "./types.ts";
 
 /** Who is looking at the page, as the server knows it — available from the very first render. */
@@ -11,11 +13,9 @@ export type ViewerSource = {
 
 const ROLES: Role[] = ["admin", "scrum_master", "dev"];
 
-const ROLE_LABEL: Record<Role, string> = { admin: "Admin", scrum_master: "Scrum Master", dev: "Dev" };
-
-/** "Visitante" is only for nobody signed in. */
+/** "Visitor" is only for nobody signed in. */
 export function roleLabel(role: Role | null): string {
-  return role === null ? "Visitante" : ROLE_LABEL[role];
+  return role === null ? VISITOR : ROLE_LABEL[role];
 }
 
 // A signed-in user is never a visitor: no role, an unknown role or no profile row all mean the

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { AVATAR_IDS, avatarSrc } from "@/lib/avatars";
+import { AUTH, NAV } from "@/lib/text/account";
 import { useLogout } from "@/lib/use-logout";
 
 function UserIcon() {
@@ -73,7 +74,7 @@ export function UserMenu({ roleLabel, avatar: initialAvatar }: { roleLabel: stri
       <button
         ref={triggerRef}
         onClick={() => setOpen((o) => !o)}
-        aria-label="Menu do usuário"
+        aria-label={NAV.userMenu}
         aria-expanded={open}
         className="-m-1.5 flex items-center gap-2.5 rounded-full p-1.5 sm:m-0 sm:p-0"
       >
@@ -85,14 +86,14 @@ export function UserMenu({ roleLabel, avatar: initialAvatar }: { roleLabel: stri
 
       {open && (
         <div className="absolute right-0 top-full z-50 mt-2 flex w-64 flex-col gap-3 rounded-xl border border-rs-border bg-rs-card p-3 shadow-lg">
-          <span className="text-[13px] font-semibold text-rs-text-soft">Foto do perfil</span>
+          <span className="text-[13px] font-semibold text-rs-text-soft">{NAV.profilePicture}</span>
           {/* 44px touch targets on phones (4 per row), the compact 6-per-row grid from sm up. */}
           <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
             {AVATAR_IDS.map((id) => (
               <button
                 key={id}
                 onClick={() => choose(id)}
-                aria-label={`Foto ${id.replace("avatar-", "")}`}
+                aria-label={NAV.picture(id.replace("avatar-", ""))}
                 aria-pressed={avatar === id}
                 className={`h-11 w-11 justify-self-center overflow-hidden rounded-full border-2 sm:h-8 sm:w-8 ${avatar === id ? "border-rs-brand" : "border-transparent"}`}
               >
@@ -104,7 +105,7 @@ export function UserMenu({ roleLabel, avatar: initialAvatar }: { roleLabel: stri
             onClick={logout}
             className="rounded-lg border border-rs-border py-3 text-sm font-bold text-rs-text hover:bg-rs-bg sm:py-2"
           >
-            Sair
+            {AUTH.signOut}
           </button>
         </div>
       )}

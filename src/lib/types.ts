@@ -3,7 +3,7 @@ export type Role = "admin" | "scrum_master" | "dev";
 /** Sprint lanes should hold at most this many items (the type lanes, where an item with no week sits, have no limit).
  *  Not enforced: a sprint over it shows n/4 and a warning asking for the overflow to move out. */
 export const MAX_ITEMS_PER_SPRINT = 4;
-/** Title a "+ Novo item" card starts with; it gets no GitHub issue until someone writes a real one. */
+/** Title a "+ New item" card starts with; it gets no GitHub issue until someone writes a real one. */
 export const NEW_ITEM_TITLE = "Novo item — edite a descrição";
 /** The two working views a Roadmap card can render as. Admin can look through either one, or Config. */
 export type ViewAs = "dev" | "scrum_master";
@@ -53,7 +53,7 @@ export type RoadmapItem = {
   createdBy?: string | null;
   /** When the item was stored: the Kanban's Open lists the items with no issue on the board newest first. */
   createdAt?: string;
-  /** The issue's Status on Project #7 (last snapshot), set only on sprint items; "done" shows as Concluído. */
+  /** The issue's Status on Project #7 (last snapshot), set only on sprint items; "done" shows as Done. */
   status?: "open" | "dev" | "blocker" | "done";
   /** The item's Assignees, as GitHub logins (issue #23); shown by the name of the profile with that login. */
   assignees?: string[];

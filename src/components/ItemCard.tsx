@@ -6,11 +6,13 @@ import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones
 import { ItemComment } from "@/components/ItemComment";
 import { assigneeNames } from "@/lib/assignee-sync";
 import type { SelectorStatus } from "@/lib/bilateral-sync";
+import { ACTION, FIELD } from "@/lib/text/common";
+import { deleteItemConfirm, ROADMAP } from "@/lib/text/roadmap";
 
 const PRIORIDADES: Prioridade[] = ["Critical", "High", "Medium", "Low"];
 const EFFORTS: Effort[] = ["Very High", "High", "Medium", "Low"];
 
-/** content is only present when the viewer may edit title/description/produto (admin, or RoadS-created items). */
+/** content is only present when the viewer may edit title/description/product (admin, or RoadS-created items). */
 export type EditDraft = {
   prioridade: Prioridade;
   effort: Effort;
@@ -75,8 +77,8 @@ export function ItemCard({
   weekLabel?: string | null;
   canDelete?: boolean;
   canEditContent?: boolean;
-  /** The lane the card is in and every lane it can go to — drive the "Mover para" select. A card in a week also lists
-   *  "Kanban (sem semana)" (KANBAN), which unplans it like a drop on the Kanban's Open. */
+  /** The lane the card is in and every lane it can go to — drive the "Move to" select. A card in a week also lists
+   *  "Kanban (no week)" (KANBAN), which unplans it like a drop on the Kanban's Open. */
   laneId?: string;
   moveTargets?: { id: string; label: string }[];
   onMoveTo?: (laneId: string) => void;
@@ -138,7 +140,7 @@ export function ItemCard({
         <span className={badgeClass(produtoTone(item.produto))}>{item.produto}</span>
         <span className={badgeClass(prioridadeTone(item.prioridade))}>{item.prioridade}</span>
         <span className={badgeClass(effortTone(item.effort))}>{item.effort}</span>
-        {(item.status === "done" || item.state === "Done") && <span className={badgeClass("green")}>Concluído</span>}
+        {(item.status === "done" || item.state === "Done") && <span className={badgeClass("green")}>{ROADMAP.done}</span>}
         {item.state === "Blocker" && <span className={badgeClass("red")}>Blocker</span>}
       </div>
 
@@ -146,7 +148,7 @@ export function ItemCard({
 
       {item.assignees && item.assignees.length > 0 && (
         <p data-assignees-shown className="text-xs text-rs-text-soft">
-          <span className="font-bold text-rs-text-faint">Assignees:</span> {assigneeNames(item.assignees, peopleNames(people)).join(", ")}
+          <span className="font-bold text-rs-text-faint">{FIELD.assignees}:</span> {assigneeNames(item.assignees, peopleNames(people)).join(", ")}
         </p>
       )}
 
@@ -159,7 +161,7 @@ export function ItemCard({
           {content && (
             <>
               <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Título</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.title}</span>
                 <input
                   value={content.title}
                   onChange={(e) => setContent({ title: e.target.value })}
@@ -167,7 +169,7 @@ export function ItemCard({
                 />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Descrição</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.description}</span>
                 <textarea
                   value={content.description}
                   onChange={(e) => setContent({ description: e.target.value })}
@@ -177,7 +179,7 @@ export function ItemCard({
               </label>
               <div className="flex gap-2">
                 <label className="flex flex-1 flex-col gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Tipo</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.type}</span>
                   <select
                     value={content.tipo}
                     onChange={(e) => isTipo(e.target.value) && setContent({ tipo: e.target.value })}
@@ -191,7 +193,7 @@ export function ItemCard({
                   </select>
                 </label>
                 <label className="flex flex-1 flex-col gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Stack</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.stack}</span>
                   <select
                     value={content.stack}
                     onChange={(e) => isStack(e.target.value) && setContent({ stack: e.target.value })}
@@ -209,7 +211,7 @@ export function ItemCard({
           )}
           <div className="flex gap-2">
             <label className="flex flex-1 flex-col gap-1">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Prioridade</span>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.priority}</span>
               <select
                 value={editDraft.prioridade}
                 onChange={(e) => onDraftChange({ ...editDraft, prioridade: e.target.value as Prioridade })}
@@ -223,7 +225,7 @@ export function ItemCard({
               </select>
             </label>
             <label className="flex flex-1 flex-col gap-1">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Effort</span>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.effort}</span>
               <select
                 value={editDraft.effort}
                 onChange={(e) => onDraftChange({ ...editDraft, effort: e.target.value as Effort })}
@@ -238,7 +240,7 @@ export function ItemCard({
             </label>
           </div>
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Status</span>
+            <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.status}</span>
             <select
               value={editDraft.status}
               onChange={(e) => onDraftChange({ ...editDraft, status: e.target.value as SelectorStatus })}
@@ -253,7 +255,7 @@ export function ItemCard({
           </label>
           {editDraft.assignees && (people.length > 0 || editDraft.assignees.length > 0) && (
             <fieldset data-assignees className="flex flex-col gap-1">
-              <legend className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Assignees</legend>
+              <legend className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.assignees}</legend>
               <div className="flex flex-wrap gap-x-3 gap-y-1">
                 {assigneeChoices(people, editDraft.assignees).map((p) => (
                   <label key={p.login} className="flex items-center gap-1.5 text-xs text-rs-text">
@@ -279,8 +281,8 @@ export function ItemCard({
             <input
               value={editDraft.note}
               onChange={(e) => onDraftChange({ ...editDraft, note: e.target.value })}
-              aria-label="New Comment"
-              placeholder="Write a Comment (optional)..."
+              aria-label={ROADMAP.newComment}
+              placeholder={ROADMAP.commentPlaceholder}
               className="w-full min-w-0 flex-grow rounded-lg sm:w-auto border border-rs-border bg-rs-card px-2.5 py-2 text-base text-rs-text sm:text-xs"
             />
             <button
@@ -288,10 +290,10 @@ export function ItemCard({
               disabled={!!content && !content.title.trim()}
               className="rounded-lg bg-rs-brand px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
             >
-              Salvar
+              {ACTION.save}
             </button>
             <button onClick={onCancelEdit} className="rounded-lg px-2 py-2 text-xs font-bold text-rs-text-soft">
-              Cancelar
+              {ACTION.cancel}
             </button>
           </div>
         </div>
@@ -300,16 +302,16 @@ export function ItemCard({
       {canDrag && !isEditing && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <button onClick={onStartEdit} className="py-1 text-xs font-bold text-rs-brand-text">
-            {canEditContent ? "Editar" : "+ Comment"}
+            {canEditContent ? ACTION.edit : ROADMAP.addComment}
           </button>
           {canDelete && (
             <button
               onClick={() => {
-                if (window.confirm(`Excluir "${item.title}"? Não dá pra desfazer.`)) onDelete();
+                if (window.confirm(deleteItemConfirm(item.title))) onDelete();
               }}
               className="py-1 text-xs font-bold text-red-600 dark:text-red-400"
             >
-              Excluir
+              {ACTION.delete}
             </button>
           )}
           {/* Below lg a select moves the card too, with a mouse; a touch screen holds and drags the card instead,
@@ -318,10 +320,10 @@ export function ItemCard({
             <select
               value=""
               onChange={(e) => e.target.value && onMoveTo(e.target.value)}
-              aria-label="Mover para"
+              aria-label={ROADMAP.moveTo}
               className="ml-auto min-w-0 max-w-[65%] rounded-lg border border-rs-border bg-rs-card px-2 py-1 text-base font-bold text-rs-text-soft sm:text-xs lg:hidden pointer-coarse:sr-only pointer-coarse:focus:not-sr-only"
             >
-              <option value="">Mover para…</option>
+              <option value="">{ROADMAP.moveToPlaceholder}</option>
               {moveTargets
                 .filter((t) => t.id !== laneId)
                 .map((t) => (
