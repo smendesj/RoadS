@@ -32,6 +32,7 @@ export function roadmapSyncMessage(roadmap: {
   retitled?: number;
   fields?: { pulled: number; pushed: number; failed: number; error?: string };
   comments?: { pulled: number; pushed: number; failed: number; error?: string };
+  assignees?: { pulled: number; pushed: number; failed: number; error?: string };
 }): string {
   if (roadmap.error) return roadmap.error;
   return (
@@ -40,8 +41,20 @@ export function roadmapSyncMessage(roadmap: {
     (roadmap.untyped ? ` ${roadmap.untyped} issue(s) aberta(s) sem label type:* ficaram de fora até ganharem tipo.` : "") +
     (roadmap.fields ? fieldsLine(roadmap.fields) : roadmap.retitled ? ` ${roadmap.retitled} título(s) do Roadmap acompanharam a renomeação da issue no GitHub.` : "") +
     (roadmap.comments ? commentsLine(roadmap.comments) : "") +
+    (roadmap.assignees ? assigneesLine(roadmap.assignees) : "") +
     (roadmap.sprint ? sprintLine(roadmap.sprint) : "")
   );
+}
+
+// The two-way sync of Assignees (issue #23): items whose Assignees came from GitHub or went there.
+function assigneesLine(assignees: { pulled: number; pushed: number; failed: number; error?: string }): string {
+  if (assignees.error) return ` Os Assignees não sincronizaram: ${assignees.error}.`;
+  const parts = [
+    assignees.pulled ? `${assignees.pulled} item(ns) trazido(s) do GitHub` : "",
+    assignees.pushed ? `${assignees.pushed} gravado(s) no GitHub` : "",
+    assignees.failed ? `${assignees.failed} falharam` : "",
+  ].filter(Boolean);
+  return parts.length ? ` Assignees: ${parts.join(", ")}.` : "";
 }
 
 // The two-way sync of Comments (issue #23): created, edited or deleted on either side.
@@ -70,7 +83,7 @@ function fieldsLine(fields: { pulled: number; pushed: number; failed: number; er
 export function roadmapChanged(roadmap: Parameters<typeof roadmapSyncMessage>[0]): boolean {
   const s = roadmap.sprint;
   return Boolean(
-    roadmap.error || roadmap.added || roadmap.removed || roadmap.issuesCreated || roadmap.retitled || roadmap.fields || roadmap.comments ||
+    roadmap.error || roadmap.added || roadmap.removed || roadmap.issuesCreated || roadmap.retitled || roadmap.fields || roadmap.comments || roadmap.assignees ||
       (s && (s.error || s.pulled || s.released || s.written || s.wouldWrite || s.failed || s.stuck))
   );
 }

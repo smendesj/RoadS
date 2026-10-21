@@ -173,6 +173,9 @@ try {
   await check("admin", "edit a Comment from GitHub", "allow", async () => rows(await adm.c.from("item_notes").update({ body: "[TESTE] admin editou" }).eq("id", ghNote).select("id")));
   await check("admin", "delete someone else's Comment", "allow", async () => rows(await adm.c.from("item_notes").delete().eq("id", ghNote).select("id")));
   await check("sm", "promote self to admin", "deny", async () => rows(await sm.c.from("profiles").update({ role: "admin" }).eq("id", sm.id).select("id")));
+  // The GitHub login ties a profile to Assignees and comments (issue #23, migration 0041): only the admin sets it.
+  await check("sm", "set own GitHub login", "deny", async () => rows(await sm.c.from("profiles").update({ github_login: "zz-teste-sm" }).eq("id", sm.id).select("id")));
+  await check("dev", "set own GitHub login", "deny", async () => rows(await dev.c.from("profiles").update({ github_login: "zz-teste-dev" }).eq("id", dev.id).select("id")));
   await check("sm", "change dev's role", "deny", async () => rows(await sm.c.from("profiles").update({ role: "scrum_master" }).eq("id", dev.id).select("id")));
   await check("sm", "insert lane", "deny", async () => rows(await sm.c.from("lanes").insert({ id: "zz-test-sm", title: "x", kind: "group" }).select("id")));
   await check("sm", "rename a lane", "deny", async () => rows(await sm.c.from("lanes").update({ title: "[TESTE] hacked" }).eq("id", "zz-test-b").select("id")));
@@ -209,6 +212,12 @@ try {
   await check("admin", "delete anyone's item", "allow", async () => rows(await adm.c.from("roadmap_items").delete().eq("id", S2).select("id")));
   await check("admin", "note as admin", "allow", async () => rows(await adm.c.from("item_notes").insert({ item_id: M, author_id: adm.id, author_role: "dev", body: "[TESTE] nota do admin" }).select("id")));
   await check("admin", "write lanes", "allow", async () => rows(await adm.c.from("lanes").update({ title: "[TESTE] lane A admin" }).eq("id", "zz-test-a").select("id")));
+  {
+    const before = (await svc.from("profiles").select("github_login").eq("id", dev.id).single()).data.github_login;
+    await check("admin", "set a profile's GitHub login", "allow", async () => rows(await adm.c.from("profiles").update({ github_login: "zz-teste-dev" }).eq("id", dev.id).select("id")));
+    await check("admin", "a GitHub login GitHub would never accept", "deny", async () => rows(await adm.c.from("profiles").update({ github_login: "-zz teste" }).eq("id", dev.id).select("id")));
+    await svc.from("profiles").update({ github_login: before }).eq("id", dev.id);
+  }
   await check("admin", "dev -> scrum_master", "allow", async () => rows(await adm.c.from("profiles").update({ role: "scrum_master" }).eq("id", dev.id).select("id")));
   await check("admin", "scrum_master -> dev (restore dev)", "allow", async () => rows(await adm.c.from("profiles").update({ role: "dev" }).eq("id", dev.id).select("id")));
   await check("admin", "make dev an admin", "deny", async () => rows(await adm.c.from("profiles").update({ role: "admin" }).eq("id", dev.id).select("id")));

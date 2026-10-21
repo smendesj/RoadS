@@ -269,8 +269,31 @@ async function seedBoard() {
     expect("Comment: Delete asks first, in the card", (await count(editedComment.getByText("Delete this Comment?"))) === 1);
     await btn(editedComment, "Delete").click();
     await editedComment.waitFor({ state: "detached", timeout: 15000 });
-    const { data: gone } = await svc.from("item_notes").select("id").eq("item_id", created.id);
-    expect("Comment: one never sent to GitHub is deleted at once", gone.length === 0, JSON.stringify(gone));
+    const { data: noteLeft } = await svc.from("item_notes").select("id").eq("item_id", created.id);
+    expect("Comment: one never sent to GitHub is deleted at once", noteLeft.length === 0, JSON.stringify(noteLeft));
+
+    // ------------------------------------------------ Assignees (issue #23): picked among the profiles with a GitHub login
+    const { data: smLogin } = await svc.from("profiles").select("github_login").eq("id", L.ids.sm).single();
+    await svc.from("profiles").update({ github_login: "zz-teste-sm" }).eq("id", L.ids.sm);
+    try {
+      await page.reload({ waitUntil: "load" });
+      await openCard("[TESTE] criado e editado pelo SM").waitFor({ timeout: 30000 });
+      await btn(openCard("[TESTE] criado e editado pelo SM"), "Editar").click();
+      const assigning = page.locator('div[draggable="false"]:has([data-assignees])');
+      // The profile shows by its name (the account's, or the login when it has none).
+      const { data: smUser } = await svc.auth.admin.getUserById(L.ids.sm);
+      const smName = smUser.user?.user_metadata?.name?.trim() || "zz-teste-sm";
+      const choice = assigning.locator("[data-assignees] label", { hasText: smName });
+      await choice.waitFor({ timeout: 15000 });
+      await choice.locator("input").check();
+      await btn(assigning, "Salvar").click();
+      await openCard("[TESTE] criado e editado pelo SM").locator("[data-assignees-shown]").waitFor({ timeout: 15000 });
+      const { data: assigned } = await svc.from("roadmap_items").select("assignees, field_changed_at").eq("id", created.id).single();
+      expect("Assignees: the profile picked is saved as its GitHub login, with the time of the edit",
+        JSON.stringify(assigned.assignees) === '["zz-teste-sm"]' && Boolean(assigned.field_changed_at?.assignees), JSON.stringify(assigned));
+    } finally {
+      await svc.from("profiles").update({ github_login: smLogin.github_login }).eq("id", L.ids.sm);
+    }
 
     // ------------------------------------------------ seeded item: note + priority only, on its card in Open
     await btn(openCard("[TESTE] item semeado (sem dono)"), "+ Comment").click();

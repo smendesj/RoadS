@@ -6,6 +6,7 @@ import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { SyncButton } from "@/components/SyncButton";
 import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { syncBoardAsViewer } from "@/lib/actions/sync";
+import { listAssignableProfiles } from "@/lib/actions/assignees";
 import { retryDelay, touchesCurrentSprint } from "@/lib/auto-sync";
 import type { SyncColumn } from "@/lib/board-sync";
 import { useAutoSync } from "@/lib/use-auto-sync";
@@ -62,6 +63,15 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
       .catch((e) => console.error("getRoadmapBoard failed", e));
   }
   useEffect(reloadBoard, []);
+
+  // Who can be an Assignee (issue #23): the profiles the admin tied to a GitHub login; cards show them by name.
+  const [people, setPeople] = useState<{ login: string; name: string }[]>([]);
+  useEffect(() => {
+    if (!viewer) return;
+    listAssignableProfiles()
+      .then(setPeople)
+      .catch((e) => console.error("listAssignableProfiles failed", e));
+  }, [viewer]);
 
   // Pulls GitHub again: open issues the Roadmap lacks come in, closed ones leave the Kanban.
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
@@ -216,6 +226,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
       prioridade: item.prioridade,
       effort: item.effort,
       note: "",
+      assignees: item.assignees ?? [],
       content: canEditContent(item)
         ? {
             title: item.title,
@@ -296,6 +307,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
       onDelete: () => removeItem(item.id),
       viewer: viewer ? { id: viewer.id, role: viewer.role } : null,
       onCommentsChanged: reloadBoard,
+      people,
     };
   };
 

@@ -2,7 +2,45 @@
 
 import { useEffect, useState, useTransition } from "react";
 import type { AppUser, Role } from "@/lib/types";
-import { listUsersForConfig, resetUserPassword, updateUserRole } from "@/lib/actions/admin";
+import { listUsersForConfig, resetUserPassword, setUserGithubLogin, updateUserRole } from "@/lib/actions/admin";
+
+const LOGIN_ERROR: Record<string, string> = {
+  invalid_login: "Not a GitHub login: letters, digits and single hyphens.",
+  login_taken: "Another profile already has this login.",
+  save_failed: "Not saved. Try again.",
+};
+
+// The GitHub login of a profile (issue #23): it ties the profile to Assignees and to comments on the issues. Saved
+// when the field loses focus or on Enter; empty clears it.
+function GithubLoginInput({ user, onSaved }: { user: AppUser; onSaved: () => void }) {
+  const [value, setValue] = useState(user.githubLogin ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const save = () => {
+    if (value.trim() === (user.githubLogin ?? "")) return;
+    setSaving(true);
+    setError(null);
+    setUserGithubLogin(user.id, value)
+      .then((r) => (r.ok ? onSaved() : setError(LOGIN_ERROR[r.error] ?? LOGIN_ERROR.save_failed)))
+      .catch(() => setError(LOGIN_ERROR.save_failed))
+      .finally(() => setSaving(false));
+  };
+  return (
+    <div className="flex flex-col gap-1">
+      <input
+        aria-label={`GitHub login of ${user.name}`}
+        value={value}
+        disabled={saving}
+        placeholder="login"
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+        className="w-36 rounded-lg border border-rs-border bg-rs-bg px-2 py-1.5 text-xs text-rs-text"
+      />
+      {error && <span className="text-xs text-red-600 dark:text-red-400">{error}</span>}
+    </div>
+  );
+}
 
 const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
@@ -50,6 +88,7 @@ export function ConfigPanel() {
             <tr className="border-b border-rs-border text-[11px] font-bold uppercase tracking-wide text-rs-text-faint">
               <th className="px-5 py-3">Nome / e-mail</th>
               <th className="px-5 py-3">Papel</th>
+              <th className="px-5 py-3">GitHub</th>
               <th className="px-5 py-3">Senha</th>
               <th className="px-5 py-3" />
             </tr>
@@ -81,6 +120,9 @@ export function ConfigPanel() {
                       <option value="scrum_master">{ROLE_LABEL.scrum_master}</option>
                     </select>
                   )}
+                </td>
+                <td className="px-5 py-3.5">
+                  <GithubLoginInput user={u} onSaved={reload} />
                 </td>
                 <td className="px-5 py-3.5 text-rs-text-soft">
                   {u.mustResetPassword ? (

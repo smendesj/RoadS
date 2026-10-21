@@ -99,3 +99,9 @@ test("the Comments a sync brought in, wrote to GitHub or failed are told, and co
   assert.equal(roadmapChanged({ ...base, comments: { pulled: 0, pushed: 1, failed: 0 } }), true);
   assert.match(roadmapSyncMessage({ ...base, comments: { pulled: 0, pushed: 0, failed: 0, error: "GitHub respondeu 502" } }), /Os Comments não sincronizaram: GitHub respondeu 502/);
 });
+
+test("the Assignees a sync brought in, wrote to GitHub or failed are told, and count as a change", () => {
+  const base = { added: 0, removed: 0, issuesCreated: 0 };
+  assert.match(roadmapSyncMessage({ ...base, assignees: { pulled: 1, pushed: 2, failed: 0 } }), /Assignees: 1 item\(ns\) trazido\(s\) do GitHub, 2 gravado\(s\) no GitHub/);
+  assert.equal(roadmapChanged({ ...base, assignees: { pulled: 1, pushed: 0, failed: 0 } }), true);
+});

@@ -253,6 +253,45 @@ export async function deleteIssueComment(token: string, commentId: number, port:
   await github(token, `/repos/${GEOCLOUD_REPO}/issues/comments/${commentId}`, { method: "DELETE", body: undefined }, port);
 }
 
+/**
+ * The assignees of each issue (their GitHub logins) and when someone last assigned or unassigned one, read in one
+ * request; an issue not found is left out.
+ */
+export async function readIssueAssignees(
+  token: string,
+  numbers: number[],
+  port: GitHubPort = {}
+): Promise<Map<number, { logins: string[]; changedAt: string | null }>> {
+  const assignees = new Map<number, { logins: string[]; changedAt: string | null }>();
+  if (!numbers.length) return assignees;
+  const [owner, name] = GEOCLOUD_REPO.split("/");
+  const fields = numbers
+    .map(
+      (n) => `i${n}: issue(number: ${Number(n)}) { assignees(first: 20) { nodes { login } }
+        timelineItems(itemTypes: [ASSIGNED_EVENT, UNASSIGNED_EVENT], last: 1) {
+          nodes { ... on AssignedEvent { createdAt } ... on UnassignedEvent { createdAt } } } }`
+    )
+    .join("\n");
+  const json = await github(
+    token,
+    "/graphql",
+    { method: "POST", body: { query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`, variables: { owner, name } } },
+    port
+  );
+  type Issue = { assignees: { nodes: { login: string }[] }; timelineItems?: { nodes: { createdAt?: string }[] } };
+  const repo: Record<string, Issue | null> = json?.data?.repository ?? {};
+  for (const n of numbers) {
+    const issue = repo[`i${n}`];
+    if (issue) assignees.set(n, { logins: issue.assignees.nodes.map((a) => a.login), changedAt: issue.timelineItems?.nodes?.[0]?.createdAt ?? null });
+  }
+  return assignees;
+}
+
+/** Sets an issue's assignees to exactly these logins; nothing else of the issue is sent. */
+export async function setIssueAssignees(token: string, number: number, logins: string[], port: GitHubPort = {}): Promise<void> {
+  await github(token, `/repos/${GEOCLOUD_REPO}/issues/${number}`, { method: "PATCH", body: { assignees: logins } }, port);
+}
+
 function fitsBoard(layout: Map<string, Set<string> | null>, field: string, value: FieldValue): boolean {
   if (!layout.has(field)) return false;
   const options = layout.get(field);

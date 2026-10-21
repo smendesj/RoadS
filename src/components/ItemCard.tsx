@@ -4,6 +4,7 @@ import type { Effort, Prioridade, Produto, RoadmapItem } from "@/lib/types";
 import { isStack, isTipo, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } from "@/lib/issue-fields";
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
 import { ItemComment } from "@/components/ItemComment";
+import { assigneeNames } from "@/lib/assignee-sync";
 
 const PRIORIDADES: Prioridade[] = ["Critical", "High", "Medium", "Low"];
 const EFFORTS: Effort[] = ["Very High", "High", "Medium", "Low"];
@@ -14,7 +15,19 @@ export type EditDraft = {
   effort: Effort;
   note: string;
   content?: { title: string; description: string; produto: Produto; tipo: Tipo; stack: Stack };
+  /** The Assignees being picked, as GitHub logins (issue #23). */
+  assignees?: string[];
 };
+
+/** The profiles to pick from, plus any login already assigned that no profile has (shown as the login). */
+function assigneeChoices(people: { login: string; name: string }[], current: string[]) {
+  const known = new Set(people.map((p) => p.login));
+  return [...people, ...current.filter((l) => !known.has(l)).map((l) => ({ login: l, name: l }))];
+}
+
+function peopleNames(people: { login: string; name: string }[]): Map<string, string> {
+  return new Map(people.map((p) => [p.login.toLowerCase(), p.name]));
+}
 
 export function ItemCard({
   item,
@@ -41,7 +54,10 @@ export function ItemCard({
   onDelete,
   viewer = null,
   onCommentsChanged = () => {},
+  people = [],
 }: {
+  /** Who can be an Assignee: the profiles tied to a GitHub login, with their names. */
+  people?: { login: string; name: string }[];
   item: RoadmapItem;
   /** Who is looking: whoever wrote a Comment, and the admin, edit and delete it (ItemComment). */
   viewer?: { id: string; role: string } | null;
@@ -121,6 +137,12 @@ export function ItemCard({
       </div>
 
       {item.desc && <p className="text-[13px] leading-snug text-rs-text-soft">{item.desc}</p>}
+
+      {item.assignees && item.assignees.length > 0 && (
+        <p data-assignees-shown className="text-xs text-rs-text-soft">
+          <span className="font-bold text-rs-text-faint">Assignees:</span> {assigneeNames(item.assignees, peopleNames(people)).join(", ")}
+        </p>
+      )}
 
       {item.notes.map((n) => (
         <ItemComment key={n.id} note={n} viewer={viewer} onChanged={onCommentsChanged} />
@@ -209,6 +231,30 @@ export function ItemCard({
               </select>
             </label>
           </div>
+          {editDraft.assignees && (people.length > 0 || editDraft.assignees.length > 0) && (
+            <fieldset data-assignees className="flex flex-col gap-1">
+              <legend className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">Assignees</legend>
+              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                {assigneeChoices(people, editDraft.assignees).map((p) => (
+                  <label key={p.login} className="flex items-center gap-1.5 text-xs text-rs-text">
+                    <input
+                      type="checkbox"
+                      checked={editDraft.assignees!.includes(p.login)}
+                      onChange={(e) =>
+                        onDraftChange({
+                          ...editDraft,
+                          assignees: e.target.checked
+                            ? [...editDraft.assignees!, p.login]
+                            : editDraft.assignees!.filter((l) => l !== p.login),
+                        })
+                      }
+                    />
+                    {p.name}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
           <div className="flex flex-wrap gap-1.5 sm:flex-nowrap">
             <input
               value={editDraft.note}

@@ -45,6 +45,24 @@ const { BASE, expect, sleep, svc } = L;
     await page.locator("tbody tr").first().waitFor();
     expect("config: the page shows the saved role after a reload", (await page.locator("tbody tr", { hasText: "RoadS Tester Dev" }).locator("select").inputValue()) === "dev");
 
+    // GitHub login (issue #23): the admin ties a profile to a login; a login GitHub would never accept is refused.
+    const { data: loginBefore } = await svc.from("profiles").select("github_login").eq("id", L.ids.dev).single();
+    try {
+      const loginInput = page.locator("tbody tr", { hasText: "RoadS Tester Dev" }).getByLabel(/^GitHub login of/);
+      await loginInput.fill("-zz teste");
+      await loginInput.press("Enter");
+      await page.getByText("Not a GitHub login").waitFor({ timeout: 15000 });
+      const { data: refused } = await svc.from("profiles").select("github_login").eq("id", L.ids.dev).single();
+      expect("config: a login GitHub would never accept is refused, with what to fix", refused.github_login === loginBefore.github_login);
+      await loginInput.fill("zz-teste-dev");
+      await loginInput.press("Enter");
+      await sleep(2500);
+      const { data: saved } = await svc.from("profiles").select("github_login").eq("id", L.ids.dev).single();
+      expect("config: the GitHub login of the Dev account is saved", saved.github_login === "zz-teste-dev", String(saved.github_login));
+    } finally {
+      await svc.from("profiles").update({ github_login: loginBefore.github_login }).eq("id", L.ids.dev);
+    }
+
     // ------------------------------------------------ Roadmap: full control over everybody's items
     await page.goto(BASE + "/roadmap", { waitUntil: "load" });
     await page.getByText("Carregando...").waitFor({ state: "detached", timeout: 30000 });
