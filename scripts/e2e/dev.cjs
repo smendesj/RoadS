@@ -222,7 +222,8 @@ async function seedSprintIssue() {
         (await count(page.locator('[data-lane-id="zz-test-a"], [data-lane-id^="tipo-"]'))) === 0);
     expect("roadmap: no '+ Novo item'", (await count(page.getByRole("button", { name: "+ Novo item" }))) === 0);
     expect("roadmap: the same read-refresh Sincronizar button as the Dashboard", (await count(page.getByRole("button", { name: /^Sincronizar$/ }))) === 1);
-    expect("roadmap: no Editar / + nota / Excluir", (await count(page.getByRole("button", { name: /^(Editar|\+ nota|Excluir)$/ }))) === 0);
+    expect("roadmap: no Editar / + Comment / Excluir", (await count(page.getByRole("button", { name: /^(Editar|\+ Comment|Excluir)$/ }))) === 0);
+    expect("roadmap: a dev edits and deletes no Comment", (await count(page.locator("[data-comment-id] button"))) === 0);
     expect("roadmap: no card is draggable, in the weeks or in Open", (await count(page.locator('div[draggable="true"]'))) === 0 &&
       (await count(page.locator('[data-kanban-column="open"] div[draggable="false"]'))) > 0);
     expect("roadmap: no 'Mover para' select", (await count(page.locator('select[aria-label="Mover para"]'))) === 0);

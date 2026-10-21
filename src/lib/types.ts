@@ -20,11 +20,18 @@ export type Produto = "GeoCloud"; // RoadS only handles GeoCloud; ELIMS issues a
 export type Prioridade = "Critical" | "High" | "Medium" | "Low";
 export type Effort = "Low" | "Medium" | "High" | "Very High";
 
+/** A Comment of an item: written in RoadS by a profile, or on the issue by a GitHub login (issue #23). */
 export type Note = {
   id: string;
   author: ViewAs;
   when: string;
   text: string;
+  /** The profile that wrote it in RoadS; null for a comment that came from GitHub. */
+  authorId?: string | null;
+  /** The name it is shown and signed with: the profile's name, or the GitHub login of a comment from there. */
+  authorName?: string | null;
+  /** Edited after it was written. */
+  edited?: boolean;
 };
 
 export type RoadmapItem = {

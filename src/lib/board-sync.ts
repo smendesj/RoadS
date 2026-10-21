@@ -33,6 +33,7 @@ import "server-only";
 import { createGeoCloudIssue, GEOCLOUD_REPO, readIssueChangeTimes, setProjectStatus, updateIssue } from "@/lib/github";
 import { importableIssues, isTestData, mayGetIssue } from "@/lib/test-data";
 import { decideField, extractSolucao, replaceSolucao } from "@/lib/bilateral-sync";
+import { syncItemComments, type CommentsSummary } from "@/lib/comments-sync";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
 import { isStack, isTipo } from "@/lib/issue-fields";
 import { laneForLabels, releaseLane, tipoForLabels, TYPE_LANES } from "@/lib/issue-lane";
@@ -78,6 +79,8 @@ export type RoadmapReconcile = {
   retitled?: number;
   /** The two-way sync of Title and Description: values brought in, written to GitHub and failed; absent when none. */
   fields?: FieldsSummary;
+  /** The two-way sync of Comments (issue #23): brought in, written to GitHub and failed; absent when none. */
+  comments?: CommentsSummary;
 };
 
 export type FieldsSummary = { pulled: number; pushed: number; failed: number; error?: string };
@@ -255,6 +258,18 @@ async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
       : null;
     const retitled = fields?.retitled ?? 0;
 
+    // The Comments of each item go both ways with its issue's comments (comments-sync.ts, issue #23); a failure here
+    // doesn't fail the board sync.
+    const comments: CommentsSummary | null = cards.size
+      ? await readOpen()
+          .then((open) => syncItemComments(token, open.map((i) => i.number), push))
+          .catch((e) => {
+            console.error("syncBoard: Comments failed", e);
+            return { pulled: 0, pushed: 0, failed: 0, error: e instanceof Error ? e.message : "Erro ao sincronizar os Comments." };
+          })
+      : null;
+    const commentCounts = comments && (comments.pulled || comments.pushed || comments.failed || comments.error) ? comments : null;
+
     // The Roadmap follows the repo's open issues; a failure here doesn't fail the board sync.
     const roadmap: RoadmapReconcile = await reconcileRoadmapWithIssues(token, onProject, readOpen, cards).catch((e) => {
       console.error("syncBoard: roadmap reconcile failed", e);
@@ -273,7 +288,13 @@ async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
       ok: true,
       columns,
       syncedAt,
-      roadmap: { ...roadmap, ...(sprint ? { sprint } : {}), ...(retitled ? { retitled } : {}), ...(fieldCounts ? { fields: fieldCounts } : {}) },
+      roadmap: {
+        ...roadmap,
+        ...(sprint ? { sprint } : {}),
+        ...(retitled ? { retitled } : {}),
+        ...(fieldCounts ? { fields: fieldCounts } : {}),
+        ...(commentCounts ? { comments: commentCounts } : {}),
+      },
     };
   } catch (e) {
     return { ok: false, reason: "error", message: e instanceof Error ? e.message : "Erro desconhecido" };

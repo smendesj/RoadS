@@ -197,17 +197,17 @@ async function seedBoard() {
       const noOwner = of("[TESTE] item semeado (sem dono)");
       const admins = of("[TESTE] item do admin");
       expect(`own item ${where}: draggable, with Editar and Excluir`, (await own.getAttribute("draggable")) === "true" && (await count(btn(own, "Editar"))) === 1 && (await count(btn(own, "Excluir"))) === 1);
-      expect(`seeded item (no owner) ${where}: draggable, '+ nota' only, no Editar, no Excluir`, (await noOwner.getAttribute("draggable")) === "true" && (await count(btn(noOwner, "+ nota"))) === 1 && (await count(btn(noOwner, "Editar"))) === 0 && (await count(btn(noOwner, "Excluir"))) === 0);
+      expect(`seeded item (no owner) ${where}: draggable, '+ Comment' only, no Editar, no Excluir`, (await noOwner.getAttribute("draggable")) === "true" && (await count(btn(noOwner, "+ Comment"))) === 1 && (await count(btn(noOwner, "Editar"))) === 0 && (await count(btn(noOwner, "Excluir"))) === 0);
       expect(`admin's item ${where}: not draggable and no controls at all`, (await admins.getAttribute("draggable")) === "false" && (await count(admins.getByRole("button"))) === 0);
     }
 
     // ------------------------------------------------ create through the UI: "+ Novo item" in the Kanban's Open
     await open.getByRole("button", { name: "+ Novo item" }).click();
     // The one card in edit mode (not draggable while editing, has the note field): stable while its inputs change.
-    const fresh = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
+    const fresh = page.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])');
     await fresh.waitFor({ timeout: 15000 });
     expect("create: the new item opens straight into edit mode, in Open",
-      (await count(fresh)) === 1 && (await count(open.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])'))) === 1);
+      (await count(fresh)) === 1 && (await count(open.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])'))) === 1);
     await fresh.locator("input").first().fill("[TESTE] criado pelo Scrum Master");
     await fresh.locator("textarea").fill("descrição escrita no teste");
     // By their visible labels, not their position: the card gained and lost selects (Tipo, Stack) over time.
@@ -215,7 +215,7 @@ async function seedBoard() {
     const labelled = (scope, caption) => scope.locator("label").filter({ has: page.getByText(caption, { exact: true }) }).locator("select");
     await labelled(fresh, "Prioridade").selectOption("High");
     await labelled(fresh, "Effort").selectOption("Low");
-    await fresh.getByPlaceholder("Escrever nota (opcional)...").fill("[TESTE] primeira nota");
+    await fresh.getByPlaceholder("Write a Comment (optional)...").fill("[TESTE] primeira nota");
     await btn(fresh, "Salvar").click();
     await page.getByText("[TESTE] criado pelo Scrum Master").first().waitFor({ timeout: 15000 });
     await sleep(1500);
@@ -241,7 +241,7 @@ async function seedBoard() {
     // ------------------------------------------------ edit own item, on its card in Open
     const own = openCard("[TESTE] criado pelo Scrum Master");
     await btn(own, "Editar").click();
-    const editing = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
+    const editing = page.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])');
     await editing.locator("input").first().fill("[TESTE] criado e editado pelo SM");
     // A bug: unplanned later, the item goes back to the bug type lane (the server picks it by the item's type).
     await labelled(editing, "Tipo").selectOption("bug");
@@ -251,12 +251,33 @@ async function seedBoard() {
     const { data: edited } = await svc.from("roadmap_items").select("title, tipo").eq("id", created.id).single();
     expect("edit own item: the new title and the type bug are saved", edited.title === "[TESTE] criado e editado pelo SM" && edited.tipo === "bug", JSON.stringify(edited));
 
+    // ------------------------------------------------ Comments (issue #23): whoever wrote one edits and deletes it
+    const myComment = openCard("[TESTE] criado e editado pelo SM").locator("[data-comment-id]", { hasText: "[TESTE] primeira nota" });
+    expect("Comment: shows its author and, to whoever wrote it, Edit and Delete",
+      (await count(btn(myComment, "Edit"))) === 1 && (await count(btn(myComment, "Delete"))) === 1);
+    await btn(myComment, "Edit").click();
+    await myComment.getByLabel("Edit Comment").fill("[TESTE] primeira nota, editada");
+    await btn(myComment, "Save").click();
+    await page.getByText("[TESTE] primeira nota, editada").first().waitFor({ timeout: 15000 });
+    await sleep(500);
+    const { data: editedNote } = await svc.from("item_notes").select("body, updated_at, deleted_at").eq("item_id", created.id);
+    expect("Comment: the edit is saved with its time, to go to the issue on the next sync",
+      editedNote.length === 1 && editedNote[0].body === "[TESTE] primeira nota, editada" && editedNote[0].updated_at && !editedNote[0].deleted_at, JSON.stringify(editedNote));
+    expect("Comment: an edited one says so", (await count(openCard("[TESTE] criado e editado pelo SM").locator("[data-comment-id]", { hasText: "edited" }))) === 1);
+    const editedComment = openCard("[TESTE] criado e editado pelo SM").locator("[data-comment-id]", { hasText: "[TESTE] primeira nota, editada" });
+    await btn(editedComment, "Delete").click();
+    expect("Comment: Delete asks first, in the card", (await count(editedComment.getByText("Delete this Comment?"))) === 1);
+    await btn(editedComment, "Delete").click();
+    await editedComment.waitFor({ state: "detached", timeout: 15000 });
+    const { data: gone } = await svc.from("item_notes").select("id").eq("item_id", created.id);
+    expect("Comment: one never sent to GitHub is deleted at once", gone.length === 0, JSON.stringify(gone));
+
     // ------------------------------------------------ seeded item: note + priority only, on its card in Open
-    await btn(openCard("[TESTE] item semeado (sem dono)"), "+ nota").click();
-    const noting = page.locator('div[draggable="false"]:has(input[placeholder^="Escrever nota"])');
+    await btn(openCard("[TESTE] item semeado (sem dono)"), "+ Comment").click();
+    const noting = page.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])');
     expect("seeded item: the edit panel has NO title/description/produto fields", (await count(noting.getByText("Título", { exact: true }))) === 0 && (await count(noting.getByText("Descrição", { exact: true }))) === 0);
     await labelled(noting, "Prioridade").selectOption("Critical");
-    await noting.getByPlaceholder("Escrever nota (opcional)...").fill("[TESTE] nota no item semeado");
+    await noting.getByPlaceholder("Write a Comment (optional)...").fill("[TESTE] nota no item semeado");
     await btn(noting, "Salvar").click();
     await page.getByText("[TESTE] nota no item semeado").first().waitFor({ timeout: 15000 });
     await sleep(1000);

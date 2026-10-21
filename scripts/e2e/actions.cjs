@@ -90,8 +90,17 @@ async function call(ctx, id, args, pagePath) {
     // "+ Novo item" puts an item in a type lane, never a week: no item of this run, in any lane, comes from nobody.
     expect("nobody signed in -> no item was created", (await svc.from("roadmap_items").select("id").gte("created_at", t0).not("created_by", "in", `(${L.ids.admin},${L.ids.sm})`)).data.length === 0);
 
+    // A Comment the admin wrote (issue #23): only its author and the admin edit or delete it.
+    const adminNote = (await svc.from("item_notes").insert({ item_id: L.ids.adminItem, author_id: L.ids.admin, author_role: "scrum_master", body: "[TESTE] comment do admin" }).select("id").single()).data.id;
+    const adminNoteIntact = async () => {
+      const { data } = await svc.from("item_notes").select("body, deleted_at").eq("id", adminNote);
+      return data.length === 1 && data[0].body === "[TESTE] comment do admin" && !data[0].deleted_at;
+    };
+
     // ------------------------------------------------------------------ DEV
     const devDenied = [
+      ["editItemComment (the admin's Comment)", A.editItemComment, [adminNote, "[TESTE] forjado"], "/roadmap"],
+      ["deleteItemComment (the admin's Comment)", A.deleteItemComment, [adminNote], "/roadmap"],
       ["createRoadmapItem", A.createRoadmapItem, [], "/roadmap"],
       ["deleteRoadmapItem (admin's item)", A.deleteRoadmapItem, [L.ids.adminItem], "/roadmap"],
       ["moveRoadmapItemLane (SM's item)", A.moveRoadmapItemLane, [L.ids.smItem, "zz-test-b"], "/roadmap"],
@@ -178,6 +187,8 @@ async function call(ctx, id, args, pagePath) {
 
     // ------------------------------------------------------------------ SCRUM MASTER
     const smDenied = [
+      ["editItemComment (the admin's Comment)", A.editItemComment, [adminNote, "[TESTE] forjado"], "/roadmap"],
+      ["deleteItemComment (the admin's Comment)", A.deleteItemComment, [adminNote], "/roadmap"],
       ["deleteRoadmapItem (admin's item)", A.deleteRoadmapItem, [L.ids.adminItem], "/roadmap"],
       ["moveRoadmapItemLane (admin's item)", A.moveRoadmapItemLane, [L.ids.adminItem, "zz-test-b"], "/roadmap"],
       ["moveRoadmapItemLane to the Kanban, unplanning it (admin's item)", A.moveRoadmapItemLane, [L.ids.adminItem, "kanban"], "/roadmap"],
@@ -192,6 +203,7 @@ async function call(ctx, id, args, pagePath) {
       const r = await call(sm.context, id, args, p);
       expect(`scrum master -> ${name}: refused`, r.kind === "error", `${r.kind} ${r.status}`);
     }
+    expect("dev and scrum master -> the admin's Comment is untouched", await adminNoteIntact());
     expect("scrum master -> nothing changed on the admin's and seeded items",
       (await itemRow(L.ids.adminItem)).prioridade === "Medium" && (await itemRow(L.ids.adminItem)).lane_id === lane &&
         (await itemRow(L.ids.seeded)).title === "[TESTE] item semeado (sem dono)" && (await profileRole(L.ids.dev)) === "dev");
