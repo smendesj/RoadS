@@ -388,7 +388,10 @@ export async function deleteRoadmapItem(itemId: string): Promise<void> {
   // the item back). If GitHub refuses, nothing is deleted: the item would come back with the next sync anyway.
   const number = Number(access.item.github_issue_url?.match(/github\.com\/Essencis-Labs\/GeoCloudAI\/issues\/(\d+)/i)?.[1]);
   const token = process.env.GITHUB_TOKEN;
-  if (number && token && !isTestData(access.item.title)) await closeIssueAsNotPlanned(token, number, deletionComment(actor.realRole));
+  if (number && token && !isTestData(access.item.title)) {
+    const { data: profile } = await supabase.from("profiles").select("github_login").eq("id", actor.userId).single();
+    await closeIssueAsNotPlanned(token, number, deletionComment(actor.realRole, (profile?.github_login as string | null | undefined) ?? null));
+  }
 
   // Queued before the delete so the row still exists for the FK; item_id then goes null via
   // "on delete set null" and the payload keeps the id for FrontlightS.

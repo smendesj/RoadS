@@ -149,9 +149,10 @@ export function storedStatus(choice: SelectorStatus, inCurrentSprint: boolean): 
   return { status: choice, move: null };
 }
 
-/** The Comment a Delete leaves on the issue it closes; the profile has no name, so it names the role. */
-export function deletionComment(role: "admin" | "scrum_master"): string {
-  return `Deleted in RoadS by ${role === "admin" ? "an admin" : "a scrum master"}: this issue was closed as not planned.`;
+/** The Comment a Delete leaves on the issue it closes: who deleted it, by the profile's GitHub login, else by the role. */
+export function deletionComment(role: "admin" | "scrum_master", login: string | null): string {
+  const who = login ? `@${login}` : role === "admin" ? "an admin" : "a scrum master";
+  return `Deleted in RoadS by ${who}: this issue was closed as not planned.`;
 }
 
 /** Who may write to GitHub through a sync: scrum masters, admins and the daily cron. A dev's press only pulls. */

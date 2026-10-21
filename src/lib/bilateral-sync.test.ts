@@ -180,9 +180,14 @@ test("choosing Development or Open stores Open and moves the item into or out of
   assert.deepEqual(storedStatus("Done", false), { status: "Done", move: null });
 });
 
-test("the Comment of a Delete says who deleted the item and that the issue was closed as not planned", () => {
-  assert.equal(deletionComment("admin"), "Deleted in RoadS by an admin: this issue was closed as not planned.");
-  assert.equal(deletionComment("scrum_master"), "Deleted in RoadS by a scrum master: this issue was closed as not planned.");
+test("the Comment of a Delete names who deleted the item by the profile's GitHub login", () => {
+  assert.equal(deletionComment("admin", "ana-y"), "Deleted in RoadS by @ana-y: this issue was closed as not planned.");
+  assert.equal(deletionComment("scrum_master", "bia-z"), "Deleted in RoadS by @bia-z: this issue was closed as not planned.");
+});
+
+test("a profile with no GitHub login is named by its role in the Comment of a Delete", () => {
+  assert.equal(deletionComment("admin", null), "Deleted in RoadS by an admin: this issue was closed as not planned.");
+  assert.equal(deletionComment("scrum_master", null), "Deleted in RoadS by a scrum master: this issue was closed as not planned.");
 });
 
 // ---- Week (S5): the Monday of the item's week, the board's date field Week
