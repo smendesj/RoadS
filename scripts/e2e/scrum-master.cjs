@@ -269,8 +269,8 @@ async function seedBoard() {
     expect("Comment: Delete asks first, in the card", (await count(editedComment.getByText("Delete this Comment?"))) === 1);
     await btn(editedComment, "Delete").click();
     await editedComment.waitFor({ state: "detached", timeout: 15000 });
-    const { data: gone } = await svc.from("item_notes").select("id").eq("item_id", created.id);
-    expect("Comment: one never sent to GitHub is deleted at once", gone.length === 0, JSON.stringify(gone));
+    const { data: noteLeft } = await svc.from("item_notes").select("id").eq("item_id", created.id);
+    expect("Comment: one never sent to GitHub is deleted at once", noteLeft.length === 0, JSON.stringify(noteLeft));
 
     // ------------------------------------------------ seeded item: note + priority only, on its card in Open
     await btn(openCard("[TESTE] item semeado (sem dono)"), "+ Comment").click();
