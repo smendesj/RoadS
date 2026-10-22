@@ -76,7 +76,7 @@ const { BASE, expect, sleep, svc } = L;
         expect(`roadmap: ${label} ${where} is draggable with Edit and Delete`, (await c.getAttribute("draggable")) === "true" && (await count(btn(c, "Edit"))) === 1 && (await count(btn(c, "Delete"))) === 1);
       }
     }
-    expect("roadmap: no 'Config' tab missing, and the subtitle is the editor one", (await count(page.getByText(/decide what goes in and when/))) === 1);
+    expect("roadmap: no subtitle and no drag hint under the title", (await count(page.getByText(/decide what goes in|Drag a card from Open/))) === 0);
 
     // edit the Scrum Master's item (title) and the seeded item (title: only admin may)
     await btn(card("[TESTE] item do scrum master"), "Edit").click();

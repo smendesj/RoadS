@@ -88,7 +88,7 @@ async function seedBoard() {
     const count = (loc) => loc.count();
     const open = page.locator('[data-kanban-column="open"]');
     const done = page.locator('[data-kanban-column="done"]');
-    expect("roadmap: subtitle offers 'decide what goes in and when'", (await count(page.getByText(/decide what goes in and when/))) === 1);
+    expect("roadmap: no subtitle and no drag hint under the title", (await count(page.getByText(/decide what goes in|Drag a card from Open/))) === 0);
     expect("roadmap: 'Sync' is available", (await count(page.getByRole("button", { name: /^Sync$/ }))) === 1);
     expect("roadmap: one '+ New item', in the Kanban's Open, none in any week",
       (await count(page.getByRole("button", { name: "+ New item" }))) === 1 && (await count(open.getByRole("button", { name: "+ New item" }))) === 1 &&
@@ -184,7 +184,7 @@ async function seedBoard() {
     const W = await L.weeks();
     {
       const row = page.locator('[data-drag-scroll="x"] > [data-lane-id]');
-      const shown = await row.evaluateAll((lanes) => lanes.map((l) => ({ id: l.dataset.laneId, virtual: l.hasAttribute("data-virtual"), title: l.querySelector(":scope > div > div")?.textContent?.trim() ?? "", current: l.getAttribute("aria-current") })));
+      const shown = await row.evaluateAll((lanes) => lanes.map((l) => ({ id: l.dataset.laneId, virtual: l.hasAttribute("data-virtual"), title: l.querySelector("[data-lane-title]")?.textContent?.trim() ?? "", current: l.getAttribute("aria-current") })));
       const expected = W.real.map((l) => ({ id: l.id, start: l.start_date, virtual: false }));
       for (let m = W.monday; m <= W.trailing; m = L.addDays(m, 7)) if (!W.holds(m)) expected.push({ id: L.weekId(m), start: m, virtual: true });
       expected.sort((a, b) => a.start.localeCompare(b.start));

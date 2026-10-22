@@ -711,5 +711,5 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       console.log(`cleanup of the synthetic reports failed: ${L.scrub(e && e.message ? e.message : e).slice(0, 120)}`);
     }
   }
-  process.exit(L.summary("PROGRESS REPORT (Board report)") ? 1 : 0);
+  process.exit(L.summary("PROGRESS REPORT (Report)") ? 1 : 0);
 })();
