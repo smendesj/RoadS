@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { KANBAN } from "@/lib/issue-lane";
 import { dropMove, edgeScrollSpeed, LONG_PRESS_MS, pressAfterMove, pressAfterTime, touchOwnsDrag, type PressState } from "@/lib/touch-drag";
 
@@ -12,6 +12,9 @@ import { dropMove, edgeScrollSpeed, LONG_PRESS_MS, pressAfterMove, pressAfterTim
 // data-item-id (the one a dropped card goes before); the Kanban's Open carries data-unplan-target (a card dropped there
 // lands on KANBAN, before no card: the Roadmap unplans it); a scrolling area that should follow the finger near its
 // edges carries data-drag-scroll="x" or "y" (the page itself always does).
+//
+// The lane and card under the finger change at every week it crosses: they live in a small store (TouchHover), not in
+// the Roadmap's state, so only the lane and the card that light up or go dark render again (useTouchHover).
 
 type Press = {
   itemId: string;
@@ -31,20 +34,38 @@ type Press = {
   offsetY: number;
   frame: number;
   snapped: { el: HTMLElement; value: string }[];
+  /** Since when the finger has stayed in an edge zone of each scrolling area, and which edge (edgeScrollSpeed's heldMs). */
+  edges: Map<HTMLElement | Window, { side: number; since: number }>;
 };
 
-type Ports = {
-  setLifted(id: string | null): void;
-  setOver(lane: string | null): void;
-  setBefore(card: string | null): void;
+/** The lane under the finger carrying a card, and the card under it there (the one the card would go before). */
+export type TouchSpot = { over: string | null; before: string | null };
+
+export type TouchHover = {
+  get(): TouchSpot;
+  subscribe(listener: () => void): () => void;
 };
+
+const NOWHERE: TouchSpot = { over: null, before: null };
 
 // Built once per Roadmap (the listeners it adds must be the very functions it later removes).
-function touchDragController({ setLifted, setOver, setBefore }: Ports) {
+function touchDragController(setLifted: (id: string | null) => void) {
   let press: Press | null = null;
   let drop: (itemId: string, toLane: string, beforeId: string | null) => void = () => {};
-  let over: string | null = null;
-  let before: string | null = null;
+  let spot: TouchSpot = NOWHERE;
+  const listeners = new Set<() => void>();
+  const hover: TouchHover = {
+    get: () => spot,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  const setSpot = (next: TouchSpot) => {
+    if (next.over === spot.over && next.before === spot.before) return;
+    spot = next;
+    for (const listener of listeners) listener();
+  };
   let lastTouchAt: number | null = null;
 
   // The lane under the finger, and the card under it in that lane (the copy that follows the finger lets the touch
@@ -62,32 +83,43 @@ function touchDragController({ setLifted, setOver, setBefore }: Ports) {
     press.x = x;
     press.y = y;
     if (press.ghost) press.ghost.style.transform = `translate(${x - press.offsetX}px, ${y - press.offsetY}px) scale(1.03)`;
-    const spot = spotAt(x, y);
-    if (spot.lane !== over) {
-      over = spot.lane;
-      setOver(spot.lane);
+    const at = spotAt(x, y);
+    setSpot({ over: at.lane, before: at.card });
+  };
+
+  // The step for one scrolling area, faster the longer the finger has stayed at the same edge of it; leaving the
+  // edge, or turning to the other one, starts again from the base pace.
+  const stepFor = (p: Press, area: HTMLElement | Window, pos: number, start: number, end: number, now: number) => {
+    const side = Math.sign(edgeScrollSpeed(pos, start, end));
+    const held = p.edges.get(area);
+    if (!side) {
+      p.edges.delete(area);
+      return 0;
     }
-    if (spot.card !== before) {
-      before = spot.card;
-      setBefore(spot.card);
-    }
+    if (held?.side !== side) p.edges.set(area, { side, since: now });
+    return edgeScrollSpeed(pos, start, end, now - (held?.side === side ? held.since : now));
   };
 
   // While the card is up, the areas under the finger scroll toward an edge it comes near.
   const scrollLoop = () => {
     if (!press || press.state !== "active") return;
     if (!press.card.isConnected) return end(false); // the card left the page (a reload replaced it)
+    const now = performance.now();
+    const under = new Set<HTMLElement | Window>([window]);
     let el = document.elementFromPoint(press.x, press.y) as HTMLElement | null;
     while (el) {
       const axis = el.dataset?.dragScroll;
       if (axis) {
+        under.add(el);
         const r = el.getBoundingClientRect();
-        if (axis === "x") el.scrollLeft += edgeScrollSpeed(press.x, r.left, r.right);
-        if (axis === "y") el.scrollTop += edgeScrollSpeed(press.y, r.top, r.bottom);
+        if (axis === "x") el.scrollLeft += stepFor(press, el, press.x, r.left, r.right, now);
+        if (axis === "y") el.scrollTop += stepFor(press, el, press.y, r.top, r.bottom, now);
       }
       el = el.parentElement;
     }
-    const pageStep = edgeScrollSpeed(press.y, 0, window.innerHeight);
+    // An area the finger left keeps no hold time: coming back, it starts at the base pace.
+    for (const area of press.edges.keys()) if (!under.has(area)) press.edges.delete(area);
+    const pageStep = stepFor(press, window, press.y, 0, window.innerHeight, now);
     if (pageStep) window.scrollBy(0, pageStep);
     track(press.x, press.y);
     press.frame = requestAnimationFrame(scrollLoop);
@@ -185,13 +217,10 @@ function touchDragController({ setLifted, setOver, setBefore }: Ports) {
     document.removeEventListener("contextmenu", onContextMenu);
     document.removeEventListener("touchstart", onAnotherFinger);
     // A card that left the page mid-gesture (a reload replaced it) never drops anywhere.
-    const spot = dropIt && p.card.isConnected ? spotAt(p.x, p.y) : { lane: null, card: null };
-    over = null;
-    before = null;
-    setOver(null);
-    setBefore(null);
+    const at = dropIt && p.card.isConnected ? spotAt(p.x, p.y) : { lane: null, card: null };
+    setSpot(NOWHERE);
     setLifted(null);
-    const move = dropMove(p.itemId, p.from, spot.lane, spot.card);
+    const move = dropMove(p.itemId, p.from, at.lane, at.card);
     if (move) drop(p.itemId, move.to, move.before);
   }
 
@@ -220,6 +249,7 @@ function touchDragController({ setLifted, setOver, setBefore }: Ports) {
       offsetY: 0,
       frame: 0,
       snapped: [],
+      edges: new Map(),
     };
     target.addEventListener("touchmove", onMove as EventListener, { passive: false });
     target.addEventListener("touchend", onEnd as EventListener, { passive: false });
@@ -230,6 +260,7 @@ function touchDragController({ setLifted, setOver, setBefore }: Ports) {
 
   return {
     start,
+    hover,
     cancel: () => end(false),
     /** True right after a finger held a card: a browser drag then is the browser's own long press (touchOwnsDrag). */
     // While a finger is on a card, however long it holds, the browser's drag is its long press; just after, too.
@@ -247,9 +278,7 @@ const noop = () => {};
 
 export function useTouchDrag(onDrop: (itemId: string, toLane: string, beforeId: string | null) => void) {
   const [lifted, setLifted] = useState<string | null>(null);
-  const [over, setOver] = useState<string | null>(null);
-  const [before, setBefore] = useState<string | null>(null);
-  const [controller] = useState(() => touchDragController({ setLifted, setOver, setBefore }));
+  const [controller] = useState(() => touchDragController(setLifted));
   useEffect(() => {
     controller.onDrop(onDrop);
   });
@@ -260,5 +289,10 @@ export function useTouchDrag(onDrop: (itemId: string, toLane: string, beforeId: 
       controller.cancel();
     };
   }, [controller]);
-  return { start: controller.start, touchOwnsDrag: controller.touchOwnsDrag, lifted, over, before };
+  return { start: controller.start, touchOwnsDrag: controller.touchOwnsDrag, lifted, hover: controller.hover };
+}
+
+/** What a part of the screen reads from the spot under the finger; it renders again only when `select`'s answer changes. */
+export function useTouchHover<T>(hover: TouchHover, select: (spot: TouchSpot) => T): T {
+  return useSyncExternalStore(hover.subscribe, () => select(hover.get()), () => select(NOWHERE));
 }

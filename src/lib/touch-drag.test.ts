@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dropMove, edgeScrollSpeed, LONG_PRESS_MS, MOVE_TOLERANCE_PX, pressAfterMove, pressAfterTime, touchOwnsDrag } from "./touch-drag.ts";
+import { dropMove, EDGE_RAMP_MS, edgeScrollSpeed, LONG_PRESS_MS, MOVE_TOLERANCE_PX, pressAfterMove, pressAfterTime, TOP_SCROLL_PX, touchOwnsDrag } from "./touch-drag.ts";
 
 test("holding a card still for 250 ms lifts it", () => {
   assert.equal(LONG_PRESS_MS, 250);
@@ -31,6 +31,19 @@ test("near an edge the area scrolls toward it, faster the closer the finger; in 
   assert.equal(edgeScrollSpeed(400, 0, 400), 18);
   assert.equal(edgeScrollSpeed(-30, 0, 400), -18, "past the edge never goes faster than the cap");
   assert.equal(edgeScrollSpeed(450, 0, 400), 18);
+});
+
+test("held at an edge, the area speeds up over a second to 80 px per frame; just arrived, it keeps the base pace", () => {
+  // The same strip; the fourth argument is how long the finger has stayed in that edge zone.
+  assert.equal(EDGE_RAMP_MS, 1_000);
+  assert.equal(TOP_SCROLL_PX, 80);
+  assert.equal(edgeScrollSpeed(400, 0, 400, 0), 18, "just arrived: the base pace");
+  assert.equal(edgeScrollSpeed(400, 0, 400, 500), 49, "half a second in: half way from 18 to 80");
+  assert.equal(edgeScrollSpeed(400, 0, 400, 1_000), 80);
+  assert.equal(edgeScrollSpeed(400, 0, 400, 10_000), 80, "never faster than the top pace");
+  assert.equal(edgeScrollSpeed(0, 0, 400, 1_000), -80, "toward the start too");
+  assert.equal(edgeScrollSpeed(372, 0, 400, 1_000), 40, "half way into the edge zone: half the top pace");
+  assert.equal(edgeScrollSpeed(200, 0, 400, 10_000), 0, "in the middle it stays put, however long the finger stays");
 });
 
 test("dropping on another sprint or group moves the card; on its own card, or on nothing, it goes back and nothing is saved", () => {
