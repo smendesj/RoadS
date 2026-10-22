@@ -11,7 +11,6 @@ const PUBLIC_ACTIONS: Record<string, string[]> = {
   "account.ts": ["completePasswordReset"],
   "admin.ts": ["listUsersForConfig", "resetUserPassword", "setUserGithubLogin", "updateUserRole"],
   "assignees.ts": ["listAssignableProfiles"],
-  "comments.ts": ["deleteItemComment", "editItemComment"],
   "dashboard.ts": ["getDashboard", "syncDashboard"],
   "progress.ts": ["markProgressReportSent", "saveProgressEdit", "setProgressChecked"],
   "roadmap.ts": ["createRoadmapItem", "deleteRoadmapItem", "getRoadmapBoard", "moveRoadmapItemLane", "saveRoadmapItemEdit"],

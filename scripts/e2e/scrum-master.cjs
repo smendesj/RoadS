@@ -352,10 +352,15 @@ async function seedBoard() {
     expect("seeded item: the edit panel has NO title/description/produto fields", (await count(noting.getByText("Title", { exact: true }))) === 0 && (await count(noting.getByText("Description", { exact: true }))) === 0);
     await labelled(noting, "Priority").selectOption("Critical");
     await noting.getByPlaceholder("Write a Comment (optional)...").fill("[TESTE] nota no item semeado");
+    // The card shows no Comment (issue #34), and the panel closes before the save is sent: the row is read once the
+    // server action that carries the item has answered (it may wait behind another action of the page).
+    const seededSaved = page.waitForResponse((r) => {
+      const q = r.request();
+      return q.method() === "POST" && !!q.headers()["next-action"] && (q.postData() ?? "").includes(L.ids.seeded) && (q.postData() ?? "").includes("[TESTE] nota no item semeado");
+    }, { timeout: 20000 });
     await btn(noting, "Save").click();
-    // The card shows no Comment (issue #34): the save is seen by the panel closing, then the row is read.
+    await seededSaved;
     await noting.waitFor({ state: "detached", timeout: 15000 });
-    await sleep(1000);
     const { data: sRow } = await svc.from("roadmap_items").select("title, prioridade, field_changed_at").eq("id", L.ids.seeded).single();
     const { data: sNotes } = await svc.from("item_notes").select("author_role").eq("item_id", L.ids.seeded);
     expect("seeded item: priority changed, title untouched, note stored as scrum_master", sRow.prioridade === "Critical" && sRow.title === "[TESTE] item semeado (sem dono)" && sNotes.length === 1 && sNotes[0].author_role === "scrum_master", JSON.stringify([sRow, sNotes]));
@@ -872,8 +877,9 @@ async function seedBoard() {
       await sleep(2000);
       expect("unplan: the Open card dropped back on Open changes nothing (the item stays in its week)", (await laneOfItem(created.id)) === "zz-test-sprint", await laneOfItem(created.id));
 
+      const unplanned = moveAnswer(created.id, "kanban");
       await mouseDrag(card(title), open);
-      await sleep(2500);
+      await unplanned;
       expect("unplan (drag from the week to the Kanban): the item is saved in the bug type lane, out of the week", (await laneOfItem(created.id)) === "tipo-bug", await laneOfItem(created.id));
       const { data: q } = await svc.from("roadmap_sync_queue").select("payload").eq("item_id", created.id).eq("action", "move_lane").gte("created_at", since);
       const moves = (q ?? []).map((r) => r.payload);
