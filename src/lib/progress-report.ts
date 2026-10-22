@@ -230,7 +230,8 @@ export type ProgressReportRow = {
 export type LintIssue = { code: string; message: string };
 /** "geral" is the plain-language text for the CEO; "ia" is the usage section, where "token" is allowed. */
 export type LintSection = "geral" | "ia";
-export type EmailOptions = { visualUrl: string; shotUrls: string[]; roadsUrl: string };
+/** `beforeUrls[i]` is the link of the before of `content.shots[i]` (positional, like `shotUrls`); left out, no before is shown. */
+export type EmailOptions = { visualUrl: string; shotUrls: string[]; beforeUrls?: (string | undefined)[]; roadsUrl: string };
 export type EmailBuild = { html: string; text: string };
 
 /* ---------- Public image links (fetched by an e-mail client: no cookies, unguessable token) ---------- */

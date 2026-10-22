@@ -341,6 +341,73 @@ test("a placed print carries its before's link, checked like its own; a print wi
   assert.equal(placeShots(rich({ shots: [pair] }), ["/a.png"], safe).shotsOf(1)[0].before, null);
 });
 
+/* ---------- a print with its before ---------- */
+
+const BEFORE_PATH = `${"e".repeat(64)}.png`;
+const paired = (n: number, caption?: string) => ({ ...shot(n, caption), issue: 1, before: { mime: "image/png" as const, path: BEFORE_PATH } });
+const shotUrl = (n: number) => `${ORIGIN}/api/progress-report/${TOKEN}/abc/shot-${n}.jpg`;
+const beforeUrl = (n: number) => `${ORIGIN}/api/progress-report/${TOKEN}/abc/shot-${n}-before.png`;
+const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+
+test("a print with a before shows both open: the before above with the label 'antes', then the print and its caption", () => {
+  const out = html(rich({ shots: [paired(1)] }), { ...OPTIONS, shotUrls: [shotUrl(1)], beforeUrls: [beforeUrl(1)] });
+  assert.ok(at(out, "Entrega de teste 1") < at(out, ">antes<"));
+  assert.ok(at(out, ">antes<") < at(out, `src="${beforeUrl(1)}"`));
+  assert.ok(at(out, `src="${beforeUrl(1)}"`) < at(out, `src="${shotUrl(1)}"`));
+  assert.ok(at(out, `src="${shotUrl(1)}"`) < at(out, ">Legenda do print 1<") && at(out, ">Legenda do print 1<") < at(out, "Entrega de teste 2"));
+  // Both pictures have the print's width and a filled alt that tells them apart.
+  const before = out.match(new RegExp(`<img src="${literal(beforeUrl(1))}"[^>]*>`))?.[0] ?? "";
+  assert.match(before, /width="544"/);
+  assert.match(before, /alt="Antes: Legenda do print 1"/);
+  assert.match(out, new RegExp(`<img src="${literal(shotUrl(1))}"[^>]*alt="Legenda do print 1"`));
+  // The caption is said once, under the print.
+  assert.equal(out.split(">Legenda do print 1<").length, 2);
+  // A before with no caption still gets an alt.
+  const unnamed = html(rich({ shots: [paired(1, "")] }), { ...OPTIONS, shotUrls: [shotUrl(1)], beforeUrls: [beforeUrl(1)] });
+  assert.ok(unnamed.includes(`src="${beforeUrl(1)}"`));
+  for (const tag of unnamed.match(/<img\b[^>]*>/g) ?? []) assert.match(tag, /\salt="[^"]+"/);
+});
+
+test("a print without a before is byte for byte as before, whatever beforeUrls says", () => {
+  const plain = rich({ shots: [{ ...shot(1), issue: 1 }, shot(2)] });
+  const urls = [shotUrl(1), shotUrl(2)];
+  const without = buildEmail(plain, { ...OPTIONS, shotUrls: urls });
+  assert.deepEqual(buildEmail(plain, { ...OPTIONS, shotUrls: urls, beforeUrls: [beforeUrl(1), beforeUrl(2)] }), without);
+  assert.ok(!without.html.includes(">antes<") && !without.text.includes("antes"));
+});
+
+test("an unsafe before link is dropped without a hole: no label, no empty picture, the print as without a before", () => {
+  const c = rich({ shots: [paired(1)] });
+  const alone = html(rich({ shots: [{ ...shot(1), issue: 1 }] }), { ...OPTIONS, shotUrls: [shotUrl(1)] });
+  for (const bad of ["javascript:alert(1)", "http://x.example/a.png", "//x.example/a.png", ""]) {
+    assert.equal(html(c, { ...OPTIONS, shotUrls: [shotUrl(1)], beforeUrls: [bad] }), alone, bad);
+  }
+  assert.equal(html(c, { ...OPTIONS, shotUrls: [shotUrl(1)] }), alone, "no beforeUrls at all");
+  // A before whose print has no link is not shown alone.
+  assert.ok(!html(c, { ...OPTIONS, shotUrls: [], beforeUrls: [beforeUrl(1)] }).includes("before.png"));
+});
+
+test("the cap of forty counts a print and its before once", () => {
+  const shots = Array.from({ length: 41 }, (_, i) => paired(i + 1));
+  const out = html(rich({ shots }), {
+    ...OPTIONS,
+    shotUrls: shots.map((_, i) => shotUrl(i + 1)),
+    beforeUrls: shots.map((_, i) => beforeUrl(i + 1)),
+  });
+  assert.ok(out.includes(`src="${shotUrl(40)}"`) && out.includes(`src="${beforeUrl(40)}"`));
+  assert.ok(!out.includes("shot-41.jpg") && !out.includes("shot-41-before.png"));
+  assert.equal(out.split(">antes<").length - 1, 40);
+});
+
+test("the text version names the before on its own line, right before the print's line", () => {
+  const c = rich({ shots: [paired(1), { ...shot(2), issue: 1 }] });
+  const t = text(c, { ...OPTIONS, shotUrls: [shotUrl(1), shotUrl(2)], beforeUrls: [beforeUrl(1), beforeUrl(2)] });
+  assert.ok(t.includes("  Print (antes): Legenda do print 1\n  Print: Legenda do print 1\n  Print: Legenda do print 2\n"));
+  assert.ok(!t.includes("Print (antes): Legenda do print 2"));
+  const dropped = text(c, { ...OPTIONS, shotUrls: [shotUrl(1), shotUrl(2)], beforeUrls: ["javascript:x"] });
+  assert.ok(!dropped.includes("Print (antes)"));
+});
+
 test("a print without a link, or a report without prints, leaves no hole", () => {
   assert.ok(!html(rich(), { ...OPTIONS, shotUrls: [] }).includes("Legenda do print"));
   assert.ok(!html(rich({ shots: [] })).includes("shot-1.jpg"));
