@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import type { Effort, Prioridade, Produto, RoadmapItem } from "@/lib/types";
 import { isStack, isTipo, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } from "@/lib/issue-fields";
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
@@ -34,6 +35,33 @@ function assigneeChoices(people: { login: string; name: string }[], current: str
 
 function peopleNames(people: { login: string; name: string }[]): Map<string, string> {
   return new Map(people.map((p) => [p.login.toLowerCase(), p.name]));
+}
+
+/** The card's text, at most three lines; a longer one has "Show more" to read it all, and "Show less" to fold it back. */
+function ClampedText({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  // Whether the folded text is cut, looked at again whenever the card's width changes it.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    const observer = new ResizeObserver(() => setOverflows(el.scrollHeight > el.clientHeight + 1));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [open]);
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      <p ref={ref} data-desc={open ? "open" : "folded"} className={`text-[13px] leading-snug text-rs-text-soft ${open ? "" : "line-clamp-3"}`}>
+        {text}
+      </p>
+      {(overflows || open) && (
+        <button type="button" data-desc-toggle onClick={() => setOpen(!open)} className="text-xs font-bold text-rs-brand-text">
+          {open ? ROADMAP.showLess : ROADMAP.showMore}
+        </button>
+      )}
+    </div>
+  );
 }
 
 export function ItemCard({
@@ -144,7 +172,7 @@ export function ItemCard({
         {item.state === "Blocker" && <span className={badgeClass("red")}>Blocker</span>}
       </div>
 
-      {item.desc && <p className="text-[13px] leading-snug text-rs-text-soft">{item.desc}</p>}
+      {item.desc && <ClampedText key={item.desc} text={item.desc} />}
 
       {item.assignees && item.assignees.length > 0 && (
         <p data-assignees-shown className="text-xs text-rs-text-soft">
@@ -168,15 +196,18 @@ export function ItemCard({
                   className="rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-base font-bold text-rs-text sm:text-xs"
                 />
               </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.description}</span>
-                <textarea
-                  value={content.description}
-                  onChange={(e) => setContent({ description: e.target.value })}
-                  rows={3}
-                  className="resize-y rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-base text-rs-text sm:text-xs"
-                />
-              </label>
+              {/* An item with an issue shows the issue's summary, which only GitHub changes (issue #28). */}
+              {!item.url && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.description}</span>
+                  <textarea
+                    value={content.description}
+                    onChange={(e) => setContent({ description: e.target.value })}
+                    rows={3}
+                    className="resize-y rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-base text-rs-text sm:text-xs"
+                  />
+                </label>
+              )}
               <div className="flex gap-2">
                 <label className="flex flex-1 flex-col gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.type}</span>

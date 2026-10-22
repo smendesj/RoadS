@@ -178,7 +178,8 @@ resumo, nunca os cartões do quadro. Quem monta: `src/lib/frontlights/sync.ts`.
 - **`roadmap.retitled`** (opcional, número): quantos títulos do Roadmap acompanharam a renomeação da issue no
   GitHub nesta sincronização (cada um vira um `modify` com `title` na fila). Ausente quando nenhum.
 - **`roadmap.fields`** (opcional, só contagens): a sincronização nos dois sentidos dos campos de cada item com a sua
-  issue (issue #22 do RoadS): Title, Description (a seção `## Solução` do corpo), Type (a label `type:`), Stack e
+  issue (issue #22 do RoadS): Title, Description (o primeiro parágrafo da seção `## Solução` do corpo, que desde a
+  issue #28 do RoadS só vem do GitHub: vazia quando o corpo não tem Solução, nunca escrita na issue), Type (a label `type:`), Stack e
   Priority (campos do Project) e Effort (o campo de issue da organização). `pulled`: valores trazidos do GitHub (cada item com algum vira um `modify` com
   os campos trazidos, nas chaves `title`, `description`, `tipo`, `stack`, `prioridade` e `effort`, e `reason`
   `"field follows the issue on GitHub"`); `pushed`: valores escritos no GitHub (com as labels `type:`, `area:` e

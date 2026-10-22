@@ -281,7 +281,9 @@ export async function saveRoadmapItemEdit(
     const title = input.content.title.trim();
     if (!title) throw new Error("title_required");
     update.title = title;
-    update.description = input.content.description.trim();
+    // An item with an issue shows the issue's summary, which only GitHub changes (issue #28): its Description stays as
+    // stored, for every role. A draft with no issue yet keeps an editable one.
+    update.description = access.item.github_issue_url ? access.item.description : input.content.description.trim();
     if (title !== access.item.title) changedAt.title = now;
     if (update.description !== access.item.description) changedAt.description = now;
     update.produto = input.content.produto;

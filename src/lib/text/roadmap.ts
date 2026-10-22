@@ -8,6 +8,8 @@ export const ROADMAP = {
   moveToPlaceholder: "Move to…",
   kanbanNoWeek: "Kanban (no week)",
   done: "Done",
+  showMore: "Show more",
+  showLess: "Show less",
   addComment: "+ Comment",
   newComment: "New Comment",
   commentPlaceholder: "Write a Comment (optional)...",

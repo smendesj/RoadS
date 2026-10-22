@@ -188,6 +188,42 @@ export function extractSolucao(body: string): string | null {
   return (next ? rest.slice(0, next.index) : rest).trim();
 }
 
+/**
+ * The card's summary of an issue (issue #28): the first paragraph of its Solução section, its wrapped lines joined by
+ * a space. The paragraph ends at a blank line, a list item or a heading; a Solução that opens with a list gives its
+ * first item's text, without the marker. Null without a Solução section. CRLF bodies read the same.
+ */
+export function extractResumo(body: string): string | null {
+  const solucao = extractSolucao(body.replace(/\r\n?/g, "\n"));
+  if (solucao === null) return null;
+  const lines: string[] = [];
+  for (const line of solucao.split("\n")) {
+    const text = line.trim();
+    if (!text || /^#{1,6}\s/.test(text)) break;
+    const item = /^(?:[-*+]|\d+[.)])\s+(.*)$/.exec(text);
+    if (item) {
+      if (!lines.length) lines.push(item[1].trim());
+      break;
+    }
+    lines.push(text);
+  }
+  return lines.join(" ");
+}
+
+/** Which synced fields an item writes to its issue: all but the Description, which only comes from GitHub (issue #28). */
+export function pushesToGitHub(field: string): boolean {
+  return field !== "description";
+}
+
+/**
+ * The Description a sync brings to an item with an issue: the issue's summary ("" when its body has no Solução),
+ * whatever RoadS holds, a text edited there too; null when the item already holds it.
+ */
+export function descriptionPull(stored: string, body: string): string | null {
+  const resumo = extractResumo(body) ?? "";
+  return resumo === stored ? null : resumo;
+}
+
 /** The body with the Solução section's text replaced (or the section added at the end); nothing else changes. */
 export function replaceSolucao(body: string, text: string): string {
   const head = SOLUCAO.exec(body);
