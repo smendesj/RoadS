@@ -21,6 +21,9 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 // A print of this suite: made-up bytes that start like a PNG. Stored under the hash of its bytes, like any print.
 const E2E_SHOT = Buffer.concat([PNG_SIGNATURE, Buffer.from(`${MARK} print do e2e do Resumo`)]);
 const E2E_SHOT_PATH = `${crypto.createHash("sha256").update(E2E_SHOT).digest("hex")}.png`;
+// The same screen before the change (#35): another made-up PNG, riding on the print above.
+const E2E_BEFORE = Buffer.concat([PNG_SIGNATURE, Buffer.from(`${MARK} print antes do e2e do Resumo`)]);
+const E2E_BEFORE_PATH = `${crypto.createHash("sha256").update(E2E_BEFORE).digest("hex")}.png`;
 // The week of the synthetic sent report (2099-02-02 is a Monday); the presentation puts it together.
 const WEEK = "2099-02-02";
 // The synthetic reports are of another product, so the week's address names it (GeoCloud is the default).
@@ -232,11 +235,13 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     expect("prints door: a print is stored under the hash of its bytes", stored.status === 200 && storedBody.path === E2E_SHOT_PATH && storedBody.mime === "image/png", `${stored.status} ${storedBody.path}`);
     const again = await postShot({ data: E2E_SHOT.toString("base64") });
     expect("prints door: the same print again is fine (stored once)", again.status === 200 && (await again.json()).path === E2E_SHOT_PATH, String(again.status));
+    const storedBefore = await postShot({ data: E2E_BEFORE.toString("base64") });
+    expect("prints door: a print's before goes up the same way, under the hash of its bytes", storedBefore.status === 200 && (await storedBefore.json()).path === E2E_BEFORE_PATH, String(storedBefore.status));
     // The draft now shows that print under its first delivery (what a push with captions.json would do).
     const draftContent = (await row(draft.id)).content;
     const shotted = await svc
       .from("progress_reports")
-      .update({ content: { ...draftContent, shots: [{ id: "shot-1", caption: `${MARK} Tela da primeira entrega`, mime: "image/png", issue: 9001, path: E2E_SHOT_PATH }] } })
+      .update({ content: { ...draftContent, shots: [{ id: "shot-1", caption: `${MARK} Tela da primeira entrega`, mime: "image/png", issue: 9001, path: E2E_SHOT_PATH, before: { mime: "image/png", path: E2E_BEFORE_PATH } }] } })
       .eq("id", draft.id)
       .select("id");
     expect("prints door: the draft names the stored print", !shotted.error && shotted.data?.length === 1, shotted.error?.message ?? "");
@@ -264,6 +269,8 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     expect("attach: the print is added to the sent report", attached.status === 200 && attachedBody.added === 1 && attachedBody.existing === 0, `${attached.status} ${JSON.stringify(attachedBody)}`);
     const twice = await postAttach(sent.id, attachBody());
     expect("attach: the same print again adds nothing", twice.status === 200 && (await twice.json()).existing === 1, String(twice.status));
+    const lateBefore = await postAttach(sent.id, { shots: [{ ...attachBody().shots[0], before: { mime: "image/png", path: E2E_BEFORE_PATH } }] });
+    expect("attach: a before for a print the sent report already has is a 400 (the e-mail already showed it)", lateBefore.status === 400, String(lateBefore.status));
     const sentAfter = await row(sent.id);
     expect("attach: text, statuses, numbers, edits, stamps and link of the sent report are untouched", keep(sentAfter) === keep(sentBefore));
     // A second sent report in the same week (Thursday to Friday): the second delivery got done on Friday.
@@ -275,7 +282,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       // As the collector does: what was delivered before Friday's period comes along hidden.
       friday.entries[0].hidden = true;
       friday.entries[0].title = `${MARK} Primeira entrega, escondida na sexta`;
-      friday.shots = [{ id: "shot-1", caption: `${MARK} Tela da terceira entrega, na sexta`, mime: "image/png", issue: 9003, path: E2E_SHOT_PATH }];
+      friday.shots = [{ id: "shot-1", caption: `${MARK} Tela da terceira entrega, na sexta`, mime: "image/png", issue: 9003, path: E2E_SHOT_PATH, before: { mime: "image/png", path: E2E_BEFORE_PATH } }];
       const stamp = new Date().toISOString();
       const { data, error } = await svc
         .from("progress_reports")
@@ -326,6 +333,10 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     expect("public image: an unknown file under a real token is the very same 404 as an unknown token (nothing tells them apart)", strangeFile.status === 404 && strangeFile.body.equals(invented.body) && strangeFile.type === invented.type, `${strangeFile.status}`);
     const storedShot = await image(draft, "shot-1.png");
     expect("public image: a print kept in the bucket comes back byte for byte, with no cookie", storedShot.status === 200 && storedShot.type === "image/png" && storedShot.body.equals(E2E_SHOT) && !storedShot.cookie, `${storedShot.status} ${storedShot.type}`);
+    const storedBeforeShot = await image(draft, "shot-1-before.png");
+    expect("public image: a print's before comes back byte for byte at shot-<n>-before, with no cookie", storedBeforeShot.status === 200 && storedBeforeShot.type === "image/png" && storedBeforeShot.body.equals(E2E_BEFORE) && !storedBeforeShot.cookie, `${storedBeforeShot.status} ${storedBeforeShot.type}`);
+    const noSecondBefore = await image(draft, "shot-2-before.png");
+    expect("public image: a before the report does not have is the same 404", noSecondBefore.status === 404 && noSecondBefore.body.equals(invented.body), String(noSecondBefore.status));
     const noSecondShot = await image(draft, "shot-2.png");
     expect("public image: a print the report does not have is the same 404", noSecondShot.status === 404 && noSecondShot.body.equals(invented.body), String(noSecondShot.status));
     expect("public image: nosniff on every answer", [draftImage, sentImage, invented, malformed, strangeFile, storedShot].every((r) => r.nosniff === "nosniff"));
@@ -435,6 +446,28 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       );
       const fridaySrc = (await smPage.locator('[data-entry="9003"] [data-print] img').getAttribute("src")) ?? "";
       expect("scrum master -> a print of the Friday report comes by that report's own link", Boolean(fridayToken) && fridaySrc.includes(`/api/progress-report/${fridayToken}/`), fridaySrc);
+      const toggle = smPage.locator('[data-entry="9003"] [data-before-toggle]');
+      expect(
+        "scrum master -> a print with a before shows a closed 'antes' above it; a print without one shows none",
+        (await toggle.count()) === 1 && (await toggle.innerText()).includes("antes") && (await toggle.getAttribute("aria-expanded")) === "false" &&
+          (await smPage.locator("[data-print-before]").count()) === 0 && (await smPage.locator('[data-entry="9001"] [data-before-toggle]').count()) === 0
+      );
+      await toggle.click();
+      const beforeSrc = (await smPage.locator('[data-entry="9003"] [data-print-before] img').getAttribute("src")) ?? "";
+      const beforeAbove = await smPage.evaluate(() => {
+        const entry = document.querySelector('[data-entry="9003"]');
+        const b = entry?.querySelector("[data-print-before]");
+        const p = entry?.querySelector("[data-print]");
+        return Boolean(b && p && b.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING);
+      });
+      expect(
+        "scrum master -> 'antes' opens the before above the print, by its report's own link",
+        (await toggle.getAttribute("aria-expanded")) === "true" && beforeAbove && beforeSrc.includes(`/api/progress-report/${fridayToken}/`) && beforeSrc.endsWith("/shot-1-before.png"),
+        beforeSrc
+      );
+      if (process.env.E2E_SCREENSHOTS) await smPage.locator('[data-entry="9003"]').screenshot({ path: path.join(process.env.E2E_SCREENSHOTS, "semana-antes-aberto.png") });
+      await toggle.click();
+      expect("scrum master -> a second click closes it again", (await toggle.getAttribute("aria-expanded")) === "false" && (await smPage.locator("[data-print-before]").count()) === 0);
       const numbers = await smPage.locator("#uso dd").allInnerTexts();
       expect("scrum master -> the week's numbers add up the e-mails' (4 sessions, 320 messages, 2 delivered)", JSON.stringify(numbers) === JSON.stringify(["4", "320", "2"]), JSON.stringify(numbers));
       // Optional pictures of the presentation, for a person to look at (E2E_SCREENSHOTS=<folder>).
@@ -532,8 +565,13 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
       const at = (needle) => doc.indexOf(needle);
       expect(
         "admin -> the print of a delivery sits right under it in the preview, with its caption",
-        at("Primeira entrega") >= 0 && at("Primeira entrega") < at("/shot-1.png") && at("/shot-1.png") < at("Segunda entrega") && at("Tela da primeira entrega") > at("/shot-1.png"),
+        at("Primeira entrega") >= 0 && at("Primeira entrega") < at("/shot-1.png") && at("/shot-1.png") < at("Segunda entrega") && doc.indexOf("Tela da primeira entrega", at("/shot-1.png")) > at("/shot-1.png"),
         `${at("Primeira entrega")} ${at("/shot-1.png")} ${at("Segunda entrega")}`
+      );
+      expect(
+        "admin -> the preview shows the print's before open above it, labelled 'antes', as the e-mail does",
+        at("/shot-1-before.png") > at("Primeira entrega") && at("/shot-1-before.png") < at("/shot-1.png") && doc.slice(at("Primeira entrega"), at("/shot-1-before.png")).includes("antes"),
+        `${at("/shot-1-before.png")} ${at("/shot-1.png")}`
       );
     }
     expect("admin -> the preview is titled just 'Prévia'", (await page.getByRole("heading", { name: "Prévia", exact: true }).count()) === 1 && (await page.getByRole("region", { name: "Prévia", exact: true }).count()) === 1 && (await page.getByText("Prévia do e-mail").count()) === 0);
@@ -706,7 +744,7 @@ const noise = (s, extra = /^$/) => s.problems.filter((p) => !/auth\/v1\/token|ER
     await browser.close();
     try {
       await sweep();
-      await svc.storage.from("progress-shots").remove([E2E_SHOT_PATH]);
+      await svc.storage.from("progress-shots").remove([E2E_SHOT_PATH, E2E_BEFORE_PATH]);
     } catch (e) {
       console.log(`cleanup of the synthetic reports failed: ${L.scrub(e && e.message ? e.message : e).slice(0, 120)}`);
     }

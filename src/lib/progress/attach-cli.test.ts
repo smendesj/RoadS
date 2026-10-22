@@ -165,3 +165,27 @@ test("the answers of the server become plain messages: a draft, an unknown repor
   assert.match(noSecret.output(), /FRONTLIGHTS_API_SECRET/);
   assert.equal(noSecret.requests.length, 0);
 });
+
+test("a print with its before sends both up and the before in the body, and the report keeps it", async () => {
+  const files = {
+    [`${WEEK}/captions.json`]: JSON.stringify([{ file: "1-tela.png", caption: "Tela da entrega 1.", issue: 1, before: "1-antes.png" }]),
+    [`${WEEK}/1-antes.png`]: png(300, 9),
+  };
+  const w = world({ files });
+  assert.equal(await w.run("--report", ID, "--shots-dir", WEEK), 0, w.output());
+  const attach = w.requests.at(-1)!;
+  assert.match(attach.url, new RegExp(`/progress-report/${ID}/shots$`));
+  const sentShot = JSON.parse(String(attach.init.body)).shots[0];
+  assert.equal(sentShot.before.mime, "image/png");
+  assert.ok(w.bucket.has(sentShot.before.path), "the before was uploaded before the report named it");
+  assert.notEqual(sentShot.before.path, sentShot.path);
+  assert.deepEqual(w.report().content.shots?.[0].before, sentShot.before);
+  assert.match(w.output(), /acrescentados: 1/i);
+});
+
+test("a before that is not in the folder is named, and nothing is sent", async () => {
+  const w = world({ files: { [`${WEEK}/captions.json`]: JSON.stringify([{ file: "1-tela.png", caption: "Tela.", issue: 1, before: "sumiu-antes.png" }]) } });
+  assert.equal(await w.run("--report", ID, "--shots-dir", WEEK), 1);
+  assert.match(w.output(), /sumiu-antes\.png/);
+  assert.equal(w.requests.length, 0);
+});

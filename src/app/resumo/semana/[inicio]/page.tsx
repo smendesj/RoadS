@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { WeekPresentation } from "@/components/WeekPresentation";
-import { shotPath } from "@/lib/progress-report";
 import { reportPeriodLabel } from "@/lib/progress/report-view";
 import { visualAlt, visualModel } from "@/lib/progress/visual";
-import { combineWeek } from "@/lib/progress/week";
+import { combineWeek, weekShotLinks } from "@/lib/progress/week";
 import { WEEK } from "@/lib/text/resumo";
 import { loadWeek, requireReportViewer, weekProduct, weekStartParam } from "../../data";
 
@@ -31,7 +30,7 @@ export default async function WeekPage({
   if (rows.length === 0) notFound();
 
   const week = combineWeek(rows);
-  const shotUrls = week.shotSources.map((s) => shotPath(s.token, s.pushedAt, s.n, s.ext));
+  const { shotUrls, beforeUrls } = weekShotLinks(week);
   // The picture of the week's usage: the latest push of the week in the address, so a new report refreshes it.
   const version = Math.max(...rows.map((r) => Date.parse(r.pushed_at))).toString(36);
   const query = produto === "GeoCloud" ? `v=${version}` : `produto=${produto}&v=${version}`;
@@ -40,6 +39,7 @@ export default async function WeekPage({
       produto={produto}
       content={week.content}
       shotUrls={shotUrls}
+      beforeUrls={beforeUrls}
       visual={{ url: `/resumo/semana/${start}/uso?${query}`, title: visualModel(week.content).title, alt: visualAlt(week.content) }}
       periodLabel={reportPeriodLabel(week.content.window, "en")}
     />

@@ -9,7 +9,7 @@ import {
   isShareToken,
   localDay,
   nextReportWindow,
-  shotPath,
+  shotBeforePath, shotPath,
   visualPath,
 } from "./progress-report.ts";
 
@@ -82,6 +82,11 @@ test("image paths carry the token and a version that changes when the draft is p
   assert.match(v1, /^\/api\/progress-report\/0b9f1c2e-3d4a-4b5c-8d6e-7f8091a2b3c4\/[0-9a-z]+\/visual\.png$/);
   assert.notEqual(v1, v2);
   assert.match(shotPath(token, "2026-10-01T15:00:00Z", 2, "jpg"), /\/shot-2\.jpg$/);
+  // A print's before sits next to it, under the same number, so no print ever moves.
+  assert.equal(
+    shotBeforePath(token, "2026-10-01T15:00:00Z", 2, "png"),
+    shotPath(token, "2026-10-01T15:00:00Z", 2, "png").replace(/shot-2\.png$/, "shot-2-before.png")
+  );
 });
 
 test("e-mail links always point at the production site", () => {

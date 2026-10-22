@@ -60,7 +60,7 @@ const DEFAULT_LOCAL = ".frontlights/progress/config.json";
 type Args = {
   draft: string;
   produto: string;
-  shots: { file: string; caption: string | null; issue?: number }[];
+  shots: { file: string; caption: string | null; issue?: number; before?: string }[];
   /** A command line --issue that is not a whole issue number, or that came before any --shot. */
   badIssue: string | null;
   endpoint: string | null;
@@ -116,34 +116,55 @@ function parseArgs(argv: string[]): Args | null {
 
 const kb = (bytes: number) => Math.ceil(bytes / 1024);
 
-/** A print ready to go: the contract Shot the draft carries (with the path it will have) and its bytes. */
-export type LoadedShot = { shot: Shot; name: string; bytes: Buffer };
+/**
+ * A print ready to go: the contract Shot the draft carries (with the path it will have) and its bytes, and the
+ * bytes of its before when it has one (the Shot carries the before's path).
+ */
+export type LoadedShot = { shot: Shot; name: string; bytes: Buffer; before?: { name: string; bytes: Buffer } };
+
+/** One image file read and checked the way the server checks it, or the sentence that says what is wrong. */
+async function readImage(file: string, what: string, deps: PushDeps) {
+  const name = basename(file);
+  let bytes: Buffer;
+  try {
+    bytes = deps.readFile(file);
+  } catch {
+    return `Não consegui ler ${what} «${name}».`;
+  }
+  if (bytes.length > MAX_SHOT_BYTES) {
+    return `${what[0].toUpperCase()}${what.slice(1)} «${name}» tem ${kb(bytes.length)} KB e o limite é ${kb(MAX_SHOT_BYTES)} KB. Reduza a imagem (por exemplo, 1920 px de largura em JPEG) e tente de novo.`;
+  }
+  // The same check the server runs: the type from the bytes, and the path is the hash of the bytes.
+  const checked = await checkShotBytes(new Uint8Array(bytes));
+  if (!checked.ok) return `${what[0].toUpperCase()}${what.slice(1)} «${name}» precisa ser uma imagem JPEG ou PNG.`;
+  return { name, bytes, mime: checked.mime, path: checked.path };
+}
 
 /** The prints named on the command line or in captions.json, checked, or the sentence that says what is wrong. */
 export async function loadShots(args: Pick<Args, "shots" | "badIssue">, deps: PushDeps): Promise<LoadedShot[] | string> {
   if (args.badIssue) return args.badIssue;
+  // A print and its before count once: the before rides on its print.
   if (args.shots.length > MAX_SHOTS) return `São aceitos no máximo ${MAX_SHOTS} prints (--shot).`;
   const shots: LoadedShot[] = [];
-  for (const [i, { file, caption, issue }] of args.shots.entries()) {
+  for (const [i, { file, caption, issue, before }] of args.shots.entries()) {
     if (!file) return "Uma legenda (--caption) veio sem o print (--shot) a que pertence.";
-    const name = basename(file);
-    if (caption === null) return `O print «${name}» precisa de uma legenda: acrescente --caption "<texto>" logo depois dele.`;
-    let bytes: Buffer;
-    try {
-      bytes = deps.readFile(file);
-    } catch {
-      return `Não consegui ler o print «${name}».`;
-    }
-    if (bytes.length > MAX_SHOT_BYTES) {
-      return `O print «${name}» tem ${kb(bytes.length)} KB e o limite é ${kb(MAX_SHOT_BYTES)} KB. Reduza a imagem (por exemplo, 1920 px de largura em JPEG) e tente de novo.`;
-    }
-    // The same check the server runs: the type from the bytes, and the path is the hash of the bytes.
-    const checked = await checkShotBytes(new Uint8Array(bytes));
-    if (!checked.ok) return `O print «${name}» precisa ser uma imagem JPEG ou PNG.`;
+    if (caption === null) return `O print «${basename(file)}» precisa de uma legenda: acrescente --caption "<texto>" logo depois dele.`;
+    const print = await readImage(file, "o print", deps);
+    if (typeof print === "string") return print;
+    const old = before === undefined ? undefined : await readImage(before, "o print antes", deps);
+    if (typeof old === "string") return old;
     shots.push({
-      shot: { id: `shot-${i + 1}`, caption, mime: checked.mime, ...(issue === undefined ? {} : { issue }), path: checked.path },
-      name,
-      bytes,
+      shot: {
+        id: `shot-${i + 1}`,
+        caption,
+        mime: print.mime,
+        ...(issue === undefined ? {} : { issue }),
+        path: print.path,
+        ...(old === undefined ? {} : { before: { mime: old.mime, path: old.path } }),
+      },
+      name: print.name,
+      bytes: print.bytes,
+      ...(old === undefined ? {} : { before: { name: old.name, bytes: old.bytes } }),
     });
   }
   return shots;
@@ -173,7 +194,7 @@ function localAccess(value: unknown): { account: string; password: string } | nu
 const SHOT_NAME = /^[\w.-]+\.(png|jpe?g)$/i;
 
 /** The prints a folder's captions.json lists, in that order, as the shots the loader reads; or what is wrong. */
-export function dirShots(dir: string, deps: PushDeps): { file: string; caption: string; issue?: number }[] | string {
+export function dirShots(dir: string, deps: PushDeps): { file: string; caption: string; issue?: number; before?: string }[] | string {
   const base = dir.replace(/[\\/]+$/, "");
   let raw: Buffer;
   try {
@@ -188,16 +209,24 @@ export function dirShots(dir: string, deps: PushDeps): { file: string; caption: 
     return "O arquivo captions.json da pasta de prints não é um JSON válido.";
   }
   if (!Array.isArray(list)) return "O captions.json deve ser uma lista de {file, caption, issue}.";
-  const shots: { file: string; caption: string; issue?: number }[] = [];
+  const shots: { file: string; caption: string; issue?: number; before?: string }[] = [];
   for (const item of list) {
-    const { file, caption, issue } = (item ?? {}) as { file?: unknown; caption?: unknown; issue?: unknown };
+    const { file, caption, issue, before } = (item ?? {}) as { file?: unknown; caption?: unknown; issue?: unknown; before?: unknown };
     if (typeof file !== "string" || !SHOT_NAME.test(file)) return "Cada item do captions.json precisa de um «file» que seja só o nome de um PNG ou JPEG da pasta.";
     if (typeof caption !== "string" || caption.trim() === "") return `O print «${file}» precisa de uma legenda no captions.json.`;
     if (caption.trim().length > 200) return `A legenda do print «${file}» passa de 200 caracteres no captions.json.`;
     if (issue !== undefined && !(typeof issue === "number" && Number.isInteger(issue) && issue > 0)) {
       return `O print «${file}» tem um «issue» que não é o número inteiro de uma issue no captions.json.`;
     }
-    shots.push({ file: `${base}/${file}`, caption: caption.trim(), ...(issue === undefined ? {} : { issue }) });
+    if (before !== undefined && (typeof before !== "string" || !SHOT_NAME.test(before))) {
+      return `O print «${file}» tem um «before» que não é só o nome de um PNG ou JPEG da pasta (o print antes) no captions.json.`;
+    }
+    shots.push({
+      file: `${base}/${file}`,
+      caption: caption.trim(),
+      ...(issue === undefined ? {} : { issue }),
+      ...(before === undefined ? {} : { before: `${base}/${before}` }),
+    });
   }
   return shots;
 }
@@ -228,7 +257,13 @@ export function configuredEndpoint(config: unknown): string | null {
  * beyond a short reason).
  */
 export async function uploadShots(root: string, headers: Record<string, string>, loaded: LoadedShot[], deps: PushDeps): Promise<string | null> {
-  for (const { shot, name, bytes } of loaded) {
+  // A print's before goes up right after it, the same way, under the path its print carries.
+  const images = loaded.flatMap(({ shot, name, bytes, before }) => [
+    { path: shot.path, name, bytes },
+    ...(before && shot.before ? [{ path: shot.before.path, name: before.name, bytes: before.bytes }] : []),
+  ]);
+  for (const shot of images) {
+    const { name, bytes } = shot;
     let uploaded: Response;
     try {
       uploaded = await deps.fetch(`${root}/progress-report/shots`, {

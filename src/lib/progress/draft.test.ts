@@ -85,7 +85,7 @@ function validBody(): Body {
       },
       // One print per delivery that is not "próximo": one already in the storage bucket, one inline (older form).
       shots: [
-        { id: "shot-1", caption: "Tela de exemplo", mime: "image/png", issue: 101, path: `${"a".repeat(64)}.png` },
+        { id: "shot-1", caption: "Tela de exemplo", mime: "image/png", issue: 101, path: `${"a".repeat(64)}.png`, before: { mime: "image/jpeg", path: `${"c".repeat(64)}.jpg` } },
         { id: "shot-2", caption: "Outra tela de exemplo", mime: "image/jpeg", issue: 102, data: jpeg(2048) },
       ],
       sprint: {
@@ -246,6 +246,22 @@ test("at most forty prints, each a real jpeg or png in valid base64 or a path in
   refused((b) => (b.content.shots![1].data = png(1024)), /content\.shots\[1\]\.data/);
   refused((b) => (b.content.shots![1].data = Buffer.from("<svg onload=alert(1)></svg>").toString("base64")), /content\.shots\[1\]\.data/);
   refused((b) => (b.content.shots![1].data = ""), /content\.shots\[1\]\.data/);
+});
+
+test("a print's «before» is kept as {mime, path} in the storage bucket, and nothing else", () => {
+  const kept = parseBent(() => {});
+  assert.equal(kept.ok, true);
+  assert.deepEqual(kept.ok && kept.content.shots![0].before, { mime: "image/jpeg", path: `${"c".repeat(64)}.jpg` });
+  assert.equal(kept.ok && kept.content.shots![1].before, undefined);
+  refused((b) => (b.content.shots![0].before!.mime = unsafe("image/gif")), /content\.shots\[0\]\.before\.mime/);
+  refused((b) => (b.content.shots![0].before!.path = "../segredo.jpg"), /content\.shots\[0\]\.before\.path/);
+  refused((b) => (b.content.shots![0].before!.path = `${"c".repeat(64)}.png`), /content\.shots\[0\]\.before\.path/);
+  refused((b) => (b.content.shots![0].before = unsafe("antes.png")), /content\.shots\[0\]\.before/);
+  // Only the storage path: a before never travels inline.
+  refused((b) => (b.content.shots![0].before = unsafe({ mime: "image/jpeg", data: "AAAA" })), /content\.shots\[0\]\.before\.path/);
+  // Fields a before does not know are dropped.
+  const extra = parseBent((b) => ((b.content.shots![0].before as unknown as Record<string, unknown>).caption = "x"));
+  assert.deepEqual(extra.ok && Object.keys(extra.content.shots![0].before!).sort(), ["mime", "path"]);
 });
 
 test("every delivery on show that is not 'próximo' needs a print of its own, and a print names a delivery of the report", () => {

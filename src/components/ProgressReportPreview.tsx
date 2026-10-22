@@ -5,6 +5,7 @@ import { useLayoutEffect, useMemo, useRef, useState, useTransition } from "react
 import { markProgressReportSent, saveProgressEdit, setProgressChecked } from "@/lib/actions/progress";
 import {
   PRODUCTION_ORIGIN,
+  shotBeforePath,
   shotPath,
   visualPath,
   type EmailBuild,
@@ -13,6 +14,7 @@ import {
   type ProgressReportRow,
 } from "@/lib/progress-report";
 import { browserPorts, buildClipboardPayload, copyRich, copyText } from "@/lib/progress/clipboard";
+import { shotExtension } from "@/lib/progress/draft";
 import { buildEmail, emailSubject } from "@/lib/progress/email";
 import { resolveContent, resolveFlags, resolveHidden, locateKey } from "@/lib/progress/resolve";
 import { formatStamp, isConferenceCurrent, previewDocument, reasonMessage, reportPeriodLabel } from "@/lib/progress/report-view";
@@ -28,7 +30,9 @@ function emailFor(row: ProgressReportRow, overrides: Overrides, absolute: boolea
   const origin = absolute ? PRODUCTION_ORIGIN : "";
   return buildEmail(resolveContent({ content: row.content, overrides }), {
     visualUrl: origin + visualPath(row.share_token, row.pushed_at),
-    shotUrls: (row.content.shots ?? []).map((shot, i) => origin + shotPath(row.share_token, row.pushed_at, i + 1, shot.mime === "image/png" ? "png" : "jpg")),
+    shotUrls: (row.content.shots ?? []).map((shot, i) => origin + shotPath(row.share_token, row.pushed_at, i + 1, shotExtension(shot.mime))),
+    // A print's before sits under the print's own number, with the extension of its own type.
+    beforeUrls: (row.content.shots ?? []).map((shot, i) => (shot.before ? origin + shotBeforePath(row.share_token, row.pushed_at, i + 1, shotExtension(shot.before.mime)) : undefined)),
     roadsUrl: PRODUCTION_ORIGIN,
   });
 }

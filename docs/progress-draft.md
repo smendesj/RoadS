@@ -119,6 +119,7 @@ código e tabelas fiquem legíveis em tela cheia). Eles ficam na pasta de prints
 [
   { "file": "101-tela.png", "caption": "Uma frase simples sobre o que a tela mostra.", "issue": 101 },
   { "file": "102-codigo.jpg", "caption": "O trecho que mudou para a segunda entrega.", "issue": 102 },
+  { "file": "103-depois.png", "caption": "A tela da terceira entrega, antes e depois.", "issue": 103, "before": "103-antes.png" },
   { "file": "geral.png", "caption": "Uma visão geral, sem entrega." }
 ]
 ```
@@ -128,6 +129,9 @@ código e tabelas fiquem legíveis em tela cheia). Eles ficam na pasta de prints
   Para uma entrega feita de partes, o print de qualquer parte entra com o número da **entrega** (a raiz de
   trabalho, a que está nos fatos), nunca com o de uma sub-issue nem o de um epic: o RoadS só conhece as entregas.
 - Sem `issue`, o print é geral e sai no fim, antes do uso do Claude.
+- `before` (opcional) é a mesma tela **antes** da mudança: um PNG ou JPEG da mesma pasta, com a mesma regra de nome
+  e o mesmo limite de 1 MB do `file`. Ele não tem legenda própria (vale a do print), sobe logo depois do seu print e
+  ganha o link `shot-<n>-before.<ext>`, sob o número do print. O par conta **uma vez** nos 40.
 - Só os arquivos listados saem; os demais são ignorados. Use só dados de teste e recorte a identidade de quem
   estava logado.
 
@@ -182,3 +186,7 @@ node --experimental-strip-types scripts/progress/attach.ts --report <id do resum
 O id é o que aparece no endereço `/resumo/<id>`. A pasta segue as regras dos prints acima. Um print com `issue`
 precisa de uma entrega visível do resumo; sem `issue`, ele é geral e sai no fim, antes do uso do Claude. Rodar
 de novo não duplica nada: o que já estava lá é pulado.
+
+Um print novo pode vir com o seu `before`, como no envio. Um print que o resumo **já tem** não ganha `before`
+depois: o e-mail já o mostrou, e o RoadS recusa o pedido sem gravar nada. Para mostrar o antes e depois, acrescente
+o par como um print novo (outro arquivo).
