@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import type { EntryStatus, ProgressContent, ProgressEntry } from "@/lib/progress-report";
 import { amountLabel, openTitles, partsLabel, sprintChips } from "@/lib/progress/report-view";
 import { placeShots, visibleOf } from "@/lib/progress/shot-place";
@@ -11,8 +11,9 @@ import { STATUS, WEEK } from "@/lib/text/resumo";
 // The week of the Resumo, to present at the Monday scrum: the e-mail's content in the e-mail's order, as large
 // as the screen allows. Nothing to check, edit, copy or send here. A fixed index jumps between the sections,
 // "Full screen" hides the browser around it, and a print opens on its own over everything (Esc, the close button
-// or a click closes it, and the focus goes back to the print). The usage picture's title and alt text come from
-// the server, so the browser gets no drawing code.
+// or a click closes it, and the focus goes back to the print). A print that has its before (the same screen
+// before the change) carries a closed "antes" toggle above it that shows the before over the print, which
+// stays open. The usage picture's title and alt text come from the server, so the browser gets no drawing code.
 
 type Zoom = { src: string; caption: string; from: HTMLElement | null } | null;
 
@@ -34,13 +35,29 @@ const STATUS_ACCENT: Record<EntryStatus, string> = {
   proximo: "border-rs-border",
 };
 
-function Print({ src, caption, product, onOpen }: { src: string; caption: string; product: string; onOpen: (z: Zoom) => void }) {
+function Print({ src, before, caption, product, onOpen }: { src: string; before: string | null; caption: string; product: string; onOpen: (z: Zoom) => void }) {
+  const [showBefore, setShowBefore] = useState(false);
+  const beforeId = useId();
+  // The print is [data-print]; its before, [data-print-before].
+  const image = (url: string, label: string, alt: string, marker: object) => (
+    <button type="button" {...marker} onClick={(e) => onOpen({ src: url, caption: label, from: e.currentTarget })} className="block cursor-zoom-in overflow-hidden rounded-xl border border-rs-border bg-white" aria-label={WEEK.enlarge(label)}>
+      {/* eslint-disable-next-line @next/next/no-img-element -- the image route answers by token; nothing to optimise */}
+      <img src={url} alt={alt} className="block h-auto w-full" />
+    </button>
+  );
   return (
     <figure className="flex flex-col gap-2">
-      <button type="button" data-print onClick={(e) => onOpen({ src, caption, from: e.currentTarget })} className="block cursor-zoom-in overflow-hidden rounded-xl border border-rs-border bg-white" aria-label={WEEK.enlarge(caption)}>
-        {/* eslint-disable-next-line @next/next/no-img-element -- the image route answers by token; nothing to optimise */}
-        <img src={src} alt={caption || WEEK.screenOf(product)} className="block h-auto w-full" />
-      </button>
+      {before && (
+        <>
+          <button type="button" data-before-toggle aria-expanded={showBefore} aria-controls={beforeId} onClick={() => setShowBefore((v) => !v)} className="self-start rounded-md border border-rs-border px-2 py-0.5 text-sm font-semibold text-rs-text-soft hover:text-rs-brand-text">
+            <span aria-hidden="true">{showBefore ? "▾" : "▸"}</span> {WEEK.before}
+          </button>
+          <div id={beforeId} hidden={!showBefore}>
+            {showBefore && image(before, WEEK.beforeOf(caption), WEEK.beforeOf(caption || WEEK.screenOf(product)), { "data-print-before": "" })}
+          </div>
+        </>
+      )}
+      {image(src, caption, caption || WEEK.screenOf(product), { "data-print": "" })}
       {caption && <figcaption className="text-lg text-rs-text-soft sm:text-xl">{caption}</figcaption>}
     </figure>
   );
@@ -50,12 +67,14 @@ export function WeekPresentation({
   produto,
   content,
   shotUrls,
+  beforeUrls,
   visual,
   periodLabel,
 }: {
   produto: string;
   content: ProgressContent;
   shotUrls: string[];
+  beforeUrls: (string | undefined)[];
   visual: { url: string; title: string; alt: string };
   periodLabel: string;
 }) {
@@ -89,7 +108,7 @@ export function WeekPresentation({
   const visible = visibleOf(content);
   const by = (s: EntryStatus) => visible.filter((e) => e.status === s);
   // The week brings the prints of every report it is made of: no cap of one e-mail here.
-  const { shotsOf, general } = placeShots(content, shotUrls, (u) => (u ? u : null), Infinity);
+  const { shotsOf, general } = placeShots(content, shotUrls, (u) => (u ? u : null), Infinity, beforeUrls);
   const done = by("concluido").length;
   const upcoming = by("proximo");
   // A week with a sprint block says its chips in words (and has no "In validation" one); an older one keeps its own.
@@ -120,7 +139,7 @@ export function WeekPresentation({
       <h3 className="text-3xl font-bold text-rs-text sm:text-4xl">{e.title}</h3>
       {e.summary && <p className="text-xl text-rs-text sm:text-2xl">{e.summary}</p>}
       {partsLabel(e.subIssues, "en") && <p data-parts className="text-lg text-rs-text-soft sm:text-xl">{partsLabel(e.subIssues, "en")}</p>}
-      {shotsOf(e.issue).map(({ shot, src }) => (src ? <Print key={shot.id} src={src} caption={shot.caption} product={produto} onOpen={setZoom} /> : null))}
+      {shotsOf(e.issue).map(({ shot, src, before }) => (src ? <Print key={shot.id} src={src} before={before} caption={shot.caption} product={produto} onOpen={setZoom} /> : null))}
     </article>
   );
 
@@ -229,7 +248,7 @@ export function WeekPresentation({
 
         {general.some((g) => g.src) && (
           <section className={SECTION} aria-label={WEEK.otherShots}>
-            {general.map(({ shot, src }) => (src ? <Print key={shot.id} src={src} caption={shot.caption} product={produto} onOpen={setZoom} /> : null))}
+            {general.map(({ shot, src, before }) => (src ? <Print key={shot.id} src={src} before={before} caption={shot.caption} product={produto} onOpen={setZoom} /> : null))}
           </section>
         )}
 

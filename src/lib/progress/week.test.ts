@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { DayUsage, ProgressContent } from "../progress-report.ts";
-import { combineWeek, groupByWeek, weekHeadline, weekMeetingOf, weekOfPeriod, weekStartOf, type WeekReport } from "./week.ts";
+import { combineWeek, groupByWeek, weekHeadline, weekMeetingOf, weekOfPeriod, weekShotLinks, weekStartOf, type WeekReport } from "./week.ts";
 import { entry, sampleContent } from "./visual-fixture.ts";
 
 // Made-up data only: invented deliveries and round numbers.
@@ -230,6 +230,34 @@ test("the prints of both reports come along, each with the link of its own repor
   ]);
   assert.equal(week.content.access, undefined);
   assert.equal(week.content.gaps, undefined);
+});
+
+test("a print's before survives the merge, and is linked under its print's number in its own report, by its own type", () => {
+  const before = { mime: "image/jpeg" as const, path: `${"c".repeat(64)}.jpg` };
+  const sexta = report("sexta", {
+    shots: [
+      { id: "shot-1", caption: "Sem antes", mime: "image/png", issue: 1, path: `${"b".repeat(64)}.png` },
+      { id: "shot-2", caption: "Com antes", mime: "image/png", issue: 4, path: `${"d".repeat(64)}.png`, before },
+    ],
+  });
+  const week = combineWeek([report("quarta"), sexta]);
+  assert.deepEqual(week.content.shots?.map((s) => [s.id, s.before]), [["shot-1", undefined], ["shot-2", undefined], ["shot-3", before]]);
+
+  const { shotUrls, beforeUrls } = weekShotLinks(week);
+  const sextaVersion = Date.parse("2026-10-02T20:00:00Z").toString(36);
+  assert.deepEqual(shotUrls, [
+    `/api/progress-report/token-quarta/${Date.parse("2026-09-30T20:00:00Z").toString(36)}/shot-1.png`,
+    `/api/progress-report/token-sexta/${sextaVersion}/shot-1.png`,
+    `/api/progress-report/token-sexta/${sextaVersion}/shot-2.png`,
+  ]);
+  // Only the print that has one gets a before link: the print's own number, the before's own extension.
+  assert.deepEqual(beforeUrls, [undefined, undefined, `/api/progress-report/token-sexta/${sextaVersion}/shot-2-before.jpg`]);
+});
+
+test("a week whose prints have no before has no before link at all", () => {
+  const { shotUrls, beforeUrls } = weekShotLinks(combineWeek([report("quarta"), report("sexta")]));
+  assert.equal(shotUrls.length, 2);
+  assert.deepEqual(beforeUrls, [undefined, undefined]);
 });
 
 test("a week with a single report is that report, with the generated opening line", () => {

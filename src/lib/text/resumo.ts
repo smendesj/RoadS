@@ -53,6 +53,9 @@ export const WEEK = {
   otherShots: "Other screenshots",
   enlarge: (caption: string) => `Enlarge: ${caption || "screenshot"}`,
   enlarged: "Enlarged screenshot",
+  /** The toggle above a print that has its before (the same screen before the change): the user's word, kept in Portuguese. */
+  before: "antes",
+  beforeOf: (caption: string) => `${caption || "screenshot"} (antes)`,
   screenOf: (product: string) => `${product} screen`,
   sessions: "sessions",
   messages: "messages",
