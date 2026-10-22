@@ -323,11 +323,11 @@ export function ItemCard({
             <button
               onClick={onSaveEdit}
               disabled={!!content && !content.title.trim()}
-              className="rounded-lg bg-rs-brand px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+              className="shrink-0 whitespace-nowrap rounded-lg bg-rs-brand px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
             >
               {ACTION.save}
             </button>
-            <button onClick={onCancelEdit} className="rounded-lg px-2 py-2 text-xs font-bold text-rs-text-soft">
+            <button onClick={onCancelEdit} className="shrink-0 whitespace-nowrap rounded-lg px-2 py-2 text-xs font-bold text-rs-text-soft">
               {ACTION.cancel}
             </button>
           </div>

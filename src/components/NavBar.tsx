@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { BrandMark } from "@/components/BrandMark";
 import { SessionGuard } from "@/components/SessionGuard";
 import { UserMenu } from "@/components/UserMenu";
@@ -26,17 +27,20 @@ type Tab = "dashboard" | "roadmap" | "resumo" | "config";
 
 // showConfig is only ever true for admin — the Config tab doesn't render for anyone else. The Resumo
 // tab follows the role (admin and scrum master only). `role` is null for a visitor; what is shown is decided on the
-// role itself, never on its on-screen label, so translating a label can't change who sees what.
+// role itself, never on its on-screen label, so translating a label can't change who sees what. `actions` is a page's own
+// button (the Roadmap's Sync), shown right before the theme toggle.
 export function NavBar({
   active,
   role,
   avatar = null,
   showConfig = false,
+  actions = null,
 }: {
   active: Tab;
   role: Role | null;
   avatar?: string | null;
   showConfig?: boolean;
+  actions?: ReactNode;
 }) {
   const { theme, toggle } = useTheme();
   const showResumo = role === "admin" || role === "scrum_master";
@@ -44,8 +48,9 @@ export function NavBar({
   // inside itself rather than ever widening the page.
   const crowded = showResumo && showConfig;
 
+  // Below md the tabs share the bar's width, each label centered in its tab on one line.
   const tabClass = (tab: Tab) =>
-    `flex-1 rounded-lg py-2 text-center font-bold md:flex-none md:px-4 ${
+    `flex flex-1 items-center justify-center whitespace-nowrap rounded-lg py-2 text-center font-bold md:flex-none md:px-4 ${
       crowded ? "px-1.5 text-xs sm:px-3 sm:text-sm" : "px-3 text-sm"
     } ${active === tab ? "bg-rs-brand text-white" : "text-rs-text-soft"}`;
 
@@ -54,7 +59,7 @@ export function NavBar({
       <BrandMark />
 
       <div
-        className={`order-last flex w-full gap-1.5 rounded-[10px] bg-rs-bg p-1 md:order-none md:w-auto ${
+        className={`order-last flex w-full justify-center gap-1.5 rounded-[10px] bg-rs-bg p-1 md:order-none md:w-auto ${
           crowded ? "overflow-x-auto" : ""
         }`}
       >
@@ -77,6 +82,7 @@ export function NavBar({
       </div>
 
       <div className="flex items-center gap-3.5">
+        {actions}
         <button
           onClick={toggle}
           aria-label={NAV.toggleTheme}

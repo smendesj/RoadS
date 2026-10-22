@@ -229,7 +229,7 @@ async function seedSprintIssue() {
     expect("roadmap: no card is draggable, in the weeks or in Open", (await count(page.locator('div[draggable="true"]'))) === 0 &&
       (await count(page.locator('[data-kanban-column="open"] div[draggable="false"]'))) > 0);
     expect("roadmap: no 'Move to' select", (await count(page.locator('select[aria-label="Move to"]'))) === 0);
-    expect("roadmap: plain subtitle (no 'decide what goes in and when')", (await count(page.getByText(/decide what goes in/))) === 0);
+    expect("roadmap: no subtitle and no drag hint under the title", (await count(page.getByText(/decide what goes in|Drag a card from Open/))) === 0);
     expect("roadmap: the user area never shows 'Sign in'", (await count(page.locator('a[href="/login"]'))) === 0);
 
     // ------------------------------------------------ /config is closed to everyone but admin

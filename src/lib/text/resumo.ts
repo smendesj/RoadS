@@ -1,11 +1,11 @@
-// The texts of the Resumo screens (the board report) around the Prévia, and of the week's presentation, in
+// The texts of the Resumo screens (the Report) around the Prévia, and of the week's presentation, in
 // English (issue #23). The Prévia (ProgressReportPreview and everything inside it, the e-mail it builds) and
 // the report's own content (what the generator wrote for the board) stay in Portuguese and keep their texts
 // where they are. Pure on purpose: no "server-only", no "@/" imports.
 import type { EntryStatus } from "../progress-report.ts";
 
 /** The name of the screen: the report for the board. */
-export const RESUMO_NAME = "Board report";
+export const RESUMO_NAME = "Report";
 
 export const RESUMO = {
   pageTitle: `RoadS — ${RESUMO_NAME}`,
@@ -14,7 +14,7 @@ export const RESUMO = {
   introReadOnly: "GeoCloud progress. Read only.",
   loadFailed: "The report could not be loaded right now. Reload the page in a moment.",
   /** What an admin sees when no report exists yet (nothing was ever pushed). */
-  emptyDraft: "No draft yet. Start Frontlights and choose to update the board report.",
+  emptyDraft: "No draft yet. Start Frontlights and choose to update the report.",
   /** What a scrum master sees when nothing has been sent yet: they never see drafts. */
   emptySent: "No report sent yet.",
   latestSent: "This is the last report sent. When Frontlights sends a new draft, it shows up here.",

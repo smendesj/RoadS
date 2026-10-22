@@ -21,7 +21,7 @@ import { brakeMessage, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync
 import { badgeClass } from "@/lib/tones";
 import { MAX_ITEMS_PER_SPRINT, type Lane, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 import type { Viewer } from "@/lib/viewer";
-import { elimsNote, recentDone, ROADMAP, showAllDone, showRecentDone, sprintOverLimit } from "@/lib/text/roadmap";
+import { elimsNote, recentDone, ROADMAP, showAllDone, showRecentDone } from "@/lib/text/roadmap";
 
 /** Where a card being edited is: an item planned in a week shows in the week and in the Kanban's Open, and only the
  *  copy whose "Edit" was pressed opens. */
@@ -326,25 +326,30 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
 
   return (
     <div className="min-h-screen">
-      <NavBar active="roadmap" role={myRole} avatar={viewer?.avatar ?? null} showConfig={isAdmin} />
-
-      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-10">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="flex flex-col gap-1.5">
-            <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">Roadmap</h1>
-            {myRole !== null && (
-              <p className="text-[15px] text-rs-text-soft">
-                {activeView === "scrum_master" ? ROADMAP.subtitleScrumMaster : "GeoCloud"}
-              </p>
-            )}
-          </div>
-          {myRole !== null && (
-            <div className="flex flex-col items-end gap-1">
-              <SyncButton onClick={syncIssues} isPending={isSyncing} />
-              {syncMessage && <span className="max-w-[260px] text-right text-[11px] text-rs-text-faint">{syncMessage}</span>}
+      {/* Sync sits in the bar, beside the theme toggle; its message hangs below it without moving the bar. */}
+      <NavBar
+        active="roadmap"
+        role={myRole}
+        avatar={viewer?.avatar ?? null}
+        showConfig={isAdmin}
+        actions={
+          myRole !== null && (
+            <div className="relative">
+              <SyncButton onClick={syncIssues} isPending={isSyncing} tight />
+              {syncMessage && (
+                <span className="absolute right-0 top-full z-30 mt-1 w-max max-w-[260px] rounded-md bg-rs-card px-1.5 py-0.5 text-right text-[11px] text-rs-text-faint">
+                  {syncMessage}
+                </span>
+              )}
             </div>
-          )}
-        </div>
+          )
+        }
+      />
+
+      {/* The page has no visible title: the weeks start right under the bar. From lg the page keeps a narrow margin (14px)
+          so three weeks fit side by side on a laptop. */}
+      <div className="flex flex-col gap-6 p-4 sm:p-6 lg:px-3.5 lg:pb-10 lg:pt-0.5">
+        <h1 className="sr-only">Roadmap</h1>
 
         {!boardLoaded ? (
           <p className="text-sm text-rs-text-soft">{ROADMAP.loading}</p>
@@ -356,7 +361,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                 database lacks (dashed) is still a drop target: dropping an item on it creates it. On a wide screen the row
                 stays at the top while the Kanban under it scrolls, so a week is always in reach of a card dragged from
                 Open; a long week scrolls inside itself, so the row never covers the screen. */}
-            <div data-weeks className="lg:sticky lg:top-0 lg:z-20 lg:-mx-10 lg:bg-rs-bg lg:px-10 lg:pb-3 lg:pt-3">
+            <div data-weeks className="lg:sticky lg:top-0 lg:z-20 lg:-mx-3.5 lg:bg-rs-bg lg:px-3.5 lg:pb-3 lg:pt-3">
               <div data-drag-scroll="x" className="-mx-4 flex snap-x snap-mandatory items-start gap-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:snap-none lg:gap-5 lg:px-0">
                 {lanes.map((lane) => (
                   <DropZone
@@ -375,18 +380,25 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                       moveToLane(lane.id);
                     }}
                     className={(lit) =>
-                      `flex min-h-[240px] w-[85vw] max-w-[380px] shrink-0 snap-start flex-col gap-3 rounded-2xl border p-4 lg:max-h-[45vh] lg:w-[340px] lg:max-w-none ${
+                      `flex min-h-[240px] w-[85vw] max-w-[380px] shrink-0 snap-start flex-col gap-3 rounded-2xl border p-4 lg:max-h-[calc(45vh_+_4rem)] lg:w-[max(300px,calc((100%_-_2.5rem)/3))] lg:max-w-none ${
                         lane.current ? "bg-rs-brand-soft" : "bg-rs-lane"
                       } ${lane.virtual ? "border-dashed" : ""} ${lit ? "border-rs-brand" : "border-rs-border"}`
                     }
                   >
-                    <div className="flex items-center justify-between">
-                      <div className={`text-sm font-extrabold ${lane.current ? "text-rs-brand-text" : "text-rs-text"}`}>{lane.title}</div>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+                        <div data-lane-title className={`text-sm font-extrabold ${lane.current ? "text-rs-brand-text" : "text-rs-text"}`}>{lane.title}</div>
+                        {lane.items.length > MAX_ITEMS_PER_SPRINT && (
+                          <span data-over-limit className="text-[12px] font-semibold text-rs-brand-text">
+                            {ROADMAP.sprintOverLimit}
+                          </span>
+                        )}
+                      </div>
                       <span
                         className={
                           lane.items.length > MAX_ITEMS_PER_SPRINT
-                            ? "rounded-full border border-rs-brand bg-rs-brand-soft px-2.5 py-0.5 text-xs font-bold text-rs-brand-text"
-                            : "rounded-full border border-rs-border bg-rs-card px-2.5 py-0.5 text-xs font-bold text-rs-text-faint"
+                            ? "shrink-0 rounded-full border border-rs-brand bg-rs-brand-soft px-2.5 py-0.5 text-xs font-bold text-rs-brand-text"
+                            : "shrink-0 rounded-full border border-rs-border bg-rs-card px-2.5 py-0.5 text-xs font-bold text-rs-text-faint"
                         }
                       >
                         {lane.items.length}/{MAX_ITEMS_PER_SPRINT}
@@ -419,22 +431,10 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                         />
                       ))}
                     </div>
-
-                    {lane.items.length > MAX_ITEMS_PER_SPRINT && (
-                      <div className="rounded-[10px] border border-rs-brand bg-rs-brand-soft px-3 py-2 text-[12px] font-semibold text-rs-brand-text">
-                        {sprintOverLimit(lane.items.length, MAX_ITEMS_PER_SPRINT)}
-                      </div>
-                    )}
                   </DropZone>
                 ))}
               </div>
             </div>
-
-            {canEdit && (
-              <div className="rounded-[10px] bg-rs-brand-soft px-4 py-2.5 text-[13px] font-semibold text-rs-brand-text">
-                {ROADMAP.planHint}
-              </div>
-            )}
 
             {/* The Kanban (src/lib/kanban.ts): Open, to plan, and Done, to look at. Blocker and Development stay out. Open is
                 where a card taken out of a week is dropped to unplan it (data-unplan-target, for a finger too); it is no
