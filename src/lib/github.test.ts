@@ -12,8 +12,9 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
-const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState, setProjectDate, clearProjectField, readBoardFields, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment, readIssueAssignees, setIssueAssignees, readIssueEfforts, setIssueEffort } =
+const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState, setProjectDate, clearProjectField, readBoardFields, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment, readIssueAssignees, setIssueAssignees, readIssueEfforts, setIssueEffort, issueBody } =
   await import("./github.ts");
+const { NEW_ITEM_DESCRIPTION } = await import("./text/roadmap.ts");
 
 test("closing and reopening an issue sends its state and the reason in the same edit", async () => {
   const gh = recordingGitHub();
@@ -155,9 +156,11 @@ const BOARD = {
 function creatingGitHub(board: Record<string, { id: string; options: string[] | null }> = BOARD) {
   const written: Record<string, unknown> = {};
   const issueFields: unknown[] = [];
+  const opened: { body?: string } = {};
   const fetchImpl = (async (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     const ok = (json: unknown) => new Response(JSON.stringify(json), { status: 200 });
+    if (url.endsWith("/issues")) Object.assign(opened, body);
     if (url.endsWith("/issues")) return ok({ html_url: "https://example.test/issues/900001", number: 900001, node_id: "I_sint" });
     if (/fields\(/.test(body.query ?? "")) {
       const nodes = Object.values(board).map((f) => ({ id: f.id, name: "x", ...(f.options ? { options: f.options.map((id) => ({ id, name: id })) } : {}) }));
@@ -174,7 +177,7 @@ function creatingGitHub(board: Record<string, { id: string; options: string[] | 
     }
     return new Response("{}", { status: 404 });
   }) as typeof fetch;
-  return { fetch: fetchImpl, written, issueFields };
+  return { fetch: fetchImpl, written, issueFields, opened };
 }
 
 const NEW_ITEM = { title: "Item sintético", description: "Texto", prioridade: "High", effort: "Low", tipo: "feature", stack: "Backend" } as const;
@@ -182,7 +185,7 @@ const NEW_ITEM = { title: "Item sintético", description: "Texto", prioridade: "
 test("creating an issue fills the board's fields by their ids and never writes the board's own Repositório field", async () => {
   const gh = creatingGitHub();
   const created = await createGeoCloudIssue("token-sintetico", NEW_ITEM, "Open", { fetch: gh.fetch });
-  assert.deepEqual(created, { url: "https://example.test/issues/900001", number: 900001, skipped: [] });
+  assert.deepEqual(created, { url: "https://example.test/issues/900001", number: 900001, skipped: [], resumo: "Texto" });
   assert.deepEqual(gh.written, {
     [BOARD.status.id]: { singleSelectOptionId: "f130aaf8" },
     [BOARD.prioridade.id]: { singleSelectOptionId: "3b456fae" },
@@ -202,7 +205,7 @@ test("an Effort GitHub refuses on a new issue is skipped and reported, and the i
   const refusing = (async (url: string, init?: RequestInit) =>
     /setIssueFieldValue/.test(String(init?.body)) ? new Response(JSON.stringify({ errors: [{ message: "refused" }] }), { status: 200 }) : gh.fetch(url, init)) as typeof fetch;
   const created = await createGeoCloudIssue("token-sintetico", NEW_ITEM, "Open", { fetch: refusing });
-  assert.deepEqual(created, { url: "https://example.test/issues/900001", number: 900001, skipped: ["Effort"] });
+  assert.deepEqual(created, { url: "https://example.test/issues/900001", number: 900001, skipped: ["Effort"], resumo: "Texto" });
   assert.deepEqual(gh.written[BOARD.status.id], { singleSelectOptionId: "f130aaf8" });
 });
 
@@ -212,6 +215,37 @@ test("an option the live board no longer has is skipped and reported, instead of
   assert.deepEqual(created.skipped, ["Stack"]);
   assert.equal(gh.written[BOARD.stack.id], undefined);
   assert.deepEqual(gh.written[BOARD.prioridade.id], { singleSelectOptionId: "3b456fae" });
+});
+
+// What follows the opening text of every new issue (issue #28): the effort line, the criteria and the footer.
+const BODY_TAIL = ["", "**Esforço estimado:** Low", "", "## Critérios de aceite", "", "- [ ] A definir antes de entrar em uma sprint.", "", "_Criada pelo RoadS a partir do Roadmap._"];
+
+test("a new item's Problema › Solução text opens its issue's body, before the effort line and the criteria", () => {
+  const draft = "## Problema\n\nO relatório sintético demora a abrir.\n\n## Solução\n\nO relatório sintético abre em segundos.";
+  assert.equal(issueBody(draft, "Low"), [draft, ...BODY_TAIL].join("\n"));
+  assert.equal(issueBody(NEW_ITEM_DESCRIPTION, "Low"), [NEW_ITEM_DESCRIPTION, ...BODY_TAIL].join("\n"));
+});
+
+test("a text without a Solução heading becomes the Solução, under a Problema still to be written", () => {
+  assert.equal(
+    issueBody("  Um texto sintético antigo.  ", "Low"),
+    ["## Problema", "", "Item criado no Roadmap do RoadS; problema ainda por escrever.", "", "## Solução", "", "Um texto sintético antigo.", ...BODY_TAIL].join("\n")
+  );
+});
+
+test("an empty text still gives the body its Problema and a Solução placeholder", () => {
+  assert.equal(
+    issueBody(" ", "Low"),
+    ["## Problema", "", "Item criado no Roadmap do RoadS; problema ainda por escrever.", "", "## Solução", "", "Solução ainda por escrever.", ...BODY_TAIL].join("\n")
+  );
+});
+
+test("creating an issue from the template sends the whole text as its body and only the summary to the board", async () => {
+  const gh = creatingGitHub();
+  const created = await createGeoCloudIssue("token-sintetico", { ...NEW_ITEM, description: NEW_ITEM_DESCRIPTION }, "Open", { fetch: gh.fetch });
+  assert.equal(gh.opened.body, issueBody(NEW_ITEM_DESCRIPTION, "Low"));
+  assert.deepEqual(gh.written[BOARD.description.id], { text: "O que passa a acontecer, em uma ou duas frases." });
+  assert.equal(created.resumo, "O que passa a acontecer, em uma ou duas frases.");
 });
 
 /**

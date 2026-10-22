@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition, type ComponentProps, type HTMLAttributes, type ReactNode } from "react";
 import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
 import { SyncButton } from "@/components/SyncButton";
@@ -10,7 +10,7 @@ import { listAssignableProfiles } from "@/lib/actions/assignees";
 import { retryDelay, touchesCurrentSprint } from "@/lib/auto-sync";
 import type { SyncColumn } from "@/lib/board-sync";
 import { useAutoSync } from "@/lib/use-auto-sync";
-import { useTouchDrag } from "@/lib/use-touch-drag";
+import { useTouchDrag, useTouchHover, type TouchHover, type TouchSpot } from "@/lib/use-touch-drag";
 import { isStack } from "@/lib/issue-fields";
 import { selectorStatus } from "@/lib/bilateral-sync";
 import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
@@ -317,7 +317,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
 
   const kanban = kanbanColumns(columns, { lanes, groups }, readAt);
   // A finger carrying a card taken out of a week is over the Kanban's Open.
-  const unplanOver = touchDrag.over === KANBAN && dragFrom === "week";
+  const unplanOver = (spot: TouchSpot) => spot.over === KANBAN && dragFrom === "week";
   const done = allDone ? kanban.done.all : kanban.done.recent;
   // A card taken out of a week, carried by mouse or finger, brings Open on screen, where it is dropped to unplan it.
   const shown = shownTab(tab, dragFrom === "week" && (draggingId !== null || touchDrag.lifted !== null));
@@ -359,12 +359,13 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
             <div data-weeks className="lg:sticky lg:top-0 lg:z-20 lg:-mx-10 lg:bg-rs-bg lg:px-10 lg:pb-3 lg:pt-3">
               <div data-drag-scroll="x" className="-mx-4 flex snap-x snap-mandatory items-start gap-4 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 lg:mx-0 lg:snap-none lg:gap-5 lg:px-0">
                 {lanes.map((lane) => (
-                  <div
+                  <DropZone
                     key={lane.id}
+                    hover={touchDrag.hover}
+                    lit={(spot) => spot.over === lane.id}
                     data-lane-id={lane.id}
                     data-virtual={lane.virtual ? "" : undefined}
                     aria-current={lane.current ? "date" : undefined}
-                    data-drop-target={touchDrag.over === lane.id ? "" : undefined}
                     onDragOver={(e) => {
                       e.preventDefault();
                       setDropBefore(null);
@@ -373,9 +374,11 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                       e.preventDefault();
                       moveToLane(lane.id);
                     }}
-                    className={`flex min-h-[240px] w-[85vw] max-w-[380px] shrink-0 snap-start flex-col gap-3 rounded-2xl border p-4 lg:max-h-[45vh] lg:w-[340px] lg:max-w-none ${
-                      lane.current ? "bg-rs-brand-soft" : "bg-rs-lane"
-                    } ${lane.virtual ? "border-dashed" : ""} ${touchDrag.over === lane.id ? "border-rs-brand" : "border-rs-border"}`}
+                    className={(lit) =>
+                      `flex min-h-[240px] w-[85vw] max-w-[380px] shrink-0 snap-start flex-col gap-3 rounded-2xl border p-4 lg:max-h-[45vh] lg:w-[340px] lg:max-w-none ${
+                        lane.current ? "bg-rs-brand-soft" : "bg-rs-lane"
+                      } ${lane.virtual ? "border-dashed" : ""} ${lit ? "border-rs-brand" : "border-rs-border"}`
+                    }
                   >
                     <div className="flex items-center justify-between">
                       <div className={`text-sm font-extrabold ${lane.current ? "text-rs-brand-text" : "text-rs-text"}`}>{lane.title}</div>
@@ -394,8 +397,9 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                         padding on top keeps the orange line over the first card inside the scrolling list. */}
                     <div data-drag-scroll="y" className="-mt-2.5 flex flex-col gap-3 pt-2.5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
                       {lane.items.map((item) => (
-                        <ItemCard
+                        <WeekCard
                           key={item.id}
+                          hover={touchDrag.hover}
                           {...cardProps(item, "week", lane.id)}
                           // A card dragged over this one goes right before it; over itself, it stays where it is.
                           onDragOverCard={(e) => {
@@ -411,7 +415,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                             setDropBefore(null);
                             setDraggingId(null);
                           }}
-                          dropLine={dropBefore === item.id || (touchDrag.before === item.id && touchDrag.over === lane.id && touchDrag.lifted !== item.id)}
+                          dropLine={dropBefore === item.id}
                         />
                       ))}
                     </div>
@@ -421,7 +425,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                         {sprintOverLimit(lane.items.length, MAX_ITEMS_PER_SPRINT)}
                       </div>
                     )}
-                  </div>
+                  </DropZone>
                 ))}
               </div>
             </div>
@@ -458,11 +462,13 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                   </button>
                 ))}
               </div>
-              <section
+              <DropZone
+                as="section"
+                hover={touchDrag.hover}
+                lit={unplanOver}
                 id="kanban-open"
                 data-kanban-column="open"
                 data-unplan-target
-                data-drop-target={unplanOver ? "" : undefined}
                 onDragOver={(e) => {
                   if (!draggingId || dragFrom !== "week") return;
                   e.preventDefault();
@@ -472,7 +478,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                   e.preventDefault();
                   moveToLane(KANBAN);
                 }}
-                className={`${columnClass("open", shown)} min-w-0 flex-col gap-3 rounded-2xl border bg-rs-lane p-4 ${unplanOver ? "border-rs-brand" : "border-rs-border"}`}
+                className={(lit) => `${columnClass("open", shown)} min-w-0 flex-col gap-3 rounded-2xl border bg-rs-lane p-4 ${lit ? "border-rs-brand" : "border-rs-border"}`}
               >
                 <div className="flex items-center justify-between">
                   <span className={badgeClass("neutral")}>Open</span>
@@ -496,7 +502,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                   )}
                 </div>
                 {kanban.open.length === 0 && <div className="p-2.5 text-[13px] text-rs-text-faint">{ROADMAP.noOpenIssues}</div>}
-              </section>
+              </DropZone>
 
               <section
                 id="kanban-done"
@@ -550,4 +556,37 @@ function IssueCard({ issue }: { issue: KanbanIssue }) {
       <div className="mt-0.5 font-mono text-[11px] text-rs-text-faint">{issue.ref}</div>
     </a>
   );
+}
+
+// A week, or the Kanban's Open, that lights up (data-drop-target, an orange border) while a finger carries a card over
+// it. It reads the spot under the finger itself, so a finger crossing the row renders again only the zone it enters
+// and the one it leaves; what is inside comes from the Roadmap as it was, and stays as it is.
+function DropZone({
+  as: Tag = "div",
+  hover,
+  lit,
+  className,
+  children,
+  ...rest
+}: Omit<HTMLAttributes<HTMLElement>, "className"> & {
+  as?: "div" | "section";
+  hover: TouchHover;
+  lit: (spot: TouchSpot) => boolean;
+  className: (lit: boolean) => string;
+  children: ReactNode;
+}) {
+  const on = useTouchHover(hover, lit);
+  return (
+    <Tag {...rest} data-drop-target={on ? "" : undefined} className={className(on)}>
+      {children}
+    </Tag>
+  );
+}
+
+// A card of a week, with the orange line above it while a finger carrying another card is over it (or a mouse, by
+// dropLine): only this card renders again when the line comes or goes.
+function WeekCard({ hover, dropLine, ...props }: ComponentProps<typeof ItemCard> & { hover: TouchHover }) {
+  const id = props.item.id;
+  const touchLine = useTouchHover(hover, (spot) => spot.before === id && spot.over === props.laneId) && !props.lifted;
+  return <ItemCard {...props} dropLine={dropLine || touchLine} />;
 }
