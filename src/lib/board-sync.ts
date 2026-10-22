@@ -274,8 +274,8 @@ async function runBoardSync({ push }: { push: boolean }): Promise<SyncResult> {
       : null;
     const retitled = fields?.retitled ?? 0;
 
-    // The Comments of each item go both ways with its issue's comments (comments-sync.ts, issue #23); a failure here
-    // doesn't fail the board sync.
+    // A Comment written in RoadS goes to its item's issue as a new comment, and nothing comes back (comments-sync.ts,
+    // issue #34); a failure here doesn't fail the board sync.
     const comments: CommentsSummary | null = cards.size
       ? await readOpen()
           .then((open) => syncItemComments(token, open.map((i) => i.number), push))

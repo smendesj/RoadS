@@ -309,8 +309,6 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
       onSaveEdit: () => saveEdit(item.id),
       onCancelEdit: cancelEdit,
       onDelete: () => removeItem(item.id),
-      viewer: viewer ? { id: viewer.id, role: viewer.role } : null,
-      onCommentsChanged: reloadBoard,
       people,
     };
   };

@@ -4,8 +4,8 @@ import { mayChangeComment } from "@/lib/comment-author";
 import { createClient as createServerSupabase } from "@/lib/supabase/server";
 
 // Editing and deleting a Comment (issue #23). Whoever wrote it and the admin may (RLS in migration 0040 says the same);
-// the next sync takes the change to the issue's comment (comment-sync.ts). A Comment never sent to GitHub is deleted
-// at once; one that was is hidden and kept until the sync deletes its comment there.
+// since issue #34 the card shows no Comments and the sync only creates on GitHub the ones never sent (comment-sync.ts),
+// so an edit or a delete here stays in RoadS. A Comment never sent is deleted at once; one that was is hidden and kept.
 
 async function requireCommentActor(noteId: string) {
   const supabase = await createServerSupabase();
