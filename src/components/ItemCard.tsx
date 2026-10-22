@@ -50,17 +50,18 @@ function ClampedText({ text }: { text: string }) {
     observer.observe(el);
     return () => observer.disconnect();
   }, [open]);
+  // A fragment, so the text stays the card's own <p> (the e2e reads a card's description as [data-item-id] > p).
   return (
-    <div className="flex flex-col items-start gap-0.5">
+    <>
       <p ref={ref} data-desc={open ? "open" : "folded"} className={`text-[13px] leading-snug text-rs-text-soft ${open ? "" : "line-clamp-3"}`}>
         {text}
       </p>
       {(overflows || open) && (
-        <button type="button" data-desc-toggle onClick={() => setOpen(!open)} className="text-xs font-bold text-rs-brand-text">
+        <button type="button" data-desc-toggle onClick={() => setOpen(!open)} className="-mt-1 self-start text-xs font-bold text-rs-brand-text">
           {open ? ROADMAP.showLess : ROADMAP.showMore}
         </button>
       )}
-    </div>
+    </>
   );
 }
 
