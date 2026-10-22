@@ -65,7 +65,7 @@ function toRoadmapItem(row: ItemRow): RoadmapItem {
     createdBy: row.created_by,
     ...(row.created_at ? { createdAt: row.created_at } : {}),
     assignees: row.assignees ?? [],
-    // A Comment deleted in RoadS is kept, hidden, until the sync deletes its comment on GitHub (comment-sync.ts).
+    // A Comment deleted in RoadS after it went to GitHub is kept, hidden; the card shows no Comments since issue #34.
     notes: row.notes
       .filter((n) => !n.deleted_at)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))

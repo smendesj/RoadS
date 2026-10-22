@@ -225,7 +225,7 @@ async function seedSprintIssue() {
     expect("roadmap: no '+ New item'", (await count(page.getByRole("button", { name: "+ New item" }))) === 0);
     expect("roadmap: the same read-refresh Sync button as the Dashboard", (await count(page.getByRole("button", { name: /^Sync$/ }))) === 1);
     expect("roadmap: no Edit / + Comment / Delete", (await count(page.getByRole("button", { name: /^(Edit|\+ Comment|Delete)$/ }))) === 0);
-    expect("roadmap: a dev edits and deletes no Comment", (await count(page.locator("[data-comment-id] button"))) === 0);
+    expect("roadmap: the cards show no Comment (issue #34), so there is none to edit or delete", (await count(page.locator("[data-comment-id]"))) === 0);
     expect("roadmap: no card is draggable, in the weeks or in Open", (await count(page.locator('div[draggable="true"]'))) === 0 &&
       (await count(page.locator('[data-kanban-column="open"] div[draggable="false"]'))) > 0);
     expect("roadmap: no 'Move to' select", (await count(page.locator('select[aria-label="Move to"]'))) === 0);

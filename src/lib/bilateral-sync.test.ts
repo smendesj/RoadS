@@ -16,6 +16,7 @@ import {
   selectorStatus,
   statusOfIssue,
   closedIssueStatus,
+  followClosedIssue,
   statusWrites,
   storedStatus,
   tipoOfLabels,
@@ -274,6 +275,36 @@ test("an issue closed on GitHub makes its item Done, whether the base was Open o
 test("an item taken out of Done in RoadS reopens its closed issue, and a Done item has nothing to do", () => {
   assert.equal(closedIssueStatus({ roads: "Open", base: "Done", roadsAt: "2026-10-21T10:00:00Z" }), "push");
   assert.equal(closedIssueStatus({ roads: "Done", base: "Open", roadsAt: null }), "none");
+});
+
+// ---- Issue #34: a closed issue still gives its item the Description, a Done item's too
+
+const CLOSED_BODY = ["## Problema", "", "Dor.", "", "## Solução", "", "Resumo da solução.", "", "## Critérios de aceitação", "", "- [x] S1. Algo"].join("\n");
+
+test("a Done item whose issue closed still gets the Solução's summary in place of a placeholder, and its Status stays put", () => {
+  const follow = followClosedIssue({ status: "Done", seen: { status: "Done" }, changedAt: {}, storedDescription: "Descrição por escrever.", body: CLOSED_BODY });
+  assert.deepEqual(follow, { status: "none", description: "Resumo da solução." });
+});
+
+test("a Done item already holding the summary of its closed issue has nothing to write", () => {
+  const follow = followClosedIssue({ status: "Done", seen: { status: "Done" }, changedAt: {}, storedDescription: "Resumo da solução.", body: CLOSED_BODY });
+  assert.deepEqual(follow, { status: "none", description: null });
+});
+
+test("a closed issue with no Solução empties the Description, as an open one does", () => {
+  const follow = followClosedIssue({ status: "Done", seen: {}, changedAt: {}, storedDescription: "Texto antigo.", body: "## Problema\n\nSó isso." });
+  assert.deepEqual(follow, { status: "none", description: "" });
+});
+
+test("an open item of a closed issue becomes Done and gets the summary in the same pass; taken out of Done in RoadS, it reopens the issue", () => {
+  assert.deepEqual(followClosedIssue({ status: "Open", seen: { status: "Open" }, changedAt: {}, storedDescription: "", body: CLOSED_BODY }), {
+    status: "pull",
+    description: "Resumo da solução.",
+  });
+  assert.deepEqual(
+    followClosedIssue({ status: "Open", seen: { status: "Done" }, changedAt: { status: "2026-10-21T10:00:00Z" }, storedDescription: "Resumo da solução.", body: CLOSED_BODY }),
+    { status: "push", description: null }
+  );
 });
 
 // ---- Effort (P1): the organization's issue field, whose change time GitHub doesn't tell
