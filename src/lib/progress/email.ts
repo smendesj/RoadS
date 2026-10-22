@@ -69,7 +69,7 @@ const COLOR = {
   page: "#efeeea",
   card: "#ffffff",
   head: "#111110",
-  headSub: "#c9c8c0",
+  headText: "#f97316", // the GeoCloud orange (its brand-500), for the title and the period
   ink: "#1c1c1b",
   muted: "#5f5e59",
   rule: "#e4e3dd",
@@ -243,8 +243,8 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
       cell(
         `padding:24px ${PAD}px 22px ${PAD}px;background-color:${COLOR.head};`,
         full(
-          row(cell(font(26, 32, "#ffffff", "font-weight:bold;"), "<b>GeoCloud: andamento</b>")) +
-            (range ? row(cell(font(14, 20, COLOR.headSub, "padding-top:4px;"), `Período: ${escapeHtml(range)}`)) : "")
+          row(cell(font(26, 32, COLOR.headText, "font-weight:bold;"), "<b>GeoCloud: andamento</b>")) +
+            (range ? row(cell(font(14, 20, COLOR.headText, "padding-top:4px;"), `Período: ${escapeHtml(range)}`)) : "")
         ),
         `bgcolor="${COLOR.head}"`
       )
