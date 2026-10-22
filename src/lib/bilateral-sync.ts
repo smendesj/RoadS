@@ -224,6 +224,26 @@ export function descriptionPull(stored: string, body: string): string | null {
   return resumo === stored ? null : resumo;
 }
 
+/**
+ * What an item whose issue is closed follows from it (issue #34): the Status decision, as closedIssueStatus gives it
+ * (nothing for an item already Done), and the Description, as descriptionPull gives it for an open issue (the Solução's
+ * summary, "" without one, null when the item already holds it). The other fields of a closed issue are history and stay
+ * as they are, but the Description still comes, so a Done item whose issue closed while it held a placeholder gets the
+ * summary the issue was closed with.
+ */
+export function followClosedIssue(f: {
+  status: ItemStatus;
+  seen: Record<string, string>;
+  changedAt: Record<string, string>;
+  storedDescription: string;
+  body: string;
+}): { status: FieldDecision; description: string | null } {
+  return {
+    status: closedIssueStatus({ roads: f.status, base: "status" in f.seen ? f.seen.status : null, roadsAt: f.changedAt.status ?? null }),
+    description: descriptionPull(f.storedDescription, f.body),
+  };
+}
+
 /** The body with the Solução section's text replaced (or the section added at the end); nothing else changes. */
 export function replaceSolucao(body: string, text: string): string {
   const head = SOLUCAO.exec(body);

@@ -30,9 +30,9 @@ import "server-only";
 // endpoint any signed-in user can call directly, and syncBoard authorizes nobody (the cron has no
 // session) and writes with the admin client.
 
-import { createGeoCloudIssue, GEOCLOUD_REPO, PRIORIDADE_FIELD_ID, clearProjectField, readBoardFields, readIssueChangeTimes, readIssueEfforts, readIssueState, setIssueEffort, setProjectDate, setProjectOption, setProjectStatus, STACK_FIELD_ID, updateIssue, type IssueChange, type IssueChangeTimes } from "@/lib/github";
+import { createGeoCloudIssue, GEOCLOUD_REPO, PRIORIDADE_FIELD_ID, clearProjectField, readBoardFields, readIssueChangeTimes, readIssue, readIssueEfforts, setIssueEffort, setProjectDate, setProjectOption, setProjectStatus, STACK_FIELD_ID, updateIssue, type IssueChange, type IssueChangeTimes } from "@/lib/github";
 import { importableIssues, isTestData, mayGetIssue } from "@/lib/test-data";
-import { closedIssueStatus, decideField, descriptionPull, effortSides, extractResumo, labelsAfter, sameBase, nativeTypeOf, pushesToGitHub, statusOfIssue, statusWrites, tipoOfLabels, weekOfIssue, weekOfLane, weekPull, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
+import { decideField, descriptionPull, followClosedIssue, effortSides, extractResumo, labelsAfter, sameBase, nativeTypeOf, pushesToGitHub, statusOfIssue, statusWrites, tipoOfLabels, weekOfIssue, weekOfLane, weekPull, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
 import { syncItemComments, type CommentsSummary } from "@/lib/comments-sync";
 import { syncItemAssignees, type AssigneesSummary } from "@/lib/assignees-sync";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
@@ -685,45 +685,63 @@ async function syncIssueFields(
     }
   });
 
-  // An item whose issue is closed isn't among the open issues read above, so its issue is read on its own: closed on
-  // GitHub, the item becomes Done (issue #23, P2); taken out of Done in RoadS, the issue is reopened and its card follows
-  // (only those who push do this). A Done item has nothing to follow, so the read stops once the item is Done.
-  for (const item of items ?? []) {
+  // An item whose issue is closed isn't among the open issues read above, so its issue is read on its own, state and
+  // body in one request: closed on GitHub, the item becomes Done (issue #23, P2); taken out of Done in RoadS, the issue
+  // is reopened and its card follows (only those who push do this). Since issue #34 a Done item is read too, because the
+  // Description still follows a closed issue's Solução exactly as it follows an open one's, whoever syncs: a Done item
+  // whose issue closed while its Description held a placeholder gets the summary, while its other fields stay history.
+  // The reads go a few at a time, as the open items do, since every Done item with an issue is now read on each sync;
+  // a failure stays with its item and never stops the sync.
+  const closedCandidates = (items ?? []).filter((item) => {
+    const number = Number(item.github_issue_url?.match(ISSUE_URL)?.[1]);
+    return number && !byNumber.has(number) && !isTestData(item.title);
+  });
+  await inPool(closedCandidates, FIELDS_POOL, async (item) => {
     const number = Number(item.github_issue_url?.match(ISSUE_URL)?.[1]);
     const seen = (item.github_seen as Record<string, string> | null) ?? {};
     const status: ItemStatus = item.status ?? "Open";
-    if (!number || byNumber.has(number) || isTestData(item.title) || status === "Done") continue;
     try {
-      if ((await readIssueState(token, number)) !== "closed") continue;
+      const issue = await readIssue(token, number);
+      if (issue.state !== "closed") return;
       const changedAt = (item.field_changed_at as Record<string, string> | null) ?? {};
-      const decision = closedIssueStatus({ roads: status, base: "status" in seen ? seen.status : null, roadsAt: changedAt.status ?? null });
-      if (decision === "push" && push) {
+      const follow = followClosedIssue({ status, seen, changedAt, storedDescription: item.description ?? "", body: issue.body });
+      const pulled: { status?: "Done"; description?: string } = {};
+      let nextSeen = seen;
+      let pushedStatus = false;
+      if (follow.status === "push" && push) {
         const writes = statusWrites(status, "Done", item.lane_id === currentId);
         if (writes.issue) await updateIssue(token, number, writes.issue);
         const card = cards.get(number);
         if (card) await setProjectStatus(token, card.itemId, writes.card);
-        const { error: updateError } = await admin.from("roadmap_items").update({ github_seen: { ...seen, status } }).eq("id", item.id);
-        if (updateError) throw updateError;
-        summary.pushed++;
-      } else if (decision === "pull") {
+        nextSeen = { ...seen, status };
+        pushedStatus = true;
+      } else if (follow.status === "pull") {
+        pulled.status = "Done";
+        nextSeen = { ...seen, status: "Done" };
+      }
+      if (follow.description !== null) pulled.description = follow.description;
+      if (Object.keys(pulled).length || nextSeen !== seen) {
         const { error: updateError } = await admin
           .from("roadmap_items")
-          .update({ status: "Done", github_seen: { ...seen, status: "Done" } })
+          .update({ ...pulled, github_seen: nextSeen })
           .eq("id", item.id);
         if (updateError) throw updateError;
+      }
+      if (pushedStatus) summary.pushed++;
+      if (Object.keys(pulled).length) {
         const { error: queueError } = await admin.from("roadmap_sync_queue").insert({
           item_id: item.id,
           action: "modify",
-          payload: { status: "Done", reason: "field follows the issue on GitHub" },
+          payload: { ...pulled, reason: "field follows the issue on GitHub" },
         });
         if (queueError) throw queueError;
-        summary.pulled++;
+        summary.pulled += Object.keys(pulled).length;
       }
     } catch (e) {
       console.error("syncBoard: following a closed issue failed", e);
       summary.failed++;
     }
-  }
+  });
   return summary;
 }
 
