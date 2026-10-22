@@ -178,8 +178,8 @@ resumo, nunca os cartões do quadro. Quem monta: `src/lib/frontlights/sync.ts`.
 - **`roadmap.retitled`** (opcional, número): quantos títulos do Roadmap acompanharam a renomeação da issue no
   GitHub nesta sincronização (cada um vira um `modify` com `title` na fila). Ausente quando nenhum.
 - **`roadmap.fields`** (opcional, só contagens): a sincronização nos dois sentidos dos campos de cada item com a sua
-  issue (issue #22 do RoadS): Title, Description (a seção `## Solução` do corpo), Type (a label `type:`), Stack,
-  Priority e Effort (campos do Project). `pulled`: valores trazidos do GitHub (cada item com algum vira um `modify` com
+  issue (issue #22 do RoadS): Title, Description (a seção `## Solução` do corpo), Type (a label `type:`), Stack e
+  Priority (campos do Project) e Effort (o campo de issue da organização). `pulled`: valores trazidos do GitHub (cada item com algum vira um `modify` com
   os campos trazidos, nas chaves `title`, `description`, `tipo`, `stack`, `prioridade` e `effort`, e `reason`
   `"field follows the issue on GitHub"`); `pushed`: valores escritos no GitHub (com as labels `type:`, `area:` e
   `priority:high` que eles implicam e o tipo nativo); `failed`: itens em que algo falhou; `error` (texto) quando o
@@ -501,3 +501,7 @@ repositório, `roads-script/push` e `roads-script/attach`.
   continuam), e a opção Tests/Security do RoadS passa a se chamar Security Tests, também nos nomes guardados (migração
   0042) e no que vem em `modify` e em `roadmap-state`. O campo próprio Repositório saiu do quadro (o Repository nativo
   diz o mesmo), e o campo de data Week foi criado. Nenhuma rota mudou e a `schemaVersion` segue 1.
+- **2026-10-21:** o Effort sincroniza com o campo de issue Effort da organização no GitHub (o Effort do Project só o
+  espelha), e o RoadS deixa de ter "Very High": o Effort passa a ser High, Medium ou Low, e os valores guardados como
+  Very High viraram High (migração 0043), também em `modify` e em `roadmap-state`. As chaves do `modify` não mudaram
+  e a `schemaVersion` segue 1.

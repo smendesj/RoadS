@@ -75,7 +75,7 @@ export function issueLabels(tipo: Tipo, stack: Stack, prioridade: Prioridade): s
 export function isTipo(v: unknown): v is Tipo {
   return typeof v === "string" && (TIPOS as readonly string[]).includes(v);
 }
-export const EFFORTS: readonly Effort[] = ["Low", "Medium", "High", "Very High"];
+export const EFFORTS: readonly Effort[] = ["Low", "Medium", "High"];
 export function isEffort(v: unknown): v is Effort {
   return typeof v === "string" && (EFFORTS as readonly string[]).includes(v);
 }
