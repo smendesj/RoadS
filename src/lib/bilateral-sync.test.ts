@@ -4,11 +4,14 @@ import assert from "node:assert/strict";
 import {
   decideField,
   deletionComment,
+  descriptionPull,
   effortSides,
+  extractResumo,
   extractSolucao,
   labelsAfter,
   mayPush,
   nativeTypeOf,
+  pushesToGitHub,
   replaceSolucao,
   selectorStatus,
   statusOfIssue,
@@ -71,6 +74,52 @@ test("the Description is the Solução section of the body, and nothing else", (
   assert.equal(extractSolucao(BODY), "Primeira linha.\nSegunda linha.");
   assert.equal(extractSolucao("## Problema\n\nSó isso."), null);
   assert.equal(extractSolucao("## Solução\n\nNo fim."), "No fim.");
+});
+
+// ---- The card's summary (issue #28): the first paragraph of the Solução, from GitHub only
+
+test("the summary is the Solução's first paragraph, its wrapped lines joined by a space", () => {
+  assert.equal(extractResumo(BODY), "Primeira linha. Segunda linha.");
+  assert.equal(extractResumo("## Solução\n\n  Um parágrafo só.  \n"), "Um parágrafo só.");
+  assert.equal(extractResumo("## Solução\n\nPrimeiro.\n\nSegundo parágrafo."), "Primeiro.");
+});
+
+test("a list right under the paragraph, with no blank line, ends the summary", () => {
+  assert.equal(extractResumo("## Solução\n\nO resumo.\n- um passo\n- outro passo"), "O resumo.");
+  assert.equal(extractResumo("## Solução\n\nO resumo.\n1. um passo"), "O resumo.");
+});
+
+test("a Solução that opens with a list gives the first item's text, without the marker", () => {
+  assert.equal(extractResumo("## Solução\n\n- Primeiro item.\n- Segundo item."), "Primeiro item.");
+  assert.equal(extractResumo("## Solução\n\n* Com asterisco.\n* Outro."), "Com asterisco.");
+  assert.equal(extractResumo("## Solução\n\n1. Numerado.\n2. Outro."), "Numerado.");
+});
+
+test("a heading right under the paragraph ends the summary, a ### one or the next ## section", () => {
+  assert.equal(extractResumo("## Solução\n\nO resumo.\n### Detalhes\n\nMais texto."), "O resumo.");
+  assert.equal(extractResumo("## Solução\n\nO resumo.\n## Critérios\n\n- [ ] S1"), "O resumo.");
+});
+
+test("a body without a Solução section has no summary", () => {
+  assert.equal(extractResumo("## Problema\n\nSó isso."), null);
+  assert.equal(extractResumo(""), null);
+});
+
+test("a body with CRLF line endings gives the same summary", () => {
+  assert.equal(extractResumo(BODY.replace(/\n/g, "\r\n")), "Primeira linha. Segunda linha.");
+  assert.equal(extractResumo("## Solução\r\n\r\nO resumo.\r\n- item"), "O resumo.");
+});
+
+test("the Description is never pushed to GitHub; the other fields still go both ways", () => {
+  assert.equal(pushesToGitHub("description"), false);
+  for (const f of ["title", "tipo", "stack", "prioridade", "effort", "status", "week"]) assert.equal(pushesToGitHub(f), true, f);
+});
+
+test("the issue's summary always replaces the card's text, a Description edited in RoadS too; no Solução empties it", () => {
+  assert.equal(descriptionPull("Editado no RoadS.", BODY), "Primeira linha. Segunda linha.");
+  assert.equal(descriptionPull("Primeira linha. Segunda linha.", BODY), null);
+  assert.equal(descriptionPull("Texto antigo.", "## Problema\n\nSó isso."), "");
+  assert.equal(descriptionPull("", "## Problema\n\nSó isso."), null);
 });
 
 test("writing the Description replaces only the Solução section and keeps the rest of the body byte for byte", () => {

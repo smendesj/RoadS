@@ -16,6 +16,7 @@ const BOARD = {
   doneOld: { number: L.SYNTHETIC_ISSUE_MIN + 105, title: "[TESTE] issue concluída há 30 dias" },
 };
 const DAY = 24 * 60 * 60 * 1000;
+const LONG_SUMMARY = Array.from({ length: 12 }, (_, i) => `Frase ${i + 1} do resumo de teste, longa o bastante para ocupar espaço no card.`).join(" ");
 async function seedBoard() {
   const card = (c, statusAt) => ({ title: c.title, ref: `#${c.number}`, url: GEOCLOUD + c.number, ...(statusAt ? { statusAt } : {}) });
   const ours = new Set(Object.values(BOARD).map((c) => GEOCLOUD + c.number));
@@ -41,17 +42,18 @@ async function seedBoard() {
   const columns = without(await read());
   if (!["open", "dev", "done"].every((k) => columns.some((c) => c.key === k))) throw new Error("the board snapshot has no Open, Development or Done column");
   await write(columns.map((c) => (add[c.key] ? { ...c, items: [...add[c.key], ...c.items], count: c.count + add[c.key].length } : c)));
-  // Their items, with no week (in a test type lane): the Open one, and the one in Development.
-  const item = async (c) => {
+  // Their items, with no week (in a test type lane): the Open one, with a summary far longer than three lines of a
+  // card (issue #28), and the one in Development.
+  const item = async (c, description = "descrição de teste") => {
     const { data, error } = await svc
       .from("roadmap_items")
-      .insert({ lane_id: "zz-test-a", title: c.title, description: "descrição de teste", created_by: null, github_issue_url: GEOCLOUD + c.number, github_issue_number: c.number })
+      .insert({ lane_id: "zz-test-a", title: c.title, description, created_by: null, github_issue_url: GEOCLOUD + c.number, github_issue_number: c.number })
       .select("id")
       .single();
     if (error) throw error;
     return data.id;
   };
-  const ids = { open: await item(BOARD.open), dev: await item(BOARD.dev) };
+  const ids = { open: await item(BOARD.open, LONG_SUMMARY), dev: await item(BOARD.dev) };
   return { ids, unseed: async () => write(without(await read())) };
 }
 
@@ -132,6 +134,25 @@ async function seedBoard() {
       expect("kanban: an issue Open on the Project shows in Open as its Roadmap item's card (#number, draggable, no week label)",
         (await count(tied)) === 1 && tiedText.includes(`#${BOARD.open.number}`) && (await tied.getAttribute("draggable")) === "true" &&
           (await count(tied.locator("[data-week-label]"))) === 0, tiedText.slice(0, 80));
+      // The card of an item with an issue shows the issue's summary in at most three lines, with "Show more" to read it
+      // all (issue #28).
+      const summary = tied.locator("[data-desc]");
+      const lines = (el) => {
+        const s = getComputedStyle(el);
+        return { lines: Math.round(el.clientHeight / parseFloat(s.lineHeight)), cut: el.scrollHeight > el.clientHeight + 1, state: el.dataset.desc };
+      };
+      const folded = (await count(summary)) === 1 ? await summary.evaluate(lines) : null;
+      const showMore = tied.locator("[data-desc-toggle]");
+      expect("card: a long summary of the issue is folded to 3 lines, cut, with 'Show more'",
+        folded?.state === "folded" && folded.lines === 3 && folded.cut && (await count(showMore)) === 1 && (await showMore.innerText()).trim() === "Show more",
+        JSON.stringify(folded));
+      await showMore.click();
+      const unfolded = await summary.evaluate(lines);
+      expect("card: 'Show more' shows the whole summary, more than 3 lines and nothing cut, and turns into 'Show less'",
+        unfolded.state === "open" && unfolded.lines > 3 && !unfolded.cut && (await summary.innerText()).trim() === LONG_SUMMARY && (await showMore.innerText()).trim() === "Show less",
+        JSON.stringify(unfolded));
+      await showMore.click();
+      expect("card: 'Show less' folds it back to 3 lines", (await summary.evaluate(lines)).lines === 3);
       const orphan = open.locator("[data-issue-card]", { hasText: BOARD.orphan.title });
       expect("kanban: an issue Open on the Project that no item holds is a plain link to it in Open",
         (await count(orphan)) === 1 && (await orphan.getAttribute("href")) === GEOCLOUD + BOARD.orphan.number);
@@ -209,6 +230,10 @@ async function seedBoard() {
     await fresh.waitFor({ timeout: 15000 });
     expect("create: the new item opens straight into edit mode, in Open",
       (await count(fresh)) === 1 && (await count(open.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])'))) === 1);
+    // Its Description is born as the Problema › Solução template its issue's body will open with (issue #28).
+    const template = "## Problema\n\nO que acontece hoje e quem sente.\n\n## Solução\n\nO que passa a acontecer, em uma ou duas frases.";
+    const bornWith = await fresh.locator("textarea").inputValue();
+    expect("create: the Description field opens with the Problema › Solução template", bornWith === template, JSON.stringify(bornWith));
     await fresh.locator("input").first().fill("[TESTE] criado pelo Scrum Master");
     await fresh.locator("textarea").fill("descrição escrita no teste");
     // By their visible labels, not their position: the card gained and lost selects (Type, Stack) over time.
@@ -356,19 +381,60 @@ async function seedBoard() {
     expect("seeded item: the priority's edit time is kept for the two-way sync, and the title has none", !!sRow.field_changed_at?.prioridade && !sRow.field_changed_at?.title, JSON.stringify(sRow));
 
     // ------------------------------------------------ plan: a card dragged from Open to a week stays in Open, labelled with it
-    // A window as tall as the page keeps source and drop target on screen together (a drop can't land off-screen).
-    await L.fitWholePage(page);
-    // Native HTML5 drag: Playwright's dragTo doesn't start one here, so move the mouse in steps, like a person.
-    // The target first: a week can be off screen to the side in its row, and a card of Open is never in that row.
+    // Native HTML5 drag: Playwright's dragTo doesn't start one here, so move the mouse in steps, like a person. A drop
+    // only lands on screen, and Open holds every real open issue (a hundred cards and more), so a window grown to the
+    // whole page no longer keeps the card and the week on screen together. The drag is made in a window of 1440×900,
+    // where the row of weeks stays at the top while the page scrolls (sticky): a card or lane of that row is brought
+    // into view sideways, in the row, and anything under it (a card of Open, Open itself) is scrolled to just under the
+    // row, as little as needed. Where a card sits in Open, and how many cards Open holds, then no longer matters.
+    const DRAG_VIEW = { width: 1440, height: 900 };
+    const inWeeks = (loc) => loc.evaluate((el) => !!el.closest("[data-weeks]"));
+    // Scrolls the window until the top `need` px of the element (all of it, if it fits) are between the row's bottom
+    // and the window's bottom; re-measured each time, since the row stops being sticky near the page's top.
+    const showUnderWeeks = async (loc, need) => {
+      for (let i = 0; i < 6; i++) {
+        const by = await loc.evaluate((el, need) => {
+          const r = el.getBoundingClientRect();
+          const floor = (document.querySelector("[data-weeks]")?.getBoundingClientRect().bottom ?? 0) + 8;
+          const ceil = window.innerHeight - 20;
+          const h = Math.min(need ?? r.height, ceil - floor);
+          if (r.top < floor) return r.top - floor;
+          if (r.top + h > ceil) return r.top + h - ceil;
+          return 0;
+        }, need ?? null);
+        if (Math.abs(by) < 1) return;
+        await page.evaluate((y) => window.scrollBy(0, y), by);
+        await sleep(150);
+      }
+    };
+    // Whether the point the mouse uses is on the element itself, not under the row of weeks or off screen.
+    const hits = (loc, x, y) => loc.evaluate((el, [x, y]) => el.contains(document.elementFromPoint(x, y)), [x, y]);
     const mouseDrag = async (source, target) => {
-      await target.scrollIntoViewIfNeeded();
-      await source.scrollIntoViewIfNeeded();
+      const size = page.viewportSize();
+      if (size?.width !== DRAG_VIEW.width || size?.height !== DRAG_VIEW.height) {
+        await page.setViewportSize(DRAG_VIEW);
+        await sleep(600);
+      }
+      // A week can be off screen to the side in its row: the row's ones first, then the rest under the row, the
+      // target before the source (Open as the target needs its top on screen; a card of Open as the source, all of it).
+      if (await inWeeks(target)) await target.scrollIntoViewIfNeeded();
+      if (await inWeeks(source)) await source.scrollIntoViewIfNeeded();
+      if (!(await inWeeks(target))) await showUnderWeeks(target, 40);
+      if (!(await inWeeks(source))) await showUnderWeeks(source);
+      // Held in its upper part (its title), which is on screen however tall the card is.
       const c = await source.boundingBox();
-      await page.mouse.move(c.x + c.width / 2, c.y + c.height / 2);
-      await page.mouse.down();
-      await page.mouse.move(c.x + c.width / 2 + 10, c.y + c.height / 2 + 10, { steps: 5 });
+      const from = { x: c.x + c.width / 2, y: c.y + Math.min(c.height / 2, 60) };
+      // Dropped 12 px under the target's top (a week's header, not one of its cards; Open's top); should that point be
+      // under something else, the first point lower down that is on the target.
       const t = await target.boundingBox();
-      await page.mouse.move(t.x + t.width / 2, t.y + 12, { steps: 25 });
+      const to = { x: t.x + t.width / 2, y: t.y + 12 };
+      for (let y = to.y; !(await hits(target, to.x, y)) && y < Math.min(t.y + t.height, DRAG_VIEW.height); y += 8) to.y = y + 8;
+      // Not a check of its own: the checks after the drag fail if it didn't land; this says why.
+      if (!(await hits(source, from.x, from.y)) || !(await hits(target, to.x, to.y))) console.error("mouseDrag: the card or the drop point is not on screen", JSON.stringify({ from, to }));
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await page.mouse.move(from.x + 10, from.y + 10, { steps: 5 });
+      await page.mouse.move(to.x, to.y, { steps: 25 });
       await page.mouse.up();
     };
     // The answer to the move a drop saves: the server action's POST that carries the item and the lane it goes to. The
@@ -421,7 +487,6 @@ async function seedBoard() {
     await page.reload({ waitUntil: "load" });
     await page.getByText("Loading...").waitFor({ state: "detached", timeout: 30000 });
     await openCard("[TESTE] item semeado (sem dono)").waitFor({ timeout: 15000 });
-    await L.fitWholePage(page);
     {
       const before = await inOpen("[TESTE] item semeado (sem dono)");
       expect("plan: an item with no week is in Open with no label, not faded, and in no week", before.label === null && before.opacity === "1" && (await count(seeded)) === 0, JSON.stringify(before));
@@ -755,9 +820,16 @@ async function seedBoard() {
         const targetId = order0[0].id;
         from = await centre(openOne());
         await holdTestCard(from);
-        // Up to the top of the screen, where the page scrolls by itself, until the page is at its top.
+        // Up to the top of the screen, where the page scrolls by itself, until the page is at its top. Open holds every
+        // real open issue, so the page can be tens of thousands of px tall above the card: what the page has not
+        // scrolled in that time the test scrolls itself, with the card still held (no check here is about that trip;
+        // "holding a card near the top edge scrolls the page up" above is). The row of weeks is then on screen.
         await glide(from, { x: from.x, y: 6 }, 10);
         for (let i = 0; i < 60 && (await phone.page.evaluate(() => window.scrollY)) > 0; i++) await sleep(100);
+        if ((await phone.page.evaluate(() => window.scrollY)) > 0) {
+          await phone.page.evaluate(() => window.scrollTo(0, 0));
+          await sleep(300);
+        }
         // Onto the row, at its right edge, and held there until it stops at its end.
         const rowBox = await row.boundingBox();
         const atEdge = { x: 372, y: rowBox.y + 30 };
@@ -810,7 +882,6 @@ async function seedBoard() {
     // The item is in the test week, its card labelled in Open. The server picks the type lane: the issue's type label,
     // else the type the item is stored with (bug, saved above; the test server reads no labels, its token is empty).
     await page.getByText("[TESTE] criado e editado pelo SM").first().waitFor({ timeout: 15000 });
-    await L.fitWholePage(page);
     {
       const title = "[TESTE] criado e editado pelo SM";
       const since = new Date().toISOString();

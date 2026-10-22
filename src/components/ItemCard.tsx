@@ -1,11 +1,12 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import type { Effort, Prioridade, Produto, RoadmapItem } from "@/lib/types";
 import { isStack, isTipo, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } from "@/lib/issue-fields";
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
 import { ItemComment } from "@/components/ItemComment";
 import { assigneeNames } from "@/lib/assignee-sync";
-import type { SelectorStatus } from "@/lib/bilateral-sync";
+import { extractResumo, type SelectorStatus } from "@/lib/bilateral-sync";
 import { ACTION, FIELD } from "@/lib/text/common";
 import { deleteItemConfirm, ROADMAP } from "@/lib/text/roadmap";
 
@@ -34,6 +35,34 @@ function assigneeChoices(people: { login: string; name: string }[], current: str
 
 function peopleNames(people: { login: string; name: string }[]): Map<string, string> {
   return new Map(people.map((p) => [p.login.toLowerCase(), p.name]));
+}
+
+/** The card's text, at most three lines; a longer one has "Show more" to read it all, and "Show less" to fold it back. */
+function ClampedText({ text }: { text: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [open, setOpen] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  // Whether the folded text is cut, looked at again whenever the card's width changes it.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    const observer = new ResizeObserver(() => setOverflows(el.scrollHeight > el.clientHeight + 1));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [open]);
+  // A fragment, so the text stays the card's own <p> (the e2e reads a card's description as [data-item-id] > p).
+  return (
+    <>
+      <p ref={ref} data-desc={open ? "open" : "folded"} className={`text-[13px] leading-snug text-rs-text-soft ${open ? "" : "line-clamp-3"}`}>
+        {text}
+      </p>
+      {(overflows || open) && (
+        <button type="button" data-desc-toggle onClick={() => setOpen(!open)} className="-mt-1 self-start text-xs font-bold text-rs-brand-text">
+          {open ? ROADMAP.showLess : ROADMAP.showMore}
+        </button>
+      )}
+    </>
+  );
 }
 
 export function ItemCard({
@@ -103,6 +132,9 @@ export function ItemCard({
   const setContent = (patch: Partial<NonNullable<EditDraft["content"]>>) => {
     if (editDraft && content) onDraftChange({ ...editDraft, content: { ...content, ...patch } });
   };
+  // A draft (no issue yet) still holds its whole Problema › Solução text: the card shows only the Solução's summary,
+  // never the "## " headings (issue #28). An item with an issue already holds just that summary.
+  const shownDesc = item.url ? item.desc : (extractResumo(item.desc) ?? item.desc);
 
   return (
     <div
@@ -144,7 +176,7 @@ export function ItemCard({
         {item.state === "Blocker" && <span className={badgeClass("red")}>Blocker</span>}
       </div>
 
-      {item.desc && <p className="text-[13px] leading-snug text-rs-text-soft">{item.desc}</p>}
+      {shownDesc && <ClampedText key={shownDesc} text={shownDesc} />}
 
       {item.assignees && item.assignees.length > 0 && (
         <p data-assignees-shown className="text-xs text-rs-text-soft">
@@ -168,15 +200,18 @@ export function ItemCard({
                   className="rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-base font-bold text-rs-text sm:text-xs"
                 />
               </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.description}</span>
-                <textarea
-                  value={content.description}
-                  onChange={(e) => setContent({ description: e.target.value })}
-                  rows={3}
-                  className="resize-y rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-base text-rs-text sm:text-xs"
-                />
-              </label>
+              {/* An item with an issue shows the issue's summary, which only GitHub changes (issue #28). */}
+              {!item.url && (
+                <label className="flex flex-col gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.description}</span>
+                  <textarea
+                    value={content.description}
+                    onChange={(e) => setContent({ description: e.target.value })}
+                    rows={3}
+                    className="resize-y rounded-lg border border-rs-border bg-rs-card px-2.5 py-2 text-base text-rs-text sm:text-xs"
+                  />
+                </label>
+              )}
               <div className="flex gap-2">
                 <label className="flex flex-1 flex-col gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-rs-text-faint">{FIELD.type}</span>

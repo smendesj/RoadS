@@ -1,5 +1,6 @@
 import "server-only";
 
+import { extractResumo, extractSolucao } from "@/lib/bilateral-sync";
 import { issueLabels, PRIORIDADE_OPTION_IDS, STACK_OPTION_IDS, type NewIssueFields } from "@/lib/issue-fields";
 import type { Effort } from "@/lib/types";
 
@@ -65,11 +66,19 @@ export async function readIssueLabels(
   return (json.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean);
 }
 
-function issueBody(description: string, effort: Effort): string {
+/**
+ * A new issue's body (issue #28): the item's Problema › Solução text opens it, then the effort and the criteria. A text
+ * without a Solução heading (an old draft, or a template the user cleared) becomes the Solução, under a Problema still
+ * to be written, so every body has the section the sync reads the item's summary from.
+ */
+export function issueBody(description: string, effort: Effort): string {
+  const text = description.replace(/\r\n?/g, "\n").trim();
+  const opening =
+    extractSolucao(text) !== null
+      ? text
+      : ["## Problema", "", "Item criado no Roadmap do RoadS; problema ainda por escrever.", "", "## Solução", "", text || "Solução ainda por escrever."].join("\n");
   return [
-    "## Por que entrou na fila",
-    "",
-    description.trim() || "Item criado no Roadmap do RoadS; descrição ainda por escrever.",
+    opening,
     "",
     `**Esforço estimado:** ${effort}`,
     "",
@@ -131,20 +140,23 @@ type FieldValue = { singleSelectOptionId: string } | { text: string } | { date: 
 /**
  * Opens the issue with its labels and its Effort (the issue's own field), and puts it on Project #7 with every field
  * it can fill: Status (Open unless it is born in the current sprint), Prioridade, Stack and Description, each matched
- * by id against the live board. Returns its URL, number and the names of the fields it skipped: an Effort GitHub
- * refused, or a field or option the board no longer has.
+ * by id against the live board, the Description with the body's summary only. Returns its URL, number, the names of the
+ * fields it skipped (an Effort GitHub refused, or a field or option the board no longer has) and that summary, the
+ * item's Description from then on ("" for a body without one, as the sync reads it).
  */
 export async function createGeoCloudIssue(
   token: string,
   fields: NewIssueFields,
   status: WritableStatus = "Open",
   port: GitHubPort = {}
-): Promise<{ url: string; number: number; skipped: string[] }> {
+): Promise<{ url: string; number: number; skipped: string[]; resumo: string }> {
   const { title, description, prioridade, effort, tipo, stack } = fields;
+  const body = issueBody(description, effort);
+  const resumo = extractResumo(body) ?? "";
   const issue = await github(
     token,
     `/repos/${GEOCLOUD_REPO}/issues`,
-    { method: "POST", body: { title, body: issueBody(description, effort), labels: issueLabels(tipo, stack, prioridade) } },
+    { method: "POST", body: { title, body, labels: issueLabels(tipo, stack, prioridade) } },
     port
   );
   const skipped: string[] = [];
@@ -171,14 +183,14 @@ export async function createGeoCloudIssue(
     ["Status", STATUS_FIELD_ID, { singleSelectOptionId: STATUS_OPTIONS[status] }],
     ["Priority", PRIORIDADE_FIELD_ID, { singleSelectOptionId: PRIORIDADE_OPTION_IDS[prioridade] }],
     ["Stack", STACK_FIELD_ID, { singleSelectOptionId: STACK_OPTION_IDS[stack] }],
-    ["Description", DESCRIPTION_FIELD_ID, { text: description.trim() || title }],
+    ["Description", DESCRIPTION_FIELD_ID, { text: resumo || title }],
   ];
   for (const [name, field, value] of wanted) {
     if (!fitsBoard(layout, field, value)) skipped.push(name);
     else await setField(token, item, field, value, port);
   }
 
-  return { url: issue.html_url, number: issue.number, skipped };
+  return { url: issue.html_url, number: issue.number, skipped, resumo };
 }
 
 export type IssueChange = {

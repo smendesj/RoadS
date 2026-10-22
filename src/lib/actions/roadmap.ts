@@ -10,6 +10,7 @@ import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { moveLanePayload } from "@/lib/move-payload";
 import { isTestData, mayGetIssue } from "@/lib/test-data";
 import { commentAuthorName } from "@/lib/comment-author";
+import { NEW_ITEM_DESCRIPTION } from "@/lib/text/roadmap";
 import { assigneeKey, parseLogin } from "@/lib/assignee-sync";
 import { currentSprintLane, ensureCurrentSprintLane } from "@/lib/current-sprint";
 import { sprintLanesByDate, todayInSaoPaulo, weekDates, weekLanes, weekTitle } from "@/lib/sprint-week";
@@ -173,7 +174,8 @@ export async function createRoadmapItem(): Promise<RoadmapItem> {
       lane_id: laneId,
       sort_order: sortOrder,
       title: NEW_ITEM_TITLE,
-      description: "Escreva aqui, em linguagem natural, o que precisa ser feito.",
+      // The Problema › Solução template its issue's body will open with (issue #28).
+      description: NEW_ITEM_DESCRIPTION,
       produto: "GeoCloud",
       prioridade: "Medium",
       effort: "Medium",
@@ -281,7 +283,9 @@ export async function saveRoadmapItemEdit(
     const title = input.content.title.trim();
     if (!title) throw new Error("title_required");
     update.title = title;
-    update.description = input.content.description.trim();
+    // An item with an issue shows the issue's summary, which only GitHub changes (issue #28): its Description stays as
+    // stored, for every role. A draft with no issue yet keeps an editable one.
+    update.description = access.item.github_issue_url ? access.item.description : input.content.description.trim();
     if (title !== access.item.title) changedAt.title = now;
     if (update.description !== access.item.description) changedAt.description = now;
     update.produto = input.content.produto;
@@ -366,10 +370,11 @@ async function ensureIssue(
   try {
     const issue = await createGeoCloudIssue(token, item, status);
     // Linking is bookkeeping, not a content edit, so it goes through the admin client: the
-    // actor was already authorized above, and the 0007 triggers limit what their own session may set.
+    // actor was already authorized above, and the 0007 triggers limit what their own session may set. From now on the
+    // item holds only the body's summary, the same one the sync brings from the issue (issue #28).
     const { error } = await createAdminClient()
       .from("roadmap_items")
-      .update({ github_issue_url: issue.url, github_issue_number: issue.number })
+      .update({ github_issue_url: issue.url, github_issue_number: issue.number, description: issue.resumo })
       .eq("id", itemId);
     if (error) throw error;
     return issue;
