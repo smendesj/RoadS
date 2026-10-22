@@ -99,8 +99,6 @@ async function call(ctx, id, args, pagePath) {
 
     // ------------------------------------------------------------------ DEV
     const devDenied = [
-      ["editItemComment (the admin's Comment)", A.editItemComment, [adminNote, "[TESTE] forjado"], "/roadmap"],
-      ["deleteItemComment (the admin's Comment)", A.deleteItemComment, [adminNote], "/roadmap"],
       ["createRoadmapItem", A.createRoadmapItem, [], "/roadmap"],
       ["deleteRoadmapItem (admin's item)", A.deleteRoadmapItem, [L.ids.adminItem], "/roadmap"],
       ["moveRoadmapItemLane (SM's item)", A.moveRoadmapItemLane, [L.ids.smItem, "zz-test-b"], "/roadmap"],
@@ -187,8 +185,6 @@ async function call(ctx, id, args, pagePath) {
 
     // ------------------------------------------------------------------ SCRUM MASTER
     const smDenied = [
-      ["editItemComment (the admin's Comment)", A.editItemComment, [adminNote, "[TESTE] forjado"], "/roadmap"],
-      ["deleteItemComment (the admin's Comment)", A.deleteItemComment, [adminNote], "/roadmap"],
       ["deleteRoadmapItem (admin's item)", A.deleteRoadmapItem, [L.ids.adminItem], "/roadmap"],
       ["moveRoadmapItemLane (admin's item)", A.moveRoadmapItemLane, [L.ids.adminItem, "zz-test-b"], "/roadmap"],
       ["moveRoadmapItemLane to the Kanban, unplanning it (admin's item)", A.moveRoadmapItemLane, [L.ids.adminItem, "kanban"], "/roadmap"],
@@ -202,6 +198,20 @@ async function call(ctx, id, args, pagePath) {
     for (const [name, id, args, p] of smDenied) {
       const r = await call(sm.context, id, args, p);
       expect(`scrum master -> ${name}: refused`, r.kind === "error", `${r.kind} ${r.status}`);
+    }
+    // Since issue #34 no screen edits or deletes a Comment, so neither action is in the build: called by the ids they had
+    // in the previous build, a dev and a scrum master reach nothing, and the admin's Comment stays as it was.
+    const OLD_COMMENT_ACTIONS = [
+      ["editItemComment", "600dda44334f7fe4de78590284270a36823d0d998b", [adminNote, "[TESTE] forjado"]],
+      ["deleteItemComment", "40b3682ed46fbe4e49facaefdd7915b19fd369849d", [adminNote]],
+    ];
+    expect("editItemComment and deleteItemComment are not actions of the build any more (issue #34)",
+      !A.editItemComment && !A.deleteItemComment && OLD_COMMENT_ACTIONS.every(([, id]) => !manifest[id]));
+    for (const [who, session] of [["dev", dev], ["scrum master", sm]]) {
+      for (const [name, id, args] of OLD_COMMENT_ACTIONS) {
+        const r = await call(session.context, id, args, "/roadmap");
+        expect(`${who} -> ${name} (the admin's Comment), by its old id: not found`, r.kind === "not-found" || r.kind === "error", `${r.kind} ${r.status}`);
+      }
     }
     expect("dev and scrum master -> the admin's Comment is untouched", await adminNoteIntact());
     expect("scrum master -> nothing changed on the admin's and seeded items",
