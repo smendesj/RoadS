@@ -12,7 +12,7 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
-const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState, setProjectDate, clearProjectField, readBoardFields, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment, readIssueAssignees, setIssueAssignees, readIssueEfforts, setIssueEffort, issueBody } =
+const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssue, readIssueState, setProjectDate, clearProjectField, readBoardFields, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment, readIssueAssignees, setIssueAssignees, readIssueEfforts, setIssueEffort, issueBody } =
   await import("./github.ts");
 const { NEW_ITEM_DESCRIPTION } = await import("./text/roadmap.ts");
 
@@ -49,6 +49,24 @@ test("an issue's state is read as closed or open", async () => {
   assert.equal(closed.calls[0].method, "GET");
   const open = recordingGitHub(() => ({ state: "open" }));
   assert.equal(await readIssueState("token-sintetico", 900001, { fetch: open.fetch }), "open");
+});
+
+test("an issue's state and body come in one request, so a closed issue's Description needs no second read (issue #34)", async () => {
+  const gh = recordingGitHub(() => ({ state: "closed", body: "## Solução\n\nResumo sintético." }));
+  assert.deepEqual(await readIssue("token-sintetico", 900001, { fetch: gh.fetch }), { state: "closed", body: "## Solução\n\nResumo sintético." });
+  assert.equal(gh.calls.length, 1);
+  assert.equal(gh.calls[0].method, "GET");
+  assert.match(gh.calls[0].url, /\/issues\/900001$/);
+});
+
+test("an issue with no body reads as an empty one, and anything but closed as open", async () => {
+  const gh = recordingGitHub(() => ({ state: "open", body: null }));
+  assert.deepEqual(await readIssue("token-sintetico", 900001, { fetch: gh.fetch }), { state: "open", body: "" });
+});
+
+test("a GitHub that refuses the read is an error, never an open issue with an empty body", async () => {
+  const refusing = (async () => new Response(JSON.stringify({ message: "Not Found" }), { status: 404 })) as typeof fetch;
+  await assert.rejects(readIssue("token-sintetico", 900001, { fetch: refusing }), /404/);
 });
 
 /** A GitHub that records each request (method, path, body) and answers with `answer`. */

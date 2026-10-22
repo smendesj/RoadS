@@ -220,16 +220,25 @@ export async function closeIssueAsNotPlanned(token: string, number: number, comm
   await updateIssue(token, number, { state: "closed", state_reason: "not_planned" }, port);
 }
 
-/** Whether an issue is open or closed now (an item RoadS moved out of Done may hold a closed issue the sync didn't list). */
-export async function readIssueState(token: string, number: number, { fetch: fetchImpl = fetch }: GitHubPort = {}): Promise<"open" | "closed"> {
+/**
+ * An issue's state and body now, in one request: an item whose issue is closed isn't among the open issues the sync
+ * reads, and it still follows the issue's state and, since issue #34, its Description (the body's Solução), so both come
+ * from this one read. A body GitHub leaves empty reads as "".
+ */
+export async function readIssue(token: string, number: number, { fetch: fetchImpl = fetch }: GitHubPort = {}): Promise<{ state: "open" | "closed"; body: string }> {
   const res = await fetchImpl(`https://api.github.com/repos/${GEOCLOUD_REPO}/issues/${number}`, {
     method: "GET",
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`GitHub answered ${res.status} reading the issue`);
-  const json: { state?: string } = await res.json();
-  return json.state === "closed" ? "closed" : "open";
+  const json: { state?: string; body?: string | null } = await res.json();
+  return { state: json.state === "closed" ? "closed" : "open", body: json.body ?? "" };
+}
+
+/** Whether an issue is open or closed now (an item RoadS moved out of Done may hold a closed issue the sync didn't list). */
+export async function readIssueState(token: string, number: number, port: GitHubPort = {}): Promise<"open" | "closed"> {
+  return (await readIssue(token, number, port)).state;
 }
 
 export type IssueChangeTimes = { titleAt: string | null; bodyAt: string | null; labelAt: string | null };
