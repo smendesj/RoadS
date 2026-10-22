@@ -220,16 +220,25 @@ export async function closeIssueAsNotPlanned(token: string, number: number, comm
   await updateIssue(token, number, { state: "closed", state_reason: "not_planned" }, port);
 }
 
-/** Whether an issue is open or closed now (an item RoadS moved out of Done may hold a closed issue the sync didn't list). */
-export async function readIssueState(token: string, number: number, { fetch: fetchImpl = fetch }: GitHubPort = {}): Promise<"open" | "closed"> {
+/**
+ * An issue's state and body now, in one request: an item whose issue is closed isn't among the open issues the sync
+ * reads, and it still follows the issue's state and, since issue #34, its Description (the body's Solução), so both come
+ * from this one read. A body GitHub leaves empty reads as "".
+ */
+export async function readIssue(token: string, number: number, { fetch: fetchImpl = fetch }: GitHubPort = {}): Promise<{ state: "open" | "closed"; body: string }> {
   const res = await fetchImpl(`https://api.github.com/repos/${GEOCLOUD_REPO}/issues/${number}`, {
     method: "GET",
     headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`GitHub answered ${res.status} reading the issue`);
-  const json: { state?: string } = await res.json();
-  return json.state === "closed" ? "closed" : "open";
+  const json: { state?: string; body?: string | null } = await res.json();
+  return { state: json.state === "closed" ? "closed" : "open", body: json.body ?? "" };
+}
+
+/** Whether an issue is open or closed now (an item RoadS moved out of Done may hold a closed issue the sync didn't list). */
+export async function readIssueState(token: string, number: number, port: GitHubPort = {}): Promise<"open" | "closed"> {
+  return (await readIssue(token, number, port)).state;
 }
 
 export type IssueChangeTimes = { titleAt: string | null; bodyAt: string | null; labelAt: string | null };
@@ -267,61 +276,10 @@ export async function readIssueChangeTimes(token: string, numbers: number[], por
 }
 
 /** One comment of an issue, as the two-way sync of Comments reads it (comment-sync.ts). */
-export type IssueComment = { id: number; body: string; updatedAt: string; login: string | null; bot: boolean };
-
-const COMMENTS_PAGE = 100;
-
-/**
- * The comments of each issue, read in one request. An issue with more comments than one page holds is left out of
- * the map: the sync then leaves its Comments alone, since a comment it did not read would look deleted.
- */
-export async function readIssueComments(token: string, numbers: number[], port: GitHubPort = {}): Promise<Map<number, IssueComment[]>> {
-  const comments = new Map<number, IssueComment[]>();
-  if (!numbers.length) return comments;
-  const [owner, name] = GEOCLOUD_REPO.split("/");
-  const fields = numbers
-    .map(
-      (n) => `i${n}: issue(number: ${Number(n)}) { comments(first: ${COMMENTS_PAGE}) { totalCount
-        nodes { databaseId body updatedAt author { login __typename } } } }`
-    )
-    .join("\n");
-  const json = await github(
-    token,
-    "/graphql",
-    { method: "POST", body: { query: `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`, variables: { owner, name } } },
-    port
-  );
-  type Node = { databaseId: number; body: string; updatedAt: string; author: { login: string; __typename: string } | null };
-  const repo: Record<string, { comments: { totalCount: number; nodes: Node[] } } | null> = json?.data?.repository ?? {};
-  for (const n of numbers) {
-    const issue = repo[`i${n}`];
-    if (!issue || issue.comments.totalCount > issue.comments.nodes.length) continue;
-    comments.set(
-      n,
-      issue.comments.nodes.map((c) => ({
-        id: c.databaseId,
-        body: c.body,
-        updatedAt: c.updatedAt,
-        login: c.author?.login ?? null,
-        bot: c.author?.__typename === "Bot",
-      }))
-    );
-  }
-  return comments;
-}
-
 /** Writes a new comment on an issue; answers its id and time, which the Comment keeps so it never comes back as new. */
 export async function createIssueComment(token: string, number: number, body: string, port: GitHubPort = {}): Promise<{ id: number; updatedAt: string }> {
   const json = await github(token, `/repos/${GEOCLOUD_REPO}/issues/${number}/comments`, { method: "POST", body: { body } }, port);
   return { id: json.id, updatedAt: json.updated_at };
-}
-
-export async function updateIssueComment(token: string, commentId: number, body: string, port: GitHubPort = {}): Promise<void> {
-  await github(token, `/repos/${GEOCLOUD_REPO}/issues/comments/${commentId}`, { method: "PATCH", body: { body } }, port);
-}
-
-export async function deleteIssueComment(token: string, commentId: number, port: GitHubPort = {}): Promise<void> {
-  await github(token, `/repos/${GEOCLOUD_REPO}/issues/comments/${commentId}`, { method: "DELETE", body: undefined }, port);
 }
 
 /**

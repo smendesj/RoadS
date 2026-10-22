@@ -88,10 +88,9 @@ async function login(session, { expectOk = true, password } = {}) {
 }
 
 const menuButton = (page) => page.locator('button[aria-label="User menu"]');
-// A Roadmap card's own button (Edit, Delete, + Comment, Save, Cancel), never one of its Comments' buttons: since #23
-// both say Edit, Delete, Save and Cancel, the names GitHub uses.
-const cardButton = (scope, name) =>
-  scope.getByRole("button", { name, exact: true }).and(scope.page().locator("button:not([data-comment-id] button)"));
+// A Roadmap card's own button (Edit, Delete, + Comment, Save, Cancel). Since #34 the card shows no Comments, so no
+// Comment's button can share these names.
+const cardButton = (scope, name) => scope.getByRole("button", { name, exact: true });
 const scrub = (text) => {
   let out = String(text);
   for (const r of Object.keys(PREFIX)) out = out.split(cred(`${PREFIX[r]}_PASSWORD`)).join("<hidden>");

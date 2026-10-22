@@ -12,7 +12,7 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);
-const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssueState, setProjectDate, clearProjectField, readBoardFields, readIssueComments, createIssueComment, updateIssueComment, deleteIssueComment, readIssueAssignees, setIssueAssignees, readIssueEfforts, setIssueEffort, issueBody } =
+const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssue, readIssueState, setProjectDate, clearProjectField, readBoardFields, createIssueComment, readIssueAssignees, setIssueAssignees, readIssueEfforts, setIssueEffort, issueBody } =
   await import("./github.ts");
 const { NEW_ITEM_DESCRIPTION } = await import("./text/roadmap.ts");
 
@@ -49,6 +49,24 @@ test("an issue's state is read as closed or open", async () => {
   assert.equal(closed.calls[0].method, "GET");
   const open = recordingGitHub(() => ({ state: "open" }));
   assert.equal(await readIssueState("token-sintetico", 900001, { fetch: open.fetch }), "open");
+});
+
+test("an issue's state and body come in one request, so a closed issue's Description needs no second read (issue #34)", async () => {
+  const gh = recordingGitHub(() => ({ state: "closed", body: "## Solução\n\nResumo sintético." }));
+  assert.deepEqual(await readIssue("token-sintetico", 900001, { fetch: gh.fetch }), { state: "closed", body: "## Solução\n\nResumo sintético." });
+  assert.equal(gh.calls.length, 1);
+  assert.equal(gh.calls[0].method, "GET");
+  assert.match(gh.calls[0].url, /\/issues\/900001$/);
+});
+
+test("an issue with no body reads as an empty one, and anything but closed as open", async () => {
+  const gh = recordingGitHub(() => ({ state: "open", body: null }));
+  assert.deepEqual(await readIssue("token-sintetico", 900001, { fetch: gh.fetch }), { state: "open", body: "" });
+});
+
+test("a GitHub that refuses the read is an error, never an open issue with an empty body", async () => {
+  const refusing = (async () => new Response(JSON.stringify({ message: "Not Found" }), { status: 404 })) as typeof fetch;
+  await assert.rejects(readIssue("token-sintetico", 900001, { fetch: refusing }), /404/);
 });
 
 /** A GitHub that records each request (method, path, body) and answers with `answer`. */
@@ -278,51 +296,13 @@ test("the labels are read from the issue, strings or objects", async () => {
   assert.match(asked, /\/issues\/900001$/);
 });
 
-test("the comments of each issue are read in one request, with who wrote them and whether it was a bot", async () => {
-  const gh = recordingGitHub(() => ({
-    data: {
-      repository: {
-        i900001: {
-          comments: {
-            totalCount: 2,
-            nodes: [
-              { databaseId: 501, body: "Um", updatedAt: "2026-10-21T09:00:00Z", author: { login: "conta-teste", __typename: "User" } },
-              { databaseId: 502, body: "Dois", updatedAt: "2026-10-21T10:00:00Z", author: { login: "um-bot", __typename: "Bot" } },
-            ],
-          },
-        },
-        i900002: { comments: { totalCount: 0, nodes: [] } },
-      },
-    },
-  }));
-  const comments = await readIssueComments("token-sintetico", [900001, 900002], { fetch: gh.fetch });
-  assert.equal(gh.calls.length, 1);
-  assert.deepEqual(comments.get(900001), [
-    { id: 501, body: "Um", updatedAt: "2026-10-21T09:00:00Z", login: "conta-teste", bot: false },
-    { id: 502, body: "Dois", updatedAt: "2026-10-21T10:00:00Z", login: "um-bot", bot: true },
-  ]);
-  assert.deepEqual(comments.get(900002), []);
-});
-
-test("an issue with more comments than one page holds is left out, so its missing comments never read as deleted", async () => {
-  const gh = recordingGitHub(() => ({ data: { repository: { i900001: { comments: { totalCount: 101, nodes: [] } } } } }));
-  const comments = await readIssueComments("token-sintetico", [900001], { fetch: gh.fetch });
-  assert.equal(comments.has(900001), false);
-});
-
-test("creating, editing and deleting a comment send exactly those requests", async () => {
+test("creating a comment sends exactly that request and answers its id and time", async () => {
   const gh = recordingGitHub((url) => (url.endsWith("/comments") ? { id: 601, updated_at: "2026-10-21T11:00:00Z" } : {}));
   const created = await createIssueComment("token-sintetico", 900001, "Texto\n\n— Pessoa (RoadS)", { fetch: gh.fetch });
-  await updateIssueComment("token-sintetico", 601, "Texto novo", { fetch: gh.fetch });
-  await deleteIssueComment("token-sintetico", 601, { fetch: gh.fetch });
   assert.deepEqual(created, { id: 601, updatedAt: "2026-10-21T11:00:00Z" });
   assert.deepEqual(
     gh.calls.map((c) => [c.method, c.url.replace(/^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+/, ""), c.body]),
-    [
-      ["POST", "/issues/900001/comments", { body: "Texto\n\n— Pessoa (RoadS)" }],
-      ["PATCH", "/issues/comments/601", { body: "Texto novo" }],
-      ["DELETE", "/issues/comments/601", undefined],
-    ]
+    [["POST", "/issues/900001/comments", { body: "Texto\n\n— Pessoa (RoadS)" }]]
   );
 });
 

@@ -90,6 +90,7 @@ const { BASE, expect, sleep, svc } = L;
     const { data: aNotes } = await svc.from("item_notes").select("author_role, author_id").eq("item_id", L.ids.smItem);
     expect("admin renames a Scrum Master's item; the owner stays the Scrum Master", renamed.title === "[TESTE] SM item, renomeado pelo admin" && renamed.created_by === L.ids.sm);
     expect("admin's note is stored under the admin's id", aNotes.length === 1 && aNotes[0].author_id === L.ids.admin, JSON.stringify(aNotes));
+    expect("admin's note is not shown on the card (issue #34): no card shows a Comment", (await count(page.getByText("[TESTE] nota do admin"))) === 0 && (await count(page.locator("[data-comment-id]"))) === 0);
 
     await btn(card("[TESTE] item semeado (sem dono)"), "Edit").click();
     await editing().locator("input").first().fill("[TESTE] semeado, renomeado pelo admin");

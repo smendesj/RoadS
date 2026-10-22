@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import type { Effort, Prioridade, Produto, RoadmapItem } from "@/lib/types";
 import { isStack, isTipo, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } from "@/lib/issue-fields";
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
-import { ItemComment } from "@/components/ItemComment";
 import { assigneeNames } from "@/lib/assignee-sync";
 import { extractResumo, type SelectorStatus } from "@/lib/bilateral-sync";
 import { ACTION, FIELD } from "@/lib/text/common";
@@ -88,17 +87,11 @@ export function ItemCard({
   onSaveEdit,
   onCancelEdit,
   onDelete,
-  viewer = null,
-  onCommentsChanged = () => {},
   people = [],
 }: {
   /** Who can be an Assignee: the profiles tied to a GitHub login, with their names. */
   people?: { login: string; name: string }[];
   item: RoadmapItem;
-  /** Who is looking: whoever wrote a Comment, and the admin, edit and delete it (ItemComment). */
-  viewer?: { id: string; role: string } | null;
-  /** A Comment was edited or deleted: the board reloads. */
-  onCommentsChanged?: () => void;
   canDrag: boolean;
   isEditing: boolean;
   editDraft: EditDraft | null;
@@ -184,9 +177,7 @@ export function ItemCard({
         </p>
       )}
 
-      {item.notes.map((n) => (
-        <ItemComment key={n.id} note={n} viewer={viewer} onChanged={onCommentsChanged} />
-      ))}
+      {/* The card shows no Comments (issue #34): they go up to the issue, and are read there. "+ Comment" below still writes one. */}
 
       {isEditing && editDraft && (
         <div className="flex flex-col gap-2 rounded-lg bg-rs-lane p-2.5">

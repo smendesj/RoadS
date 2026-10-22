@@ -210,7 +210,6 @@ async function seedBoard() {
     const card = (title) => page.locator('[data-lane-id="zz-test-sprint"] div[draggable]', { hasText: title }).first();
     const openCard = (title) => open.locator("div[draggable]", { hasText: title }).first();
     const btn = L.cardButton;
-    const commentBtn = (c, name) => c.getByRole("button", { name, exact: true });
     const seeded = card("[TESTE] item semeado (sem dono)");
     const adminItem = card("[TESTE] item do admin");
 
@@ -262,7 +261,7 @@ async function seedBoard() {
     }
     const { data: note } = await svc.from("item_notes").select("author_role, body").eq("item_id", created.id);
     expect("create: the note is stored, pinned to scrum_master", note.length === 1 && note[0].author_role === "scrum_master" && /primeira nota/.test(note[0].body), JSON.stringify(note));
-    expect("create: the note shows on the card as 'Scrum Master'", (await count(open.locator("div[draggable]", { hasText: "[TESTE] criado pelo Scrum Master" }).getByText("[TESTE] primeira nota"))) === 1);
+    expect("create: the note is not shown on the card (issue #34): Comments only go up to the issue", (await count(open.locator("div[draggable]", { hasText: "[TESTE] criado pelo Scrum Master" }).getByText("[TESTE] primeira nota"))) === 0);
 
     // ------------------------------------------------ edit own item, on its card in Open
     const own = openCard("[TESTE] criado pelo Scrum Master");
@@ -319,29 +318,10 @@ async function seedBoard() {
         reopened.row.status === "Open" && reopened.row.lane_id === created.lane_id && (await count(openCard("[TESTE] criado e editado pelo SM").getByText("Blocker", { exact: true }))) === 0, JSON.stringify(reopened.row));
     }
 
-    // ------------------------------------------------ Comments (issue #23): whoever wrote one edits and deletes it
-    const myComment = openCard("[TESTE] criado e editado pelo SM").locator("[data-comment-id]", { hasText: "[TESTE] primeira nota" });
-    expect("Comment: shows its author and, to whoever wrote it, Edit and Delete",
-      (await count(commentBtn(myComment, "Edit"))) === 1 && (await count(commentBtn(myComment, "Delete"))) === 1);
-    await commentBtn(myComment, "Edit").click();
-    await myComment.getByLabel("Edit Comment").fill("[TESTE] primeira nota, editada");
-    await commentBtn(myComment, "Save").click();
-    await page.getByText("[TESTE] primeira nota, editada").first().waitFor({ timeout: 15000 });
-    await sleep(500);
-    const { data: editedNote } = await svc.from("item_notes").select("body, updated_at, deleted_at").eq("item_id", created.id);
-    expect("Comment: the edit is saved with its time, to go to the issue on the next sync",
-      editedNote.length === 1 && editedNote[0].body === "[TESTE] primeira nota, editada" && editedNote[0].updated_at && !editedNote[0].deleted_at, JSON.stringify(editedNote));
-    // The mark comes with the board the edit reloads, a moment after the text itself.
-    const editedMark = openCard("[TESTE] criado e editado pelo SM").locator("[data-comment-id]", { hasText: "· edited" });
-    await editedMark.waitFor({ timeout: 15000 }).catch(() => {});
-    expect("Comment: an edited one says so", (await count(editedMark)) === 1);
-    const editedComment = openCard("[TESTE] criado e editado pelo SM").locator("[data-comment-id]", { hasText: "[TESTE] primeira nota, editada" });
-    await commentBtn(editedComment, "Delete").click();
-    expect("Comment: Delete asks first, in the card", (await count(editedComment.getByText("Delete this Comment?"))) === 1);
-    await commentBtn(editedComment, "Delete").click();
-    await editedComment.waitFor({ state: "detached", timeout: 15000 });
-    const { data: noteLeft } = await svc.from("item_notes").select("id").eq("item_id", created.id);
-    expect("Comment: one never sent to GitHub is deleted at once", noteLeft.length === 0, JSON.stringify(noteLeft));
+    // ------------------------------------------------ Comments (issue #34): the card shows none, edits none, deletes none
+    // A Comment only goes up to the issue; it is read there. The one written on create is still stored (checked above).
+    expect("Comment: the card shows no Comment, and so no Edit or Delete of one",
+      (await count(page.locator("[data-comment-id]"))) === 0 && (await count(openCard("[TESTE] criado e editado pelo SM").getByText("[TESTE] primeira nota"))) === 0);
 
     // ------------------------------------------------ Assignees (issue #23): picked among the profiles with a GitHub login
     const { data: smLogin } = await svc.from("profiles").select("github_login").eq("id", L.ids.sm).single();
@@ -372,12 +352,19 @@ async function seedBoard() {
     expect("seeded item: the edit panel has NO title/description/produto fields", (await count(noting.getByText("Title", { exact: true }))) === 0 && (await count(noting.getByText("Description", { exact: true }))) === 0);
     await labelled(noting, "Priority").selectOption("Critical");
     await noting.getByPlaceholder("Write a Comment (optional)...").fill("[TESTE] nota no item semeado");
+    // The card shows no Comment (issue #34), and the panel closes before the save is sent: the row is read once the
+    // server action that carries the item has answered (it may wait behind another action of the page).
+    const seededSaved = page.waitForResponse((r) => {
+      const q = r.request();
+      return q.method() === "POST" && !!q.headers()["next-action"] && (q.postData() ?? "").includes(L.ids.seeded) && (q.postData() ?? "").includes("[TESTE] nota no item semeado");
+    }, { timeout: 20000 });
     await btn(noting, "Save").click();
-    await page.getByText("[TESTE] nota no item semeado").first().waitFor({ timeout: 15000 });
-    await sleep(1000);
+    await seededSaved;
+    await noting.waitFor({ state: "detached", timeout: 15000 });
     const { data: sRow } = await svc.from("roadmap_items").select("title, prioridade, field_changed_at").eq("id", L.ids.seeded).single();
     const { data: sNotes } = await svc.from("item_notes").select("author_role").eq("item_id", L.ids.seeded);
     expect("seeded item: priority changed, title untouched, note stored as scrum_master", sRow.prioridade === "Critical" && sRow.title === "[TESTE] item semeado (sem dono)" && sNotes.length === 1 && sNotes[0].author_role === "scrum_master", JSON.stringify([sRow, sNotes]));
+    expect("seeded item: '+ Comment' saves the Comment, and the card shows none", (await count(page.getByText("[TESTE] nota no item semeado"))) === 0 && (await count(page.locator("[data-comment-id]"))) === 0);
     expect("seeded item: the priority's edit time is kept for the two-way sync, and the title has none", !!sRow.field_changed_at?.prioridade && !sRow.field_changed_at?.title, JSON.stringify(sRow));
 
     // ------------------------------------------------ plan: a card dragged from Open to a week stays in Open, labelled with it
@@ -890,8 +877,9 @@ async function seedBoard() {
       await sleep(2000);
       expect("unplan: the Open card dropped back on Open changes nothing (the item stays in its week)", (await laneOfItem(created.id)) === "zz-test-sprint", await laneOfItem(created.id));
 
+      const unplanned = moveAnswer(created.id, "kanban");
       await mouseDrag(card(title), open);
-      await sleep(2500);
+      await unplanned;
       expect("unplan (drag from the week to the Kanban): the item is saved in the bug type lane, out of the week", (await laneOfItem(created.id)) === "tipo-bug", await laneOfItem(created.id));
       const { data: q } = await svc.from("roadmap_sync_queue").select("payload").eq("item_id", created.id).eq("action", "move_lane").gte("created_at", since);
       const moves = (q ?? []).map((r) => r.payload);
