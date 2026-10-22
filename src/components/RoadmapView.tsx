@@ -335,7 +335,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
         actions={
           myRole !== null && (
             <div className="relative">
-              <SyncButton onClick={syncIssues} isPending={isSyncing} />
+              <SyncButton onClick={syncIssues} isPending={isSyncing} tight />
               {syncMessage && (
                 <span className="absolute right-0 top-full z-30 mt-1 w-max max-w-[260px] rounded-md bg-rs-card px-1.5 py-0.5 text-right text-[11px] text-rs-text-faint">
                   {syncMessage}
@@ -387,7 +387,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
-                        <div className={`text-sm font-extrabold ${lane.current ? "text-rs-brand-text" : "text-rs-text"}`}>{lane.title}</div>
+                        <div data-lane-title className={`text-sm font-extrabold ${lane.current ? "text-rs-brand-text" : "text-rs-text"}`}>{lane.title}</div>
                         {lane.items.length > MAX_ITEMS_PER_SPRINT && (
                           <span data-over-limit className="text-[12px] font-semibold text-rs-brand-text">
                             {ROADMAP.sprintOverLimit}

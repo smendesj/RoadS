@@ -149,8 +149,8 @@ const { BASE, expect, sleep } = L;
       await check("Config");
 
       await page.goto(BASE + "/resumo", { waitUntil: "load" });
-      await page.getByRole("heading", { name: "Board report", exact: true }).waitFor({ timeout: 30000 });
-      expect("S3 Resumo: the tab says 'Board report'", ((await page.locator('a[href="/resumo"]').first().innerText()) ?? "").trim() === "Board report");
+      await page.getByRole("heading", { name: "Report", exact: true }).waitFor({ timeout: 30000 });
+      expect("S3 Resumo: the tab says 'Report'", ((await page.locator('a[href="/resumo"]').first().innerText()) ?? "").trim() === "Report");
       await sleep(800);
       await check("Resumo");
       // The Prévia, when a report is on show, keeps its Portuguese: its title and its seal.

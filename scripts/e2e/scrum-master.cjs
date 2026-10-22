@@ -184,7 +184,7 @@ async function seedBoard() {
     const W = await L.weeks();
     {
       const row = page.locator('[data-drag-scroll="x"] > [data-lane-id]');
-      const shown = await row.evaluateAll((lanes) => lanes.map((l) => ({ id: l.dataset.laneId, virtual: l.hasAttribute("data-virtual"), title: l.querySelector(":scope > div > div")?.textContent?.trim() ?? "", current: l.getAttribute("aria-current") })));
+      const shown = await row.evaluateAll((lanes) => lanes.map((l) => ({ id: l.dataset.laneId, virtual: l.hasAttribute("data-virtual"), title: l.querySelector("[data-lane-title]")?.textContent?.trim() ?? "", current: l.getAttribute("aria-current") })));
       const expected = W.real.map((l) => ({ id: l.id, start: l.start_date, virtual: false }));
       for (let m = W.monday; m <= W.trailing; m = L.addDays(m, 7)) if (!W.holds(m)) expected.push({ id: L.weekId(m), start: m, virtual: true });
       expected.sort((a, b) => a.start.localeCompare(b.start));

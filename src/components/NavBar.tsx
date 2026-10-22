@@ -48,8 +48,9 @@ export function NavBar({
   // inside itself rather than ever widening the page.
   const crowded = showResumo && showConfig;
 
+  // Below md the tabs share the bar's width, each label centered in its tab on one line.
   const tabClass = (tab: Tab) =>
-    `flex-1 rounded-lg py-2 text-center font-bold md:flex-none md:px-4 ${
+    `flex flex-1 items-center justify-center whitespace-nowrap rounded-lg py-2 text-center font-bold md:flex-none md:px-4 ${
       crowded ? "px-1.5 text-xs sm:px-3 sm:text-sm" : "px-3 text-sm"
     } ${active === tab ? "bg-rs-brand text-white" : "text-rs-text-soft"}`;
 
@@ -58,7 +59,7 @@ export function NavBar({
       <BrandMark />
 
       <div
-        className={`order-last flex w-full gap-1.5 rounded-[10px] bg-rs-bg p-1 md:order-none md:w-auto ${
+        className={`order-last flex w-full justify-center gap-1.5 rounded-[10px] bg-rs-bg p-1 md:order-none md:w-auto ${
           crowded ? "overflow-x-auto" : ""
         }`}
       >
