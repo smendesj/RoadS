@@ -477,6 +477,52 @@ test("--shots-dir takes the prints listed in captions.json, in that order, with 
   assert.equal(w.uploads().length, 3); // the file that is not listed never goes up
 });
 
+test("--shots-dir: a print's «before» goes up too and rides on its print as {mime, path}; the pair counts once", async () => {
+  const before = jpeg(250);
+  const w = assembling({
+    [`${WEEK}/captions.json`]: JSON.stringify([
+      { file: "101-tela.png", caption: "Tela da entrega A.", issue: 101, before: "antes-101-S1.jpg", cover: 101 },
+      { file: "102-codigo.jpg", caption: "Trecho da entrega B.", issue: 102 },
+    ]),
+    [`${WEEK}/antes-101-S1.jpg`]: before,
+  });
+  assert.equal(await w.run(...ASSEMBLE), 0, w.output());
+  const shots = sentContent(w).shots;
+  assert.deepEqual(shots[0].before, { mime: "image/jpeg", path: `${await sha256Hex(new Uint8Array(before))}.jpg` });
+  assert.equal(shots[1].before, undefined);
+  assert.equal(w.uploads().length, 3); // two prints and one before, each on its own
+  assert.ok(w.uploads().some((r) => JSON.parse(String(r.init.body)).data === before.toString("base64")));
+
+  // Forty prints, each with its before, are still forty: the pair counts once.
+  const list = Array.from({ length: 40 }, (_, i) => ({ file: `p${i}.png`, caption: `P${i}.`, ...(i === 0 ? { issue: 101 } : i === 1 ? { issue: 102 } : {}), before: `a${i}.png` }));
+  const files = Object.fromEntries(list.flatMap((s, i) => [[`${WEEK}/${s.file}`, png(100 + i)], [`${WEEK}/${s.before}`, png(300 + i)]]));
+  const forty = assembling({ [`${WEEK}/captions.json`]: JSON.stringify(list), ...files });
+  assert.equal(await forty.run(...ASSEMBLE), 0, forty.output());
+  assert.equal(sentContent(forty).shots.length, 40);
+});
+
+test("--shots-dir refuses a «before» that is missing, badly named, too big or not an image, naming it", async () => {
+  const cases: [Record<string, unknown>, Record<string, string | Buffer>, RegExp][] = [
+    [{ before: "sumiu.png" }, {}, /sumiu\.png/],
+    [{ before: "../fora.png" }, {}, /antes/i],
+    [{ before: 7 }, {}, /antes/i],
+    [{ before: "grande.jpg" }, { [`${WEEK}/grande.jpg`]: jpeg(1024 * 1024 + 1) }, /grande\.jpg/],
+    [{ before: "texto.png" }, { [`${WEEK}/texto.png`]: Buffer.from("não é imagem") }, /texto\.png/],
+  ];
+  for (const [extra, files, message] of cases) {
+    const w = assembling({
+      [`${WEEK}/captions.json`]: JSON.stringify([
+        { file: "101-tela.png", caption: "Tela A.", issue: 101, ...extra },
+        { file: "102-codigo.jpg", caption: "Trecho B.", issue: 102 },
+      ]),
+      ...files,
+    });
+    assert.equal(await w.run(...ASSEMBLE), 1, JSON.stringify(extra));
+    assert.match(w.output(), message);
+    assert.equal(w.requests.length, 0);
+  }
+});
+
 test("--shots-dir without a captions.json, or without a print of a delivery, is refused naming it; a listed file that is missing is named", async () => {
   const noList = world({
     files: {

@@ -12,22 +12,27 @@ export const isShown = (e: ProgressEntry | null | undefined): boolean => Boolean
 /** The deliveries the reader sees. */
 export const visibleOf = (content: ProgressContent): ProgressEntry[] => (Array.isArray(content.entries) ? content.entries : []).filter(isShown);
 
-export type PlacedShot = { shot: Shot; src: string | null };
+/** `before` is the link of the print's before (the same screen before the change), or null when it has none. */
+export type PlacedShot = { shot: Shot; src: string | null; before: string | null };
 
 /**
  * A print of a delivery that has its own block sits under it; a print of a hidden delivery is left out with
  * it; every other print (no delivery, or one only listed under "Próximos passos") is a general one, at the end.
- * `urls[i]` is the link of `content.shots[i]`, checked by `safe`; a print without a usable link keeps its place
- * with `src: null`. One e-mail carries at most MAX_SHOTS; the week, made of several, passes Infinity.
+ * `urls[i]` is the link of `content.shots[i]` and `beforeUrls[i]` the link of its before, both checked by
+ * `safe`; a print without a usable link keeps its place with `src: null`. One e-mail carries at most MAX_SHOTS
+ * (a print and its before count once); the week, made of several, passes Infinity.
  */
 export function placeShots(
   content: ProgressContent,
   urls: (string | undefined)[] | undefined,
   safe: (url: string | undefined) => string | null,
-  max: number = MAX_SHOTS
+  max: number = MAX_SHOTS,
+  beforeUrls?: (string | undefined)[]
 ): { shotsOf: (issue: number) => PlacedShot[]; general: PlacedShot[] } {
   const visible = visibleOf(content);
-  const shots = (Array.isArray(content.shots) ? content.shots : []).slice(0, max).map((shot, i) => ({ shot, src: safe(urls?.[i]) }));
+  const shots = (Array.isArray(content.shots) ? content.shots : [])
+    .slice(0, max)
+    .map((shot, i) => ({ shot, src: safe(urls?.[i]), before: shot.before ? safe(beforeUrls?.[i]) : null }));
   const blocked = new Set(visible.filter((e) => e.status !== "proximo").map((e) => e.issue));
   const hiddenIssues = new Set((Array.isArray(content.entries) ? content.entries : []).filter((e) => e && !visible.includes(e)).map((e) => e.issue));
   return {
