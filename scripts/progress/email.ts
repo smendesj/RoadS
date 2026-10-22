@@ -6,7 +6,8 @@
 // writes nothing until it is run again with --confirm. Pictures are embedded as data URIs so the file
 // opens anywhere: open it in a browser, select all, copy and paste into a new Outlook message. Prints kept
 // in the storage bucket (every report pushed since the prints went there) cannot be embedded here: the
-// tool says how many were left out, so they can be pasted by hand.
+// tool says how many were left out, so they can be pasted by hand. A print's before always lives in the
+// bucket, so this file never shows one (no `beforeUrls`), and the tool says how many were left out too.
 // Without `--out` the file goes to .frontlights/progress/ (ignored by git).
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
@@ -77,6 +78,9 @@ async function main(): Promise<number> {
     console.log(`E-mail gravado em ${out}.`);
     const stored = shots.filter((shot) => !shot.data).length;
     if (stored > 0) console.log(`Atenção: ${stored} print(s) guardado(s) no armazenamento do RoadS não entram neste arquivo; cole-os à mão.`);
+    // The befores of the prints that ARE in the file (a stored print's before goes with it in the line above).
+    const befores = shots.filter((shot) => shot.data && shot.before).length;
+    if (befores > 0) console.log(`Atenção: a tela "antes" de ${befores} print(s) fica no armazenamento do RoadS e não entra neste arquivo; cole-a à mão.`);
     console.log(`Assunto: ${emailSubject(content)}`);
     console.log("Abra o arquivo no navegador, selecione tudo (Ctrl+A), copie (Ctrl+C) e cole numa mensagem nova do Outlook.");
     return 0;

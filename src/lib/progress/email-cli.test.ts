@@ -103,3 +103,27 @@ test("a call without --content explains the usage and exits with 2; a bad file f
     w.done();
   }
 });
+
+test("a print's before lives in the bucket, so the file leaves it out and says so; a print without one adds no warning", () => {
+  const w = workdir();
+  try {
+    const content = join(w.dir, "resumo.json");
+    const out = join(w.dir, "email.html");
+    const before = { mime: "image/png" as const, path: `${"e".repeat(64)}.png` };
+    writeFileSync(content, JSON.stringify(sampleContent(2, { shots: [{ id: "s1", caption: "Legenda do print 1", mime: "image/jpeg", data: "AAECAwQF", before }] })));
+    const result = run(["--content", content, "--out", out, "--confirm"], w.dir);
+    assert.equal(result.code, 0, result.stderr);
+    const html = readFileSync(out, "utf8");
+    assert.match(html, /<img src="data:image\/jpeg;base64,AAECAwQF"/); // the print stays
+    assert.ok(!html.includes(">antes<")); // its before does not
+    assert.match(result.stdout, /antes.*1 print/);
+    assert.ok(!/guardado\(s\) no armazenamento do RoadS não entram/.test(result.stdout)); // the print itself is in the file
+
+    writeFileSync(content, JSON.stringify(withExtras()));
+    const plain = run(["--content", content, "--out", out, "--confirm"], w.dir);
+    assert.equal(plain.code, 0, plain.stderr);
+    assert.ok(!plain.stdout.includes("Atenção"));
+  } finally {
+    w.done();
+  }
+});

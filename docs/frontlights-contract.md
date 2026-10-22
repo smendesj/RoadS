@@ -264,11 +264,31 @@ quando não é imagem ou passa do limite.
 
 ### `POST /progress-report/<id>/shots`
 
-`{ "shots": [ { "caption": "…", "mime": "image/png", "issue": 101, "path": "<hash>.png" } ] }` → `200
-{ "schemaVersion": 1, "added": 2, "existing": 0 }`. Acrescenta prints a um resumo **já enviado** (de uma entrega,
-com `issue`, ou gerais, sem); o texto, as situações, os números e os prints que ele já tinha não mudam, e um print
-que já estava lá é pulado. `404 { "error": "not_found" }`, `409 { "error": "not_sent" | "concurrent_change" }`,
-`400` para o corpo inválido.
+`{ "shots": [ { "caption": "…", "mime": "image/png", "issue": 101, "path": "<hash>.png", "before": { "mime":
+"image/jpeg", "path": "<hash>.jpg" } } ] }` → `200 { "schemaVersion": 1, "added": 2, "existing": 0 }`. Acrescenta
+prints a um resumo **já enviado** (de uma entrega, com `issue`, ou gerais, sem); o texto, as situações, os números e
+os prints que ele já tinha não mudam, e um print que já estava lá é pulado. `404 { "error": "not_found" }`, `409
+{ "error": "not_sent" | "concurrent_change" }`, `400` para o corpo inválido.
+
+- **`before`** (opcional): o print antes, como em `shots[i].before` do rascunho (seção "O print antes", abaixo).
+  Precisa ter subido por `POST /progress-report/shots`, como o próprio print; um que não subiu é recusado (`400`).
+- **Só um print novo ganha antes.** O mesmo print (mesmo `path` na mesma entrega, ou geral) com o mesmo `before`, ou
+  os dois sem, é pulado como sempre. Um `before` para um print que o resumo já tem sem ele, ou com outro, é recusado
+  com `400` e nada é gravado: o e-mail já mostrou aquele print, e os links dele estão congelados. Para mostrar o par,
+  ele entra como um print novo (outro arquivo).
+
+### O print antes
+
+Acordado com o Frontlights em 2026-10-22 (smendesj/frontlights#74). Um print pode vir com a mesma tela **antes** da
+mudança:
+
+- **`captions.json`:** cada item aceita `"before": "<arquivo>"` (opcional), um PNG ou JPEG **da mesma pasta**, com a
+  mesma regra de nome do `file` e até **1 MB**. Ele não tem legenda própria: vale a do print.
+- **Envio:** o antes sobe por `POST /progress-report/shots` logo depois do seu print, e o rascunho o carrega como
+  `shots[i].before = { "mime": "image/png" | "image/jpeg", "path": "<hash>.<ext>" }`, sempre um caminho no
+  armazenamento, nunca a imagem embutida (`data`).
+- **Os 40:** o par conta **uma vez** no limite de 40 prints.
+- **Link:** o antes sai em `…/shot-<n>-before.<ext>`, sob o número do seu print, então nenhum print muda de link.
 
 ### Fatos do GitHub (`facts.json`)
 
@@ -506,3 +526,6 @@ repositório, `roads-script/push` e `roads-script/attach`.
   espelha), e o RoadS deixa de ter "Very High": o Effort passa a ser High, Medium ou Low, e os valores guardados como
   Very High viraram High (migração 0043), também em `modify` e em `roadmap-state`. As chaves do `modify` não mudaram
   e a `schemaVersion` segue 1.
+- **2026-10-22 (aditivo, acordado em smendesj/frontlights#74):** o print antes. `before` opcional num item de
+  `captions.json`, `shots[i].before` no rascunho e no `POST /progress-report/<id>/shots` (só para print novo), e o
+  link `shot-<n>-before.<ext>`. O par conta uma vez nos 40. Nenhum campo saiu e a `schemaVersion` segue 1.

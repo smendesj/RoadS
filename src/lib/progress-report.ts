@@ -133,7 +133,8 @@ export type ConferenceRow = {
 /**
  * A print, already downscaled (at most MAX_SHOTS per report, see draft.ts). `issue` ties it to the delivery it
  * shows; without one it is a general print, at the end of the e-mail. The image lives in the private storage
- * bucket under `path`; reports pushed before that carry it inline as base64 in `data`.
+ * bucket under `path`; reports pushed before that carry it inline as base64 in `data`. `before` is the same
+ * screen before the change, always in the bucket: it rides on its print, so it never takes a place of its own.
  */
 export type Shot = {
   id: string;
@@ -142,7 +143,10 @@ export type Shot = {
   issue?: number;
   path?: string;
   data?: string /* base64, older reports only */;
+  before?: ShotBefore;
 };
+
+export type ShotBefore = { mime: "image/jpeg" | "image/png"; path: string };
 
 export type ProgressEntry = {
   id: string; // "gc-<issue>": also the key edits are stored under
@@ -226,7 +230,8 @@ export type ProgressReportRow = {
 export type LintIssue = { code: string; message: string };
 /** "geral" is the plain-language text for the CEO; "ia" is the usage section, where "token" is allowed. */
 export type LintSection = "geral" | "ia";
-export type EmailOptions = { visualUrl: string; shotUrls: string[]; roadsUrl: string };
+/** `beforeUrls[i]` is the link of the before of `content.shots[i]` (positional, like `shotUrls`); left out, no before is shown. */
+export type EmailOptions = { visualUrl: string; shotUrls: string[]; beforeUrls?: (string | undefined)[]; roadsUrl: string };
 export type EmailBuild = { html: string; text: string };
 
 /* ---------- Public image links (fetched by an e-mail client: no cookies, unguessable token) ---------- */
@@ -240,3 +245,7 @@ export const visualPath = (token: string, pushedAt: string): string =>
 
 export const shotPath = (token: string, pushedAt: string, n: number, ext: "jpg" | "png"): string =>
   `/api/progress-report/${token}/${version(pushedAt)}/shot-${n}.${ext}`;
+
+/** The before of print `n`, under the print's own number: adding one never moves a print's link. */
+export const shotBeforePath = (token: string, pushedAt: string, n: number, ext: "jpg" | "png"): string =>
+  `/api/progress-report/${token}/${version(pushedAt)}/shot-${n}-before.${ext}`;

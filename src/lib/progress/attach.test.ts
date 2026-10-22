@@ -150,3 +150,73 @@ test("a report that changed between the read and the write is a 409, not a silen
   const store: AttachStore = { ...db.store, writeShots: async () => false };
   assert.deepEqual(await attachShots(store, ID, { shots: [shotOf(1, path("a"))] }), { status: 409, body: { error: "concurrent_change" } });
 });
+
+// The before: the same screen before the change, uploaded like a print and riding on it.
+const beforeOf = (p: string) => ({ mime: p.endsWith(".png") ? ("image/png" as const) : ("image/jpeg" as const), path: p });
+
+test("a new print with its before keeps the before in the stored content, and the pair takes one place", async () => {
+  const db = fakeStore(sent(), [path("a"), path("b", "jpg")]);
+  const out = await attachShots(db.store, ID, { shots: [{ ...shotOf(1, path("a"), "Tela depois"), before: beforeOf(path("b", "jpg")) }] });
+  assert.deepEqual(out, { status: 200, body: { added: 1, existing: 0 } });
+  assert.deepEqual(db.now()!.content.shots![1], { id: "shot-2", caption: "Tela depois", mime: "image/png", issue: 1, path: path("a"), before: beforeOf(path("b", "jpg")) });
+  assert.equal(db.now()!.content.shots!.length, 2);
+});
+
+test("a before never uploaded is refused like a print never uploaded, and nothing is written", async () => {
+  const db = fakeStore(sent(), [path("a")]);
+  const out = await attachShots(db.store, ID, { shots: [{ ...shotOf(1, path("a")), before: beforeOf(path("c")) }] });
+  assert.ok(out.status === 400 && /antes/.test(out.body.error) && /não foi enviado/.test(out.body.error), JSON.stringify(out));
+  assert.equal(db.writes.length, 0);
+});
+
+test("a before of the wrong shape is refused and says the field", async () => {
+  const cases: unknown[] = [
+    null,
+    "b.png",
+    { path: path("b") }, // no type
+    { mime: "image/gif", path: path("b") },
+    { mime: "image/png", path: "../segredo.png" },
+    { mime: "image/png", path: path("b", "jpg") }, // extension of another type
+    { mime: "image/jpeg", data: "AAAA" }, // a before is only ever a path in the bucket
+  ];
+  for (const before of cases) {
+    const db = fakeStore(sent(), [path("a"), path("b"), path("b", "jpg")]);
+    const out = await attachShots(db.store, ID, { shots: [{ ...shotOf(1, path("a")), before }] });
+    assert.equal(out.status, 400, JSON.stringify(before));
+    assert.ok(out.status === 400 && /shots\[0\]\.before/.test(out.body.error), out.status === 400 ? out.body.error : "");
+    assert.equal(db.writes.length, 0);
+  }
+});
+
+test("a before for a print the sent report already has is refused: the e-mail already showed that print", async () => {
+  const content = sentContent();
+  content.shots = [...content.shots!, { ...shotOf(1, path("a")), id: "shot-2" }, { ...shotOf(2, path("d")), id: "shot-3", before: beforeOf(path("b")) }];
+  for (const shot of [
+    { ...shotOf(1, path("a")), before: beforeOf(path("b")) }, // the stored print has none
+    { ...shotOf(2, path("d")), before: beforeOf(path("e")) }, // the stored print has another
+  ]) {
+    const db = fakeStore(sent(structuredClone(content)), [path("a"), path("b"), path("d"), path("e")]);
+    const out = await attachShots(db.store, ID, { shots: [shot] });
+    assert.equal(out.status, 400, JSON.stringify(shot));
+    assert.ok(out.status === 400 && /antes/.test(out.body.error) && new RegExp(`#${shot.issue}`).test(out.body.error), out.status === 400 ? out.body.error : "");
+    assert.equal(db.writes.length, 0);
+  }
+});
+
+test("the same print with the same before again adds nothing: the run can be repeated", async () => {
+  const db = fakeStore(sent(), [path("a"), path("b")]);
+  const shot = { ...shotOf(1, path("a")), before: beforeOf(path("b")) };
+  await attachShots(db.store, ID, { shots: [shot] });
+  assert.deepEqual(await attachShots(db.store, ID, { shots: [shot] }), { status: 200, body: { added: 0, existing: 1 } });
+  assert.equal(db.writes.length, 1);
+});
+
+test("a print and its before count once in the forty", async () => {
+  const full = sentContent();
+  full.shots = Array.from({ length: 39 }, (_, i) => ({ ...shotOf(1, path("a")), id: `shot-${i + 1}`, caption: `Print ${i + 1}` }));
+  full.shots = full.shots.map((s, i) => ({ ...s, path: `${i.toString(16).padStart(2, "0").repeat(32)}.png` }));
+  const db = fakeStore(sent(full), [path("e"), path("f")]);
+  const out = await attachShots(db.store, ID, { shots: [{ ...shotOf(2, path("e")), before: beforeOf(path("f")) }] });
+  assert.deepEqual(out, { status: 200, body: { added: 1, existing: 0 } });
+  assert.equal(db.now()!.content.shots!.length, 40);
+});

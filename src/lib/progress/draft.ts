@@ -16,6 +16,7 @@ import type {
   ProgressEntry,
   ReportWindow,
   Shot,
+  ShotBefore,
   SprintBlock,
   SprintCover,
   TokenCount,
@@ -51,7 +52,8 @@ export const KEPT_FIELDS = {
   byModel: fieldsOf<UsageModel["byModel"][number]>({ input: true, output: true, cacheRead: true, cacheWrite: true, model: true, messages: true }),
   day: fieldsOf<DayUsage>({ date: true, sessions: true, firstPromptAt: true, lastPromptAt: true, messages: true, humanPrompts: true, tokens: true, otherMethodTokens: true, hourly: true }),
   session: fieldsOf<DayUsage["sessions"][number]>({ start: true, end: true, messages: true, tokens: true }),
-  shot: fieldsOf<Shot>({ id: true, caption: true, mime: true, issue: true, path: true, data: true }),
+  shot: fieldsOf<Shot>({ id: true, caption: true, mime: true, issue: true, path: true, data: true, before: true }),
+  before: fieldsOf<ShotBefore>({ mime: true, path: true }),
   gap: fieldsOf<CoverageGap>({ at: true, ref: true, nearestMessageMinutes: true }),
   sprint: fieldsOf<SprintBlock>({ epics: true, totals: true }),
   cover: fieldsOf<SprintCover>({ issue: true, title: true, summary: true, issues: true, parts: true, open: true }),
@@ -331,7 +333,13 @@ function shot(value: unknown, path: string, issues: Set<number>): Shot {
   if (mime !== "image/jpeg" && mime !== "image/png") return refuse(`${path}.mime`, "esperado image/jpeg ou image/png");
   const issue = s.issue === undefined ? undefined : whole(s.issue, `${path}.issue`, 1e9);
   if (issue !== undefined && !issues.has(issue)) refuse(`${path}.issue`, `a entrega #${issue} não está neste resumo`);
-  const base = { id: id(s.id, `${path}.id`), caption: text(s.caption, `${path}.caption`, 200), mime: mime as Shot["mime"], ...maybe("issue", issue) };
+  const base = {
+    id: id(s.id, `${path}.id`),
+    caption: text(s.caption, `${path}.caption`, 200),
+    mime: mime as Shot["mime"],
+    ...maybe("issue", issue),
+    ...maybe("before", s.before === undefined ? undefined : before(s.before, `${path}.before`)),
+  };
   if ((s.path === undefined) === (s.data === undefined)) return refuse(path, "esperado o caminho do print no armazenamento (path) ou a imagem (data), um dos dois");
   if (s.path !== undefined) {
     const stored = s.path;
@@ -350,6 +358,18 @@ function shot(value: unknown, path: string, issues: Set<number>): Shot {
   const head = atob(data.slice(0, 12));
   if (!IMAGE_SIGNATURE[mime].every((byte, i) => head.charCodeAt(i) === byte)) return refuse(`${path}.data`, "o arquivo não é uma imagem do tipo informado");
   return { ...base, data };
+}
+
+/** The screen before the change: only ever a path in the storage bucket, never inline. */
+function before(value: unknown, path: string): ShotBefore {
+  const b = record(value, path);
+  const mime = b.mime;
+  if (mime !== "image/jpeg" && mime !== "image/png") return refuse(`${path}.mime`, "esperado image/jpeg ou image/png");
+  const stored = b.path;
+  if (typeof stored !== "string" || !SHOT_PATH.test(stored) || !stored.endsWith(`.${shotExtension(mime)}`)) {
+    return refuse(`${path}.path`, "esperado o nome do print antes no armazenamento (hash e extensão do tipo)");
+  }
+  return { mime, path: stored };
 }
 
 function gap(value: unknown, path: string): CoverageGap {
