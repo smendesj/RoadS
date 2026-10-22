@@ -1,7 +1,6 @@
 // The Roadmap's screen texts (issue #23), in English; the words every screen shares are in common.ts.
 
 export const ROADMAP = {
-  subtitleScrumMaster: "GeoCloud · decide what goes in and when",
   loading: "Loading...",
   newItem: "+ New item",
   moveTo: "Move to",
@@ -19,9 +18,8 @@ export const ROADMAP = {
   noOpenIssues: "No open issues.",
   noIssuesHere: "No issues here.",
   allDone: "All issues in Done on the Project",
-  planHint:
-    "Drag a card from Open to a week to plan it; it stays in Open with the week marked. In a week, drop it on a card to put " +
-    "the item before it. To unplan it, drag the card from the week back to Open. On a phone, hold the card and drag.",
+  /** Beside the title of a sprint over its limit (MAX_ITEMS_PER_SPRINT). */
+  sprintOverLimit: "⚠️ This sprint has too many issues",
 } as const;
 
 /**
@@ -39,12 +37,6 @@ export const recentDone = (days: number): string => `Went to Done in the last ${
 /** The button that switches Done between the last days and all of it. */
 export const showRecentDone = (days: number): string => `Show only the last ${days} days`;
 export const showAllDone = (count: number): string => `Show all (${count})`;
-
-/** A sprint over its limit asks for the overflow to move out. */
-export function sprintOverLimit(items: number, max: number): string {
-  const extra = items - max;
-  return `⚠️ This sprint has ${items} items, and the limit is ${max} issues per sprint. Move ${extra} ${extra === 1 ? "item" : "items"} to another sprint.`;
-}
 
 /** The ELIMS cards of the Project, which the Roadmap never shows. */
 export const elimsNote = (count: number): string =>

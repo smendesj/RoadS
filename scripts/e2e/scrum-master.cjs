@@ -88,7 +88,7 @@ async function seedBoard() {
     const count = (loc) => loc.count();
     const open = page.locator('[data-kanban-column="open"]');
     const done = page.locator('[data-kanban-column="done"]');
-    expect("roadmap: subtitle offers 'decide what goes in and when'", (await count(page.getByText(/decide what goes in and when/))) === 1);
+    expect("roadmap: no subtitle and no drag hint under the title", (await count(page.getByText(/decide what goes in|Drag a card from Open/))) === 0);
     expect("roadmap: 'Sync' is available", (await count(page.getByRole("button", { name: /^Sync$/ }))) === 1);
     expect("roadmap: one '+ New item', in the Kanban's Open, none in any week",
       (await count(page.getByRole("button", { name: "+ New item" }))) === 1 && (await count(open.getByRole("button", { name: "+ New item" }))) === 1 &&
