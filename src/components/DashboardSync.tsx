@@ -136,7 +136,7 @@ export function SprintPanels() {
         const row = (
           <>
             <span className={badgeClass(e.tone) + " rounded-full whitespace-nowrap"}>{e.status}</span>
-            <span className="order-first basis-full text-[15px] font-semibold text-rs-text sm:order-none sm:basis-0 sm:flex-grow">{e.title}</span>
+            <span className="order-first min-w-0 basis-full wrap-anywhere text-[15px] font-semibold text-rs-text sm:order-none sm:basis-0 sm:flex-grow">{e.title}</span>
             <span className="text-[13px] text-rs-text-faint">{e.effort}</span>
             {e.parts && (
               <span data-parts-count className="whitespace-nowrap text-[13px] text-rs-text-faint">
@@ -161,7 +161,7 @@ export function SprintPanels() {
               const inner = (
                 <>
                   <span className={badgeClass(part.tone) + " rounded-full whitespace-nowrap"}>{part.status}</span>
-                  <span className="order-first basis-full text-[14px] text-rs-text sm:order-none sm:basis-0 sm:flex-grow">{part.title}</span>
+                  <span className="order-first min-w-0 basis-full wrap-anywhere text-[14px] text-rs-text sm:order-none sm:basis-0 sm:flex-grow">{part.title}</span>
                   {part.ref && <span className="font-mono text-[12px] text-rs-brand-text">{part.ref}</span>}
                 </>
               );
