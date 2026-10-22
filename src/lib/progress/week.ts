@@ -10,6 +10,8 @@
 // counts; the prints of every report, each served by the link of its own report. Nothing the e-mails do not
 // have, and none of their sign-in details.
 import type { DayUsage, EntryStatus, Overrides, ProgressContent, ProgressEntry, Shot, TokenCount, UsageModel } from "../progress-report.ts";
+import { shotBeforePath, shotPath } from "../progress-report.ts";
+import { shotExtension } from "./draft.ts";
 import { resolveContent } from "./resolve.ts";
 import { isShown, visibleOf } from "./shot-place.ts";
 
@@ -166,7 +168,7 @@ export function combineWeek(rows: WeekReport[]): Week {
   ordered.forEach((row, i) => {
     (shown[i].shots ?? []).forEach((shot, at) => {
       shots.push({ ...shot, id: `shot-${shots.length + 1}` });
-      shotSources.push({ token: row.share_token, pushedAt: row.pushed_at, n: at + 1, ext: shot.mime === "image/png" ? "png" : "jpg" });
+      shotSources.push({ token: row.share_token, pushedAt: row.pushed_at, n: at + 1, ext: shotExtension(shot.mime) });
     });
   });
 
@@ -186,4 +188,19 @@ export function combineWeek(rows: WeekReport[]): Week {
     ...(shots.length ? { shots } : {}),
   };
   return { content, shotSources };
+}
+
+/**
+ * The links of the week's prints, in the order of its shots: each from its own report, and its before (when it
+ * has one) under the same number, with the before's own extension. A print without a before has none.
+ */
+export function weekShotLinks(week: Week): { shotUrls: string[]; beforeUrls: (string | undefined)[] } {
+  const shots = week.content.shots ?? [];
+  return {
+    shotUrls: week.shotSources.map((s) => shotPath(s.token, s.pushedAt, s.n, s.ext)),
+    beforeUrls: week.shotSources.map((s, i) => {
+      const before = shots[i]?.before;
+      return before ? shotBeforePath(s.token, s.pushedAt, s.n, shotExtension(before.mime)) : undefined;
+    }),
+  };
 }
