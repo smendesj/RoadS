@@ -933,7 +933,7 @@ async function reconcileRoadmapWithIssues(
       );
       const { error } = await admin
         .from("roadmap_items")
-        .update({ github_issue_url: issue.url, github_issue_number: issue.number })
+        .update({ github_issue_url: issue.url, github_issue_number: issue.number, description: issue.resumo })
         .eq("id", item.id);
       if (error) throw error;
       await admin.from("roadmap_sync_queue").insert({

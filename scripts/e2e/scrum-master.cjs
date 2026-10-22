@@ -230,6 +230,10 @@ async function seedBoard() {
     await fresh.waitFor({ timeout: 15000 });
     expect("create: the new item opens straight into edit mode, in Open",
       (await count(fresh)) === 1 && (await count(open.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])'))) === 1);
+    // Its Description is born as the Problema › Solução template its issue's body will open with (issue #28).
+    const template = "## Problema\n\nO que acontece hoje e quem sente.\n\n## Solução\n\nO que passa a acontecer, em uma ou duas frases.";
+    const bornWith = await fresh.locator("textarea").inputValue();
+    expect("create: the Description field opens with the Problema › Solução template", bornWith === template, JSON.stringify(bornWith));
     await fresh.locator("input").first().fill("[TESTE] criado pelo Scrum Master");
     await fresh.locator("textarea").fill("descrição escrita no teste");
     // By their visible labels, not their position: the card gained and lost selects (Type, Stack) over time.

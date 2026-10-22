@@ -6,7 +6,7 @@ import { isStack, isTipo, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } fr
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
 import { ItemComment } from "@/components/ItemComment";
 import { assigneeNames } from "@/lib/assignee-sync";
-import type { SelectorStatus } from "@/lib/bilateral-sync";
+import { extractResumo, type SelectorStatus } from "@/lib/bilateral-sync";
 import { ACTION, FIELD } from "@/lib/text/common";
 import { deleteItemConfirm, ROADMAP } from "@/lib/text/roadmap";
 
@@ -131,6 +131,9 @@ export function ItemCard({
   const setContent = (patch: Partial<NonNullable<EditDraft["content"]>>) => {
     if (editDraft && content) onDraftChange({ ...editDraft, content: { ...content, ...patch } });
   };
+  // A draft (no issue yet) still holds its whole Problema › Solução text: the card shows only the Solução's summary,
+  // never the "## " headings (issue #28). An item with an issue already holds just that summary.
+  const shownDesc = item.url ? item.desc : (extractResumo(item.desc) ?? item.desc);
 
   return (
     <div
@@ -172,7 +175,7 @@ export function ItemCard({
         {item.state === "Blocker" && <span className={badgeClass("red")}>Blocker</span>}
       </div>
 
-      {item.desc && <ClampedText key={item.desc} text={item.desc} />}
+      {shownDesc && <ClampedText key={shownDesc} text={shownDesc} />}
 
       {item.assignees && item.assignees.length > 0 && (
         <p data-assignees-shown className="text-xs text-rs-text-soft">
