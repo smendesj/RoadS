@@ -32,7 +32,7 @@ import "server-only";
 
 import { createGeoCloudIssue, GEOCLOUD_REPO, PRIORIDADE_FIELD_ID, clearProjectField, readBoardFields, readIssueChangeTimes, readIssueEfforts, readIssueState, setIssueEffort, setProjectDate, setProjectOption, setProjectStatus, STACK_FIELD_ID, updateIssue, type IssueChange, type IssueChangeTimes } from "@/lib/github";
 import { importableIssues, isTestData, mayGetIssue } from "@/lib/test-data";
-import { closedIssueStatus, decideField, effortSides, extractSolucao, labelsAfter, sameBase, nativeTypeOf, replaceSolucao, statusOfIssue, statusWrites, tipoOfLabels, weekOfIssue, weekOfLane, weekPull, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
+import { closedIssueStatus, decideField, descriptionPull, effortSides, extractResumo, labelsAfter, sameBase, nativeTypeOf, pushesToGitHub, statusOfIssue, statusWrites, tipoOfLabels, weekOfIssue, weekOfLane, weekPull, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
 import { syncItemComments, type CommentsSummary } from "@/lib/comments-sync";
 import { syncItemAssignees, type AssigneesSummary } from "@/lib/assignees-sync";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
@@ -416,8 +416,9 @@ async function rotateSprints(doneUrls: Set<string>, now = new Date()): Promise<v
 
 type Admin = ReturnType<typeof createAdminClient>;
 
-// Title, Description, Type, Stack, Priority and Effort go both ways between each item and its open issue
-// (src/lib/bilateral-sync.ts has the rule). The Description is the issue's "## Solução" section; the Type is its type:
+// Title, Type, Stack, Priority and Effort go both ways between each item and its open issue (src/lib/bilateral-sync.ts
+// has the rule). The Description only comes from GitHub (issue #28): the first paragraph of the issue's "## Solução"
+// section, empty without one, and a Description edited in RoadS never goes to the issue. The Type is its type:
 // label, and the issue's native type follows it; Stack and Priority are its card's fields on Project #7, matched by id,
 // and carry the labels they imply (area:, priority:high); Effort is the organization's issue field, on the issue itself
 // (issue #23: the board's Effort only mirrors it). A field the issue leaves empty is a gap RoadS fills with a value
@@ -425,8 +426,9 @@ type Admin = ReturnType<typeof createAdminClient>;
 // sees it, as titles always were; a value written to GitHub changes only that field of the issue (labels of other
 // families are kept). What the issue said is remembered per field (github_seen), and the title also in github_title,
 // which older readers use. One item failing is counted and the others go on.
-type SyncedField = "title" | "description" | "tipo" | "stack" | "prioridade" | "effort" | "status" | "week";
-const ISSUE_FIELDS = ["title", "description", "tipo"] as const;
+// The fields that go both ways; the Description only comes from GitHub, so it is not one of them.
+type SyncedField = "title" | "tipo" | "stack" | "prioridade" | "effort" | "status" | "week";
+const ISSUE_FIELDS = ["title", "tipo"] as const;
 const BOARD_FIELDS = { stack: STACK_FIELD_ID, prioridade: PRIORIDADE_FIELD_ID } as const;
 type BoardField = keyof typeof BOARD_FIELDS;
 /** How many items the field sync handles at once: few enough for GitHub's limits on writes. */
@@ -472,7 +474,7 @@ async function syncIssueFields(
 
   const byNumber = new Map(open.map((i) => [i.number, i]));
   type Side = { roads: string; github: string; githubAt?: string | null };
-  type Row = { id: string; laneId: string; tipo: string | null; number: number; issue: OpenIssue; card?: ProjectCard; effort: string; issueId?: string; seen: Record<string, string>; changedAt: Record<string, string>; values: Partial<Record<SyncedField, Side>> };
+  type Row = { id: string; laneId: string; tipo: string | null; number: number; issue: OpenIssue; card?: ProjectCard; effort: string; issueId?: string; seen: Record<string, string>; changedAt: Record<string, string>; description: string | null; values: Partial<Record<SyncedField, Side>> };
   const rows: Row[] = [];
   for (const item of items ?? []) {
     if (isTestData(item.title)) continue;
@@ -480,11 +482,8 @@ async function syncIssueFields(
     const issue = byNumber.get(number);
     if (!issue) continue;
     const seen: Record<string, string> = { ...((item.github_seen as Record<string, string> | null) ?? {}) };
-    // A body without a Solução section says nothing about the Description: it reads as unchanged on GitHub.
-    const githubDescription = extractSolucao(issue.body) ?? seen.description ?? item.description ?? "";
     const values: Row["values"] = {
       title: { roads: item.title, github: issue.title.trim() },
-      description: { roads: item.description ?? "", github: githubDescription },
       tipo: { roads: item.tipo ?? "", github: tipoOfLabels(issue.labels) ?? "" },
     };
     // The card's fields, when the card and its values were read: an empty field reads "", an option RoadS doesn't
@@ -504,7 +503,7 @@ async function syncIssueFields(
         if (github !== null) values[field] = { roads: roadsOf[field], github, githubAt: value?.updatedAt ?? null };
       }
     }
-    rows.push({ id: item.id, laneId: item.lane_id, tipo: item.tipo, number, issue, card, effort: item.effort ?? "", seen, changedAt: (item.field_changed_at as Record<string, string> | null) ?? {}, values });
+    rows.push({ id: item.id, laneId: item.lane_id, tipo: item.tipo, number, issue, card, effort: item.effort ?? "", seen, changedAt: (item.field_changed_at as Record<string, string> | null) ?? {}, description: descriptionPull(item.description ?? "", issue.body), values });
   }
 
   // Effort is read from the issues themselves, a few at a time. Unreadable, Effort waits for the next sync (it is no
@@ -537,7 +536,7 @@ async function syncIssueFields(
   const bothMoved = rows.filter((r) => ISSUE_FIELDS.some((f) => moved(r, f)));
   const times = bothMoved.length ? await readIssueChangeTimes(token, bothMoved.map((r) => r.number)) : new Map<number, IssueChangeTimes>();
   const githubAtOf = (field: SyncedField, side: Side, t?: IssueChangeTimes) =>
-    field === "title" ? t?.titleAt : field === "description" ? t?.bodyAt : field === "tipo" ? t?.labelAt : side.githubAt;
+    field === "title" ? t?.titleAt : field === "tipo" ? t?.labelAt : side.githubAt;
 
   // A Week changed on GitHub moves the item there (its week created when missing, the item last in it) or back to its
   // block, the way the sprint sync moves one: only from where this sync saw it, queued as a move_lane with origin
@@ -579,7 +578,7 @@ async function syncIssueFields(
   const summary = { pulled: 0, pushed: 0, failed: 0, retitled: 0 };
   await inPool(rows, FIELDS_POOL, async (row) => {
     try {
-      const pulled: Partial<Record<SyncedField, string>> = {};
+      const pulled: Partial<Record<SyncedField | "description", string>> = {};
       const change: IssueChange = {};
       const cardWrites: [string, string][] = [];
       let effortWrite: Effort | null = null;
@@ -597,7 +596,7 @@ async function syncIssueFields(
           github,
           roadsAt: row.changedAt[field] ?? null,
           githubAt: githubAtOf(field, side, times.get(row.number)) ?? null,
-          fillGap: field !== "title" && field !== "description" && field !== "status",
+          fillGap: field !== "title" && field !== "status",
         });
         if (decision === "pull" && field === "week") {
           // A Week brought in moves the item; a week gone by moves nothing and is looked at again next time.
@@ -608,9 +607,8 @@ async function syncIssueFields(
           seen[field] = github;
           // A Stack or Priority changed on the board brings the labels it implies along on the issue.
           if (field === "stack" || field === "prioridade") relabel.add(field);
-        } else if (decision === "push" && push) {
+        } else if (decision === "push" && push && pushesToGitHub(field)) {
           if (field === "title") change.title = roads;
-          else if (field === "description") change.body = replaceSolucao(row.issue.body, roads);
           else if (field === "tipo") relabel.add("tipo");
           else if (field === "status") {
             // Done closes the issue as completed, leaving Done reopens it, and the card's Status follows.
@@ -633,6 +631,8 @@ async function syncIssueFields(
           seen[field] = github;
         }
       }
+      // The Description follows the issue's summary, whoever syncs and whatever RoadS holds.
+      if (row.description !== null) pulled.description = row.description;
 
       // The labels the final values imply, and the native type the Type implies: written only by those who push.
       let gapsFilled = false;
@@ -892,17 +892,6 @@ async function fetchOpenIssues(token: string): Promise<OpenIssue[]> {
   throw new Error("Too many open issues to list");
 }
 
-// First paragraph of the issue body, as plain text, short enough for a card.
-function summarize(body: string): string {
-  const paragraph =
-    body
-      .replace(/<!--[\s\S]*?-->/g, "")
-      .split(/\n\s*\n/)
-      .map((p) => p.replace(/^#+\s.*$/gm, "").replace(/[*_`>]/g, "").replace(/\s+/g, " ").trim())
-      .find(Boolean) ?? "";
-  return paragraph.length > 280 ? `${paragraph.slice(0, 277).trimEnd()}...` : paragraph;
-}
-
 async function reconcileRoadmapWithIssues(
   token: string,
   onProject: Set<number>,
@@ -1013,7 +1002,7 @@ async function reconcileRoadmapWithIssues(
           lane_id: inSprint(i) && sprintLane ? sprintLane : laneForLabels(i.labels)!,
           sort_order: inSprint(i) ? nextInSprint++ : i.number,
           title: i.title,
-          description: summarize(i.body),
+          description: extractResumo(i.body) ?? "", // the card's summary of the issue, as the field sync keeps it
           produto: "GeoCloud",
           tipo: tipoForLabels(i.labels),
           github_issue_url: i.url,

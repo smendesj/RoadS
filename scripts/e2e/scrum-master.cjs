@@ -16,6 +16,7 @@ const BOARD = {
   doneOld: { number: L.SYNTHETIC_ISSUE_MIN + 105, title: "[TESTE] issue concluída há 30 dias" },
 };
 const DAY = 24 * 60 * 60 * 1000;
+const LONG_SUMMARY = Array.from({ length: 12 }, (_, i) => `Frase ${i + 1} do resumo de teste, longa o bastante para ocupar espaço no card.`).join(" ");
 async function seedBoard() {
   const card = (c, statusAt) => ({ title: c.title, ref: `#${c.number}`, url: GEOCLOUD + c.number, ...(statusAt ? { statusAt } : {}) });
   const ours = new Set(Object.values(BOARD).map((c) => GEOCLOUD + c.number));
@@ -41,17 +42,18 @@ async function seedBoard() {
   const columns = without(await read());
   if (!["open", "dev", "done"].every((k) => columns.some((c) => c.key === k))) throw new Error("the board snapshot has no Open, Development or Done column");
   await write(columns.map((c) => (add[c.key] ? { ...c, items: [...add[c.key], ...c.items], count: c.count + add[c.key].length } : c)));
-  // Their items, with no week (in a test type lane): the Open one, and the one in Development.
-  const item = async (c) => {
+  // Their items, with no week (in a test type lane): the Open one, with a summary far longer than three lines of a
+  // card (issue #28), and the one in Development.
+  const item = async (c, description = "descrição de teste") => {
     const { data, error } = await svc
       .from("roadmap_items")
-      .insert({ lane_id: "zz-test-a", title: c.title, description: "descrição de teste", created_by: null, github_issue_url: GEOCLOUD + c.number, github_issue_number: c.number })
+      .insert({ lane_id: "zz-test-a", title: c.title, description, created_by: null, github_issue_url: GEOCLOUD + c.number, github_issue_number: c.number })
       .select("id")
       .single();
     if (error) throw error;
     return data.id;
   };
-  const ids = { open: await item(BOARD.open), dev: await item(BOARD.dev) };
+  const ids = { open: await item(BOARD.open, LONG_SUMMARY), dev: await item(BOARD.dev) };
   return { ids, unseed: async () => write(without(await read())) };
 }
 
@@ -132,6 +134,25 @@ async function seedBoard() {
       expect("kanban: an issue Open on the Project shows in Open as its Roadmap item's card (#number, draggable, no week label)",
         (await count(tied)) === 1 && tiedText.includes(`#${BOARD.open.number}`) && (await tied.getAttribute("draggable")) === "true" &&
           (await count(tied.locator("[data-week-label]"))) === 0, tiedText.slice(0, 80));
+      // The card of an item with an issue shows the issue's summary in at most three lines, with "Show more" to read it
+      // all (issue #28).
+      const summary = tied.locator("[data-desc]");
+      const lines = (el) => {
+        const s = getComputedStyle(el);
+        return { lines: Math.round(el.clientHeight / parseFloat(s.lineHeight)), cut: el.scrollHeight > el.clientHeight + 1, state: el.dataset.desc };
+      };
+      const folded = (await count(summary)) === 1 ? await summary.evaluate(lines) : null;
+      const showMore = tied.locator("[data-desc-toggle]");
+      expect("card: a long summary of the issue is folded to 3 lines, cut, with 'Show more'",
+        folded?.state === "folded" && folded.lines === 3 && folded.cut && (await count(showMore)) === 1 && (await showMore.innerText()).trim() === "Show more",
+        JSON.stringify(folded));
+      await showMore.click();
+      const unfolded = await summary.evaluate(lines);
+      expect("card: 'Show more' shows the whole summary, more than 3 lines and nothing cut, and turns into 'Show less'",
+        unfolded.state === "open" && unfolded.lines > 3 && !unfolded.cut && (await summary.innerText()).trim() === LONG_SUMMARY && (await showMore.innerText()).trim() === "Show less",
+        JSON.stringify(unfolded));
+      await showMore.click();
+      expect("card: 'Show less' folds it back to 3 lines", (await summary.evaluate(lines)).lines === 3);
       const orphan = open.locator("[data-issue-card]", { hasText: BOARD.orphan.title });
       expect("kanban: an issue Open on the Project that no item holds is a plain link to it in Open",
         (await count(orphan)) === 1 && (await orphan.getAttribute("href")) === GEOCLOUD + BOARD.orphan.number);
