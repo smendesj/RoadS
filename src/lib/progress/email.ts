@@ -172,9 +172,20 @@ function entryBlock(entry: ProgressEntry): string {
   );
 }
 
-/** One print and its caption; `top` is the space above it (a print under its delivery sits closer). */
-function shotBlock(src: string, caption: string, top: number): string[] {
-  const out = [padded(top, 0, picture(src, SHOT_WIDTH, null, caption || "Tela do GeoCloud"))];
+/**
+ * One print and its caption; `top` is the space above it (a print under its delivery sits closer). A print
+ * with a before shows both open, since mail runs no script to switch them: the before first, under a small
+ * "antes", then the print as always. Without a before the print is exactly what it always was.
+ */
+function shotBlock(src: string, caption: string, top: number, before: string | null = null): string[] {
+  const out: string[] = [];
+  if (before) {
+    out.push(
+      padded(top, 0, full(row(cell(font(12, 16, COLOR.muted, "font-weight:bold;"), "antes")))),
+      padded(4, 0, picture(before, SHOT_WIDTH, null, caption ? `Antes: ${caption}` : "Tela do GeoCloud antes da mudança"))
+    );
+  }
+  out.push(padded(before ? 10 : top, 0, picture(src, SHOT_WIDTH, null, caption || "Tela do GeoCloud")));
   if (caption) out.push(padded(6, 0, full(row(cell(font(13, 19, COLOR.muted), body(caption))))));
   return out;
 }
@@ -220,10 +231,11 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
   const upcoming = by("proximo");
   const internal = content.internal && content.internal.count > 0 ? clean(content.internal.text) : "";
   // Each print keeps its position in `shots`: that index is the one its link (`shotUrls`) was built for.
-  const { shotsOf, general } = placeShots(content, options.shotUrls, safeImage);
+  // `beforeUrls[i]` is the link of that print's before, passed through the same check.
+  const { shotsOf, general } = placeShots(content, options.shotUrls, safeImage, undefined, options.beforeUrls);
   const withShots = (e: ProgressEntry): string[] => [
     entryBlock(e),
-    ...shotsOf(e.issue).flatMap(({ shot, src }) => (src ? shotBlock(src, clean(shot.caption), 12) : [])),
+    ...shotsOf(e.issue).flatMap(({ shot, src, before }) => (src ? shotBlock(src, clean(shot.caption), 12, before) : [])),
   ];
   // The picture's own title (the label from the data, or "AI usage") and numbers, so the text under a
   // blocked image says what the image would have said.
@@ -289,7 +301,7 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
 
   if (internal) rows.push(padded(20, 0, full(row(cell(font(14, 21, COLOR.muted), body(internal))))));
 
-  for (const { shot, src } of general) if (src) rows.push(...shotBlock(src, clean(shot.caption), 22));
+  for (const { shot, src, before } of general) if (src) rows.push(...shotBlock(src, clean(shot.caption), 22, before));
 
   // The picture of Claude's work, then its three headline numbers as TEXT: mail clients block images by
   // default, and the CEO should still read what Claude did.
@@ -363,7 +375,11 @@ export function buildEmail(content: ProgressContent, options: EmailOptions): Ema
     out.push("", shownCounters.map((s) => `${STATUS_LABEL[s]}: ${counts[s]}`).join(" · "));
   }
   const item = (e: ProgressEntry) => `- ${clean(e.title)}${clean(e.summary) ? `: ${clean(e.summary)}` : ""}`;
-  const printLines = (list: PlacedShot[]) => list.filter((s) => s.src && clean(s.shot.caption)).map((s) => `Print: ${clean(s.shot.caption)}`);
+  // A print with a before gets one line for the before, right above its own, as the pictures sit.
+  const printLines = (list: PlacedShot[]) =>
+    list
+      .filter((s) => s.src && clean(s.shot.caption))
+      .flatMap((s) => [...(s.before ? [`Print (antes): ${clean(s.shot.caption)}`] : []), `Print: ${clean(s.shot.caption)}`]);
   const partsLine = (e: ProgressEntry) => {
     const parts = partsLabel(e.subIssues);
     return parts ? [`  ${parts}`] : [];
