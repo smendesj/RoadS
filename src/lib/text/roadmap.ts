@@ -24,6 +24,12 @@ export const ROADMAP = {
     "the item before it. To unplan it, drag the card from the week back to Open. On a phone, hold the card and drag.",
 } as const;
 
+/**
+ * The Description a "+ New item" is born with (issue #28): the Problema › Solução template its issue's body opens with,
+ * in Portuguese like the issue. Once the issue exists, the item keeps only the Solução's summary.
+ */
+export const NEW_ITEM_DESCRIPTION = "## Problema\n\nO que acontece hoje e quem sente.\n\n## Solução\n\nO que passa a acontecer, em uma ou duas frases.";
+
 /** The confirm dialog before an item is deleted. */
 export const deleteItemConfirm = (title: string): string => `Delete "${title}"? This can't be undone.`;
 
