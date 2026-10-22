@@ -327,6 +327,20 @@ test("the placement rule is shared, and the week can lift the cap of forty", asy
   assert.equal(placeShots(rich({ shots: many }), urls, (u) => u ?? null, Infinity).shotsOf(1).length, 45);
 });
 
+test("a placed print carries its before's link, checked like its own; a print without a before has none", async () => {
+  const { placeShots } = await import("./shot-place.ts");
+  const pair = { ...shot(1), issue: 1, before: { mime: "image/png" as const, path: `${"e".repeat(64)}.png` } };
+  const alone = { ...shot(2), issue: 1 };
+  const safe = (u: string | undefined) => (u && u.startsWith("/") ? u : null);
+  const placed = placeShots(rich({ shots: [pair, alone] }), ["/a.png", "/b.png"], safe, 40, ["/a-before.png", "/b-before.png"]).shotsOf(1);
+  assert.deepEqual(placed.map((p) => [p.src, p.before]), [["/a.png", "/a-before.png"], ["/b.png", null]]);
+  // A before link that fails the check is left out, never shown broken.
+  const unsafe = placeShots(rich({ shots: [pair] }), ["/a.png"], safe, 40, ["javascript:x"]).shotsOf(1);
+  assert.equal(unsafe[0].before, null);
+  // No before links at all: every print reads as one without a before.
+  assert.equal(placeShots(rich({ shots: [pair] }), ["/a.png"], safe).shotsOf(1)[0].before, null);
+});
+
 test("a print without a link, or a report without prints, leaves no hole", () => {
   assert.ok(!html(rich(), { ...OPTIONS, shotUrls: [] }).includes("Legenda do print"));
   assert.ok(!html(rich({ shots: [] })).includes("shot-1.jpg"));

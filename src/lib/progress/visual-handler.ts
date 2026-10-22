@@ -5,12 +5,13 @@
 //
 //   /api/progress-report/<token>/<version>/visual.png   the "Claude por trás das entregas" picture
 //   /api/progress-report/<token>/<version>/shot-<n>.jpg|png   print number n (counted from 1)
+//   /api/progress-report/<token>/<version>/shot-<n>-before.jpg|png   the screen before print n's change
 //
 // The <version> segment only changes the URL when the draft is pushed again, so a client never shows a
 // stale copy; it is not read here. Every way of not getting an image is the same 404, byte for byte, so
 // the link cannot be used to learn which tokens exist.
 import { isShareToken } from "../progress-report.ts";
-import type { ProgressContent, ProgressReportRow } from "../progress-report.ts";
+import type { ProgressContent, ProgressReportRow, Shot } from "../progress-report.ts";
 import { resolveContent } from "./resolve.ts";
 import { SHOT_PATH } from "./draft.ts";
 import { PROGRESS_SHOTS_BUCKET } from "./shot-store.ts";
@@ -62,12 +63,12 @@ function decodeBase64(data: string): Uint8Array<ArrayBuffer> | null {
   }
 }
 
-type Target = { kind: "visual" } | { kind: "shot"; n: number };
+type Target = { kind: "visual" } | { kind: "shot"; n: number; before: boolean };
 
 function targetOf(file: string): Target | null {
   if (file === "visual.png") return { kind: "visual" };
-  const shot = /^shot-([1-9][0-9]?)\.(?:jpg|png)$/.exec(file);
-  return shot ? { kind: "shot", n: Number(shot[1]) } : null;
+  const shot = /^shot-([1-9][0-9]?)(-before)?\.(?:jpg|png)$/.exec(file);
+  return shot ? { kind: "shot", n: Number(shot[1]), before: shot[2] !== undefined } : null;
 }
 
 export async function handleProgressAsset(request: AssetRequest, store: AssetStore, render: VisualRenderer): Promise<AssetResponse> {
@@ -87,7 +88,9 @@ export async function handleProgressAsset(request: AssetRequest, store: AssetSto
   const cache = report.status === "sent" ? IMMUTABLE : NO_STORE;
 
   if (target.kind === "shot") {
-    const shot = report.content?.shots?.[target.n - 1];
+    const print = report.content?.shots?.[target.n - 1];
+    // A print's before is always in the bucket, under the print's own number.
+    const shot: Pick<Shot, "mime" | "path" | "data"> | undefined = target.before ? print?.before : print;
     // The stored type is data, not trusted: only the two image types are ever sent back.
     if (!shot || !SHOT_TYPES.has(shot.mime)) return notFound();
     if (shot.path !== undefined) {

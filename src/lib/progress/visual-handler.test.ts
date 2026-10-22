@@ -192,6 +192,27 @@ test("a print comes back byte for byte with its own content type, counted from 1
   assert.deepEqual(drawn, []); // a print never triggers a drawing
 });
 
+test("a print's before is served at shot-<n>-before, from the bucket; a print without one is a 404", async () => {
+  const BEFORE = `${"d".repeat(64)}.jpg`;
+  const content = sampleContent(2, { shots: [{ ...stored(), before: { mime: "image/jpeg", path: BEFORE } }, stored()] });
+  const store = fakeStore({ [TOKEN]: row({ status: "sent" }, content) }, { [STORED]: PNG_SHOT_BYTES, [BEFORE]: JPEG_BYTES });
+  const { render } = fakeRenderer();
+
+  const before = await handleProgressAsset({ token: TOKEN, file: "shot-1-before.jpg" }, store, render);
+  assert.equal(before.status, 200);
+  assert.equal(header(before, "Content-Type"), "image/jpeg");
+  assert.deepEqual(bytesOf(before), JPEG_BYTES);
+  assert.equal(header(before, "Cache-Control"), "public, max-age=31536000, immutable");
+  // The print itself still answers at its own address.
+  assert.deepEqual(bytesOf(await handleProgressAsset({ token: TOKEN, file: "shot-1.png" }, store, render)), PNG_SHOT_BYTES);
+
+  assert.equal((await handleProgressAsset({ token: TOKEN, file: "shot-2-before.png" }, store, render)).status, 404);
+  assert.equal((await handleProgressAsset({ token: TOKEN, file: "shot-1-antes.jpg" }, store, render)).status, 404);
+  const odd = fakeStore({ [TOKEN]: row({}, sampleContent(2, { shots: [{ ...stored(), before: { mime: "image/jpeg", path: "../x.jpg" } }] })) }, { "../x.jpg": JPEG_BYTES });
+  assert.equal((await handleProgressAsset({ token: TOKEN, file: "shot-1-before.jpg" }, odd, render)).status, 404);
+  assert.deepEqual(odd.read, []);
+});
+
 test("a draft's print is not cached either", async () => {
   const store = fakeStore({ [TOKEN]: row({ status: "draft" }, sampleContent(2, { shots: [shot("image/png", PNG_SHOT_BYTES)] })) });
   const res = await handleProgressAsset({ token: TOKEN, file: "shot-1.png" }, store, fakeRenderer().render);
