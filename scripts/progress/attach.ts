@@ -3,10 +3,11 @@
 //   node --experimental-strip-types scripts/progress/attach.ts --report <id> --shots-dir <pasta>
 //        [--endpoint https://.../api/frontlights] [--dry-run]
 //
-// The folder holds the prints and a captions.json listing [{ file, caption, issue? }], like the push's. A print
-// names the delivery it shows (`issue`), or none: a general print, which the e-mail and the week place at the
-// end (a plan for the week, say). Each print is uploaded on its own (the same door the push uses), then the
-// report receives the list. Only prints are added: the text, the numbers and the prints the report already had
+// The folder holds the prints and a captions.json listing [{ file, caption, issue?, before? }], like the push's. A
+// print names the delivery it shows (`issue`), or none: a general print, which the e-mail and the week place at
+// the end (a plan for the week, say). `before` names the same screen before the change, in the same folder. Each
+// print is uploaded on its own, its before right after it (the same door the push uses), then the report receives
+// the list. A before only comes with a new print: the report refuses one for a print it already has. Only prints are added: the text, the numbers and the prints the report already had
 // stay as they were, and a print already there is skipped, so the run can be repeated.
 //
 // The secret comes only from FRONTLIGHTS_API_SECRET (.env.local is loaded when it exists). Nothing printed
@@ -20,7 +21,7 @@ import { configuredEndpoint, dirShots, loadShots, uploadShots, type PushDeps } f
 const USAGE = [
   "Uso: node --experimental-strip-types scripts/progress/attach.ts --report <id> --shots-dir <pasta> [opções]",
   "  --report <id>         o id do resumo já enviado (o endereço /resumo/<id> mostra)",
-  "  --shots-dir <pasta>   pasta dos prints, com captions.json listando arquivo, legenda e, se houver, a entrega (issue); sem issue, o print é geral",
+  "  --shots-dir <pasta>   pasta dos prints, com captions.json listando arquivo, legenda e, se houver, a entrega (issue) e o print antes (before); sem issue, o print é geral",
   "  --endpoint <url>      base da API (padrão: roadmapSync.endpoint de .frontlights/config.json)",
   "  --dry-run             só confere a pasta e os prints; não envia nada",
 ];
@@ -86,7 +87,7 @@ export async function runAttach(argv: string[], deps: PushDeps): Promise<number>
     response = await deps.fetch(`${root}/progress-report/${args.report}/shots`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ shots: loaded.map(({ shot }) => ({ caption: shot.caption, mime: shot.mime, issue: shot.issue, path: shot.path })) }),
+      body: JSON.stringify({ shots: loaded.map(({ shot }) => ({ caption: shot.caption, mime: shot.mime, issue: shot.issue, path: shot.path, before: shot.before })) }),
       signal: AbortSignal.timeout(30_000),
     });
   } catch {

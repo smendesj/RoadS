@@ -3,14 +3,16 @@
 // script uses (scripts/progress/attach.ts), after it uploaded each print to the prints bucket.
 // Pure, with the table and the bucket injected: the route wires the admin client, the tests a fake.
 //
-//   { shots: [{ caption, mime, issue?, path }] } -> 200 { added, existing } | 400 { error } | 404 | 409
+//   { shots: [{ caption, mime, issue?, path, before? }] } -> 200 { added, existing } | 400 { error } | 404 | 409
 //
 // Only prints are ever added: the text, the statuses, the numbers, the user's edits and the prints the report
 // already had stay exactly as they were (the e-mail already went out). A print already there (same file, same
 // delivery, or both general) is skipped, so the run can be repeated. A general print has no `issue` at all,
 // so the e-mail and the week place it at the end, like the ones a push carries without a delivery.
+// A new print may come with its `before` ({ mime, path }, uploaded like a print): the pair takes one place. A
+// before is never added to a print the report already has: the e-mail already showed that print, with its links.
 // The write is made over the revision that was read.
-import type { ProgressContent, ProgressReportRow, Shot } from "../progress-report.ts";
+import type { ProgressContent, ProgressReportRow, Shot, ShotBefore } from "../progress-report.ts";
 import { MAX_SHOTS, SHOT_PATH, shotExtension } from "./draft.ts";
 import { isUuid } from "./report-view.ts";
 import { resolveContent } from "./resolve.ts";
@@ -31,11 +33,17 @@ export type AttachAnswer = { status: 200; body: { added: number; existing: numbe
 const refuse = (error: string): AttachAnswer => ({ status: 400, body: { error } });
 const CONTROL = /[\u0000-\u001F\u007F-\u009F]/g;
 
-/** `issue` is absent for a general print. */
-type Incoming = { caption: string; mime: Shot["mime"]; issue?: number; path: string };
+/** `issue` is absent for a general print; `before` for a print without one. */
+type Incoming = { caption: string; mime: Shot["mime"]; issue?: number; path: string; before?: ShotBefore };
 
 /** The same print twice means the same file under the same delivery, or the same file twice as a general print. */
 const printKey = (issue: number | undefined, path: string) => `${issue ?? "geral"}:${path}`;
+
+const stored = (mime: unknown, path: unknown): path is string =>
+  (mime === "image/png" || mime === "image/jpeg") && typeof path === "string" && SHOT_PATH.test(path) && path.endsWith(`.${shotExtension(mime)}`);
+
+/** Where a print sits, said in words: "geral" or "da entrega #n". */
+const where = (issue: number | undefined) => (issue === undefined ? "geral" : `da entrega #${issue}`);
 
 /** One incoming print, checked, or the sentence that says what is wrong with it. */
 function incoming(value: unknown, at: string, issues: Set<number>, hidden: Set<number>): Incoming | string {
@@ -54,10 +62,16 @@ function incoming(value: unknown, at: string, issues: Set<number>, hidden: Set<n
     if (hidden.has(issue)) return `${at}.issue: a entrega #${issue} está escondida neste resumo`;
   }
   const path = s.path;
-  if (typeof path !== "string" || !SHOT_PATH.test(path) || !path.endsWith(`.${shotExtension(mime)}`)) {
-    return `${at}.path: esperado o nome do print no armazenamento (hash e extensão do tipo)`;
+  if (!stored(mime, path)) return `${at}.path: esperado o nome do print no armazenamento (hash e extensão do tipo)`;
+  // The before, like the draft takes it: only ever a path in the bucket, never inline.
+  let before: ShotBefore | undefined;
+  if (s.before !== undefined) {
+    const b = (typeof s.before === "object" && s.before !== null ? s.before : {}) as Record<string, unknown>;
+    if (b.mime !== "image/png" && b.mime !== "image/jpeg") return `${at}.before.mime: esperado image/jpeg ou image/png`;
+    if (!stored(b.mime, b.path)) return `${at}.before.path: esperado o nome do print antes no armazenamento (hash e extensão do tipo)`;
+    before = { mime: b.mime, path: b.path };
   }
-  return { caption, mime, ...(general ? {} : { issue: issue as number }), path };
+  return { caption, mime, ...(general ? {} : { issue: issue as number }), path, ...(before ? { before } : {}) };
 }
 
 export async function attachShots(store: AttachStore, id: string, body: unknown): Promise<AttachAnswer> {
@@ -83,25 +97,42 @@ export async function attachShots(store: AttachStore, id: string, body: unknown)
   }
 
   const had = report.content.shots ?? [];
-  const known = new Set(had.map((s) => printKey(s.issue, s.path ?? "")));
+  // Each print there, with the path of its before ("" when it has none).
+  const known = new Map(had.map((s) => [printKey(s.issue, s.path ?? ""), s.before?.path ?? ""]));
   const fresh: Incoming[] = [];
   for (const shot of checked) {
     const key = printKey(shot.issue, shot.path);
-    if (known.has(key)) continue;
-    known.add(key);
-    fresh.push(shot);
+    const was = known.get(key);
+    if (was === undefined) {
+      known.set(key, shot.before?.path ?? "");
+      fresh.push(shot);
+      continue;
+    }
+    // Already there: skipped when it brings no before it lacks. A new or other before would change a print the
+    // e-mail already showed, so it is refused. Without a before it changes nothing, and is skipped too.
+    if (shot.before && shot.before.path !== was) {
+      return refuse(`shots: o print ${where(shot.issue)} já está no resumo enviado e não ganha print antes; envie o par como um print novo`);
+    }
   }
   if (fresh.length === 0) return { status: 200, body: { added: 0, existing: checked.length } };
   if (had.length + fresh.length > MAX_SHOTS) return refuse(`shots: o resumo passaria de ${MAX_SHOTS} prints`);
   for (const shot of fresh) {
-    if (!(await store.shotExists(shot.path))) {
-      return refuse(`shots: o print ${shot.issue === undefined ? "geral" : `da entrega #${shot.issue}`} não foi enviado ao armazenamento`);
+    if (!(await store.shotExists(shot.path))) return refuse(`shots: o print ${where(shot.issue)} não foi enviado ao armazenamento`);
+    if (shot.before && !(await store.shotExists(shot.before.path))) {
+      return refuse(`shots: o print antes do print ${where(shot.issue)} não foi enviado ao armazenamento`);
     }
   }
 
   // New ids follow the highest "shot-<n>" already there, so the public links of the old prints never move.
   const top = had.reduce((max, s) => Math.max(max, Number(/^shot-(\d+)$/.exec(s.id)?.[1] ?? 0)), 0);
-  const added: Shot[] = fresh.map((s, i) => ({ id: `shot-${top + i + 1}`, caption: s.caption, mime: s.mime, ...(s.issue === undefined ? {} : { issue: s.issue }), path: s.path }));
+  const added: Shot[] = fresh.map((s, i) => ({
+    id: `shot-${top + i + 1}`,
+    caption: s.caption,
+    mime: s.mime,
+    ...(s.issue === undefined ? {} : { issue: s.issue }),
+    path: s.path,
+    ...(s.before ? { before: s.before } : {}),
+  }));
   const content: ProgressContent = { ...report.content, shots: [...had, ...added] };
   if (!(await store.writeShots(id, report.rev, content))) return { status: 409, body: { error: "concurrent_change" } };
   return { status: 200, body: { added: added.length, existing: checked.length - added.length } };
