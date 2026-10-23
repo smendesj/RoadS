@@ -350,7 +350,10 @@ async function seedBoard() {
     await btn(openCard("[TESTE] item semeado (sem dono)"), "+ Comment").click();
     const noting = page.locator('div[draggable="false"]:has(input[placeholder^="Write a Comment"])');
     expect("seeded item: the edit panel has NO title/description/produto fields", (await count(noting.getByText("Title", { exact: true }))) === 0 && (await count(noting.getByText("Description", { exact: true }))) === 0);
-    await labelled(noting, "Priority").selectOption("Critical");
+    // The Priority offers only High, Medium and Low (issue #38): Critical is gone from the selector.
+    const priorityOptions = (await labelled(noting, "Priority").locator("option").allTextContents()).map((t) => t.trim());
+    expect("seeded item: the Priority selector offers High, Medium and Low, and no Critical", JSON.stringify(priorityOptions) === JSON.stringify(["High", "Medium", "Low"]), JSON.stringify(priorityOptions));
+    await labelled(noting, "Priority").selectOption("Low");
     await noting.getByPlaceholder("Write a Comment (optional)...").fill("[TESTE] nota no item semeado");
     // The card shows no Comment (issue #34), and the panel closes before the save is sent: the row is read once the
     // server action that carries the item has answered (it may wait behind another action of the page).
@@ -363,7 +366,7 @@ async function seedBoard() {
     await noting.waitFor({ state: "detached", timeout: 15000 });
     const { data: sRow } = await svc.from("roadmap_items").select("title, prioridade, field_changed_at").eq("id", L.ids.seeded).single();
     const { data: sNotes } = await svc.from("item_notes").select("author_role").eq("item_id", L.ids.seeded);
-    expect("seeded item: priority changed, title untouched, note stored as scrum_master", sRow.prioridade === "Critical" && sRow.title === "[TESTE] item semeado (sem dono)" && sNotes.length === 1 && sNotes[0].author_role === "scrum_master", JSON.stringify([sRow, sNotes]));
+    expect("seeded item: priority changed, title untouched, note stored as scrum_master", sRow.prioridade === "Low" && sRow.title === "[TESTE] item semeado (sem dono)" && sNotes.length === 1 && sNotes[0].author_role === "scrum_master", JSON.stringify([sRow, sNotes]));
     expect("seeded item: '+ Comment' saves the Comment, and the card shows none", (await count(page.getByText("[TESTE] nota no item semeado"))) === 0 && (await count(page.locator("[data-comment-id]"))) === 0);
     expect("seeded item: the priority's edit time is kept for the two-way sync, and the title has none", !!sRow.field_changed_at?.prioridade && !sRow.field_changed_at?.title, JSON.stringify(sRow));
 

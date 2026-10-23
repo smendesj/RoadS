@@ -420,7 +420,7 @@ type Admin = ReturnType<typeof createAdminClient>;
 // has the rule). The Description only comes from GitHub (issue #28): the first paragraph of the issue's "## Solução"
 // section, empty without one, and a Description edited in RoadS never goes to the issue. The Type is its type:
 // label, and the issue's native type follows it; Stack and Priority are its card's fields on Project #7, matched by id,
-// and carry the labels they imply (area:, priority:high); Effort is the organization's issue field, on the issue itself
+// and carry the labels they imply (area:, priority:); Effort is the organization's issue field, on the issue itself
 // (issue #23: the board's Effort only mirrors it). A field the issue leaves empty is a gap RoadS fills with a value
 // edited in RoadS (never a default); an option RoadS doesn't offer (a Stack named after a person) leaves the field alone. A value brought in is queued as a modify so FrontlightS
 // sees it, as titles always were; a value written to GitHub changes only that field of the issue (labels of other

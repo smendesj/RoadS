@@ -30,20 +30,25 @@ export const STACK_OPTION_IDS = {
 export type Stack = keyof typeof STACK_OPTION_IDS;
 export const STACKS = Object.keys(STACK_OPTION_IDS) as Stack[];
 
+// The Priority RoadS offers (issue #38): High, Medium and Low, each on its Project #7 option id. The board may still
+// hold its Critical option for a while, since taking it off the shared board is a separate question; until then a card
+// on Critical reads as High, and RoadS never writes Critical back, because it has no option id for it here.
+export const PRIORIDADES: readonly Prioridade[] = ["High", "Medium", "Low"];
 export const PRIORIDADE_OPTION_IDS: Record<Prioridade, string> = {
-  Critical: "313dc1cb",
   High: "3b456fae",
   Medium: "6acd6fa8",
   Low: "77fe47cd",
 };
+const CRITICAL_OPTION_ID = "313dc1cb";
 
 /** The Stack a board option is, or null for an option RoadS doesn't offer (or no option at all). */
 export function stackOfOption(id: string | undefined): Stack | null {
   return STACKS.find((s) => STACK_OPTION_IDS[s] === id) ?? null;
 }
 
-/** The Priority a board option is, or null. */
+/** The Priority a board option is (the board's old Critical reads as High, issue #38), or null. */
 export function prioridadeOfOption(id: string | undefined): Prioridade | null {
+  if (id === CRITICAL_OPTION_ID) return "High";
   return (Object.keys(PRIORIDADE_OPTION_IDS) as Prioridade[]).find((p) => PRIORIDADE_OPTION_IDS[p] === id) ?? null;
 }
 
@@ -62,14 +67,23 @@ export function areaLabels(stack: Stack): string[] {
   return (AREAS[stack] ?? []).map((a) => `area:${a}`);
 }
 
-/** Whether a Priority implies the priority:high label. */
-export function isHighPriority(prioridade: Prioridade): boolean {
-  return prioridade === "Critical" || prioridade === "High";
+// Each Priority has its own label on the issue (issue #38): priority:high, priority:medium or priority:low, one of
+// them per issue, like the Type's type: family. The three labels exist in the product repository since the triage
+// that dropped Critical, so the rule stays here, next to the board's options, rather than on a list read from GitHub.
+
+/** The priority: label a Priority implies. */
+export function priorityLabel(prioridade: Prioridade): string {
+  return `priority:${prioridade.toLowerCase()}`;
 }
 
-/** The labels an issue is created with: its type, the area its stack implies, and priority:high when it is. */
+/** Whether a label is one of the Priority's family (priority:high, priority:medium or priority:low). */
+export function isPriorityLabel(label: string): boolean {
+  return PRIORIDADES.some((p) => priorityLabel(p) === label);
+}
+
+/** The labels an issue is created with: its type, the area its stack implies, and the label of its Priority. */
 export function issueLabels(tipo: Tipo, stack: Stack, prioridade: Prioridade): string[] {
-  return [`type:${tipo}`, ...areaLabels(stack), ...(isHighPriority(prioridade) ? ["priority:high"] : [])];
+  return [`type:${tipo}`, ...areaLabels(stack), priorityLabel(prioridade)];
 }
 
 export function isTipo(v: unknown): v is Tipo {
