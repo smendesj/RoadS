@@ -17,7 +17,7 @@ import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { DONE_WINDOW_DAYS, kanbanColumns, type KanbanIssue } from "@/lib/kanban";
 import { columnClass, KANBAN_TABS, shownTab, type KanbanTab } from "@/lib/kanban-tabs";
 import { moveItem } from "@/lib/roadmap-move";
-import { brakeMessage, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
+import { brakeMessage, roadmapSyncMessage, SYNC_NOTICE_MS, syncFailureMessage } from "@/lib/sync-message";
 import { badgeClass } from "@/lib/tones";
 import { MAX_ITEMS_PER_SPRINT, type Lane, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 import type { Viewer } from "@/lib/viewer";
@@ -78,6 +78,12 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   // Pulls GitHub again: open issues the Roadmap lacks come in, closed ones leave the Kanban.
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [isSyncing, startSync] = useTransition();
+  // The message under the Sync button clears itself after a while (SYNC_NOTICE_MS).
+  useEffect(() => {
+    if (!syncMessage) return;
+    const timer = setTimeout(() => setSyncMessage(null), SYNC_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [syncMessage]);
   function syncIssues() {
     setSyncMessage(null);
     startSync(async () => {

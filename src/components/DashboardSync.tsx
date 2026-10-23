@@ -1,10 +1,10 @@
 "use client";
 
-import { createContext, useContext, useState, useTransition, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useTransition, type ReactNode } from "react";
 import { SyncButton } from "@/components/SyncButton";
 import { badgeClass } from "@/lib/tones";
 import { syncDashboard, type DashboardModel } from "@/lib/actions/dashboard";
-import { SYNC_FAILED } from "@/lib/sync-message";
+import { SYNC_FAILED, SYNC_NOTICE_MS } from "@/lib/sync-message";
 import { DASHBOARD, ofTotal } from "@/lib/text/dashboard";
 import { useAutoSync } from "@/lib/use-auto-sync";
 import { useLocalTime } from "@/lib/use-local-time";
@@ -41,6 +41,16 @@ export function DashboardSyncProvider({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // The message under the Sync button clears itself after a while (SYNC_NOTICE_MS).
+  useEffect(() => {
+    if (!error && !notice) return;
+    const timer = setTimeout(() => {
+      setError(null);
+      setNotice(null);
+    }, SYNC_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [error, notice]);
 
   function sync() {
     setError(null);

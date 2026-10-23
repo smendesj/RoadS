@@ -96,3 +96,6 @@ export function brakeMessage(retryInMs: number | undefined): string {
   if (retryInMs === undefined) return "A sync started less than 30 s ago or is still running; try again in a moment.";
   return `A sync started less than 30 s ago or is still running; the next one can run in ${Math.max(1, Math.ceil(retryInMs / 1000))} s.`;
 }
+
+// The message under the Sync button goes away on its own after this long.
+export const SYNC_NOTICE_MS = 10_000;

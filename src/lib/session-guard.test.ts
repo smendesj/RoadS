@@ -72,14 +72,14 @@ test("interactions are stamped at most once per second", () => {
   assert.equal(state.touches, 2);
 });
 
-test("nothing expires before 10 idle minutes", () => {
+test("nothing expires before 30 idle minutes", () => {
   const { state } = idleWatch(START);
   state.now = START + IDLE_LIMIT_MS - 1;
   mock.timers.tick(CHECK_MS);
   assert.equal(state.expired, 0);
 });
 
-test("at 10 idle minutes the next check expires the session", () => {
+test("at 30 idle minutes the next check expires the session", () => {
   const { state } = idleWatch(START);
   state.now = START + IDLE_LIMIT_MS;
   mock.timers.tick(CHECK_MS);

@@ -146,9 +146,9 @@ const { BASE, expect, sleep, svc } = L;
     expect("dashboard: Sync with no GitHub token fails closed", await page.getByText(/not configured yet/).waitFor({ timeout: 20000 }).then(() => true, () => false));
 
     // ------------------------------------------------ idle and Sign out
-    await page.evaluate(() => localStorage.setItem("roads-last-activity", String(Date.now() - (10 * 60 + 1) * 1000)));
+    await page.evaluate(() => localStorage.setItem("roads-last-activity", String(Date.now() - (30 * 60 + 1) * 1000)));
     await page.waitForURL("**/login", { timeout: 45000 });
-    expect("idle: 10 minutes and 1 second signs the admin out", true);
+    expect("idle: 30 minutes and 1 second signs the admin out", true);
     await L.login(s);
     await menu.waitFor();
     await menu.click();

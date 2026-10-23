@@ -6,7 +6,7 @@ import { startIdleWatch, watchSessionEnd } from "@/lib/session-guard";
 import { createClient } from "@/lib/supabase/client";
 import { useGoToLogin, useLogout } from "@/lib/use-logout";
 
-// Renders nothing; keeps a signed-in page honest about its session. 10 idle minutes sign the
+// Renders nothing; keeps a signed-in page honest about its session. 30 idle minutes sign the
 // user out, and a session that ends in another tab of this browser takes this tab to /login too.
 export function SessionGuard() {
   const logout = useLogout();

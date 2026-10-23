@@ -277,10 +277,10 @@ async function seedSprintIssue() {
     expect("api: cron, queue, roadmap-state and sync-board answer 401 to a signed-in Dev (they take secrets, not sessions)", cron === 401 && queue === 401 && roadmapState === 401 && syncRoute === 401, `${cron}/${queue}/${roadmapState}/${syncRoute}`);
 
     // ------------------------------------------------ idle logout and Sign out
-    await page.evaluate(() => localStorage.setItem("roads-last-activity", String(Date.now() - (10 * 60 + 1) * 1000)));
+    await page.evaluate(() => localStorage.setItem("roads-last-activity", String(Date.now() - (30 * 60 + 1) * 1000)));
     const t = Date.now();
     await page.waitForURL("**/login", { timeout: 45000 });
-    expect("idle: 10 minutes and 1 second of inactivity signs the Dev out", true, `${((Date.now() - t) / 1000).toFixed(1)}s`);
+    expect("idle: 30 minutes and 1 second of inactivity signs the Dev out", true, `${((Date.now() - t) / 1000).toFixed(1)}s`);
     await page.goto(BASE + "/roadmap", { waitUntil: "load" });
     expect("idle: the session is really gone (/roadmap bounces to /login)", page.url().endsWith("/login"), page.url());
 

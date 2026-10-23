@@ -19,7 +19,7 @@ export type IdleWatch = {
 };
 
 // Stamps every interaction (at most once per throttleMs) and reports once when the stamp has
-// gone 10 minutes stale: on the periodic check, when the tab becomes visible again, and right
+// gone 30 minutes stale: on the periodic check, when the tab becomes visible again, and right
 // away if the page opens already stale (browser left closed). A missing stamp is re-armed, never
 // treated as expired. Returns a function that stops everything.
 export function startIdleWatch({

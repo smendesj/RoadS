@@ -1,5 +1,5 @@
-// A signed-in user is logged out after 10 minutes without any interaction.
-export const IDLE_LIMIT_MS = 10 * 60 * 1000;
+// A signed-in user is logged out after 30 minutes without any interaction.
+export const IDLE_LIMIT_MS = 30 * 60 * 1000;
 
 // lastActivity is the epoch-ms stamp of the last interaction; a missing or garbled stamp can't
 // prove inactivity, so it never expires the session.
