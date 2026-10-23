@@ -170,12 +170,29 @@ test("a Type, Stack or Priority that changed swaps the labels of its family, and
     "needs-decision",
     "type:bug",
     "area:backend",
+    "priority:low",
   ]);
   assert.deepEqual(labelsAfter(["area:backend"], { tipo: "feature", stack: "Frontend/Backend", prioridade: "Medium" }, new Set(["stack"])), [
     "type:feature",
     "area:frontend",
     "area:backend",
+    "priority:medium",
   ]);
+});
+
+// Issue #38: the Priority is a family of one label, like the Type: priority:high, priority:medium or priority:low.
+test("a Priority that changed takes the previous priority: label off and puts its own, so the issue keeps exactly one", () => {
+  assert.deepEqual(labelsAfter(["type:feature", "priority:high", "needs-decision"], { tipo: "feature", stack: null, prioridade: "Low" }, new Set(["prioridade"])), [
+    "type:feature",
+    "needs-decision",
+    "priority:low",
+  ]);
+  assert.deepEqual(labelsAfter(["priority:low", "priority:medium"], { tipo: null, stack: null, prioridade: "High" }, new Set(["prioridade"])), ["priority:high"]);
+});
+
+test("a Priority that did not change fills its label only when the issue has no priority: label, never adding a second", () => {
+  assert.deepEqual(labelsAfter(["type:bug"], { tipo: "bug", stack: null, prioridade: "Medium" }, new Set()), ["type:bug", "priority:medium"]);
+  assert.deepEqual(labelsAfter(["type:bug", "priority:high"], { tipo: "bug", stack: null, prioridade: "Low" }, new Set()), ["type:bug", "priority:high"]);
 });
 
 test("a field that did not change only fills the labels it implies and never removes one someone put there", () => {

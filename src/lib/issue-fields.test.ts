@@ -2,12 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { isStack, isTipo, issueLabels, PRIORIDADE_OPTION_IDS, PRIORIDADES, prioridadeOfOption, stackOfOption, STACK_OPTION_IDS, STACKS } from "./issue-fields.ts";
 
-test("an issue gets its type, the area its stack implies and priority:high when it is", () => {
+// Issue #38: every Priority has its label, priority:high, priority:medium or priority:low, not only High.
+test("an issue gets its type, the area its stack implies and the label of its Priority, whatever the Priority", () => {
   assert.deepEqual(issueLabels("bug", "Frontend/Backend", "High"), ["type:bug", "area:frontend", "area:backend", "priority:high"]);
-  assert.deepEqual(issueLabels("feature", "Database", "Medium"), ["type:feature", "area:backend"]);
-  assert.deepEqual(issueLabels("spike", "General", "Low"), ["type:spike"]);
-  assert.deepEqual(issueLabels("chore", "Backend Tests", "Low"), ["type:chore", "area:backend"]);
-  assert.deepEqual(issueLabels("chore", "Frontend Tests", "Low"), ["type:chore", "area:frontend"]);
+  assert.deepEqual(issueLabels("feature", "Database", "Medium"), ["type:feature", "area:backend", "priority:medium"]);
+  assert.deepEqual(issueLabels("spike", "General", "Low"), ["type:spike", "priority:low"]);
+  assert.deepEqual(issueLabels("chore", "Backend Tests", "Low"), ["type:chore", "area:backend", "priority:low"]);
+  assert.deepEqual(issueLabels("chore", "Frontend Tests", "Low"), ["type:chore", "area:frontend", "priority:low"]);
 });
 
 test("only known types and stacks are accepted", () => {

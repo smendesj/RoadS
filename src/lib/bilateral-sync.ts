@@ -9,7 +9,7 @@
 //
 // Pure on purpose: board-sync.ts reads both sides, applies the decisions and remembers the new base.
 
-import { areaLabels, isHighPriority, TIPOS, type Stack, type Tipo } from "./issue-fields.ts";
+import { areaLabels, isPriorityLabel, priorityLabel, TIPOS, type Stack, type Tipo } from "./issue-fields.ts";
 import type { Prioridade } from "./types.ts";
 import { currentMonday } from "./sprint-week.ts";
 
@@ -78,9 +78,11 @@ export type LabelledField = "tipo" | "stack" | "prioridade";
 
 /**
  * The issue's labels once its Type, Stack and Priority are these values. A field in `changed` swaps the labels of its
- * family (type: for the Type, area: for the Stack, priority:high for the Priority) for the ones it implies; any other
+ * family (type: for the Type, area: for the Stack, priority: for the Priority) for the ones it implies; any other
  * field only adds the ones it implies that are missing (the gaps), never removing a label someone put there. Labels of
- * other families are kept in their order, and the new ones go at the end.
+ * other families are kept in their order, and the new ones go at the end. The Type and, since issue #38, the Priority
+ * are families of one label: a gap there is filled only when the issue has none of the family, so an issue never ends
+ * up with two priority: labels, and a Priority that changed leaves exactly the one of its new value.
  */
 export function labelsAfter(
   labels: string[],
@@ -90,14 +92,14 @@ export function labelsAfter(
   const isType = (l: string) => l.startsWith("type:") && (TIPOS as readonly string[]).includes(l.slice(5));
   const isArea = (l: string) => l === "area:frontend" || l === "area:backend";
   const dropped = (l: string) =>
-    (changed.has("tipo") && isType(l)) || (changed.has("stack") && isArea(l)) || (changed.has("prioridade") && l === "priority:high");
+    (changed.has("tipo") && isType(l)) || (changed.has("stack") && isArea(l)) || (changed.has("prioridade") && isPriorityLabel(l));
   const next = labels.filter((l) => !dropped(l));
   const add = (l: string) => {
     if (!next.includes(l)) next.push(l);
   };
   if (values.tipo && !next.some(isType)) add(`type:${values.tipo}`);
   if (values.stack) areaLabels(values.stack).forEach(add);
-  if (values.prioridade && isHighPriority(values.prioridade)) add("priority:high");
+  if (values.prioridade && !next.some(isPriorityLabel)) add(priorityLabel(values.prioridade));
   return next;
 }
 

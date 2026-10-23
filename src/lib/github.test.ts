@@ -15,6 +15,7 @@ register(`data:text/javascript,${encodeURIComponent(hooks)}`);
 const { LABELS_TIMEOUT_MS, readIssueLabels, createGeoCloudIssue, updateIssue, readIssueChangeTimes, setProjectOption, readBoardOptions, setProjectStatus, closeIssueAsNotPlanned, readIssue, readIssueState, setProjectDate, clearProjectField, readBoardFields, createIssueComment, readIssueAssignees, setIssueAssignees, readIssueEfforts, setIssueEffort, issueBody } =
   await import("./github.ts");
 const { NEW_ITEM_DESCRIPTION } = await import("./text/roadmap.ts");
+const { labelsAfter } = await import("./bilateral-sync.ts");
 
 test("closing and reopening an issue sends its state and the reason in the same edit", async () => {
   const gh = recordingGitHub();
@@ -129,6 +130,15 @@ test("pushing labels and the native type sends them in the same edit of the issu
   assert.deepEqual(gh.calls[0].body, { labels: ["type:bug", "area:backend"], type: "Bug" });
 });
 
+// Issue #38: a Priority changed in RoadS swaps the issue's priority: label, and the edit sends the whole new list.
+test("a Priority changed from High to Low sends the issue's labels with priority:low in place of priority:high", async () => {
+  const gh = recordingGitHub();
+  const labels = labelsAfter(["type:feature", "area:backend", "priority:high"], { tipo: "feature", stack: "Backend", prioridade: "Low" }, new Set(["prioridade"]));
+  await updateIssue("token-sintetico", 900001, { labels }, { fetch: gh.fetch });
+  assert.equal(gh.calls.length, 1);
+  assert.deepEqual(gh.calls[0].body, { labels: ["type:feature", "area:backend", "priority:low"] });
+});
+
 test("a board field is written by its id with the option's id", async () => {
   const gh = recordingGitHub();
   await setProjectOption("token-sintetico", "PVTI_card", "PVTSSF_campo", "opcao-1", { fetch: gh.fetch });
@@ -225,6 +235,14 @@ test("an Effort GitHub refuses on a new issue is skipped and reported, and the i
   const created = await createGeoCloudIssue("token-sintetico", NEW_ITEM, "Open", { fetch: refusing });
   assert.deepEqual(created, { url: "https://example.test/issues/900001", number: 900001, skipped: ["Effort"], resumo: "Texto" });
   assert.deepEqual(gh.written[BOARD.status.id], { singleSelectOptionId: "f130aaf8" });
+});
+
+test("a new issue is created with the label of its Priority, whichever of the three it is (issue #38)", async () => {
+  for (const [prioridade, label] of [["High", "priority:high"], ["Medium", "priority:medium"], ["Low", "priority:low"]] as const) {
+    const gh = creatingGitHub();
+    await createGeoCloudIssue("token-sintetico", { ...NEW_ITEM, prioridade }, "Open", { fetch: gh.fetch });
+    assert.deepEqual((gh.opened as { labels?: string[] }).labels, ["type:feature", "area:backend", label]);
+  }
 });
 
 test("an option the live board no longer has is skipped and reported, instead of failing the creation", async () => {
