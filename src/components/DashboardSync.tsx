@@ -82,27 +82,31 @@ export function DashboardBranch() {
   return <span className="font-mono">{model.branch}</span>;
 }
 
-export function SyncPill() {
-  const { isPending, error, notice, model, canSync, sync } = useSync();
-  // Shown in the viewer's time zone, which only the browser knows: "—" holds the line until then.
-  const syncedAt = useLocalTime(model.syncedAt);
-  const lastSync = model.syncedAt && (
-    <span className="text-[11px] text-rs-text-faint">{DASHBOARD.lastSync}: {syncedAt ?? "—"}</span>
-  );
-
+// Sync sits in the bar, beside the theme toggle, as on the Roadmap; its message hangs below it without moving the bar.
+export function NavSync() {
+  const { isPending, error, notice, canSync, sync } = useSync();
+  if (!canSync) return null;
+  const message = error || notice;
   return (
-    <div className="flex flex-col items-end gap-1">
-      {canSync && <SyncButton onClick={sync} isPending={isPending} />}
-      {error ? (
-        <span className="max-w-[260px] text-right text-[11px] text-red-500">{error}</span>
-      ) : (
-        <>
-          {notice && <span className="max-w-[260px] text-right text-[11px] text-rs-text-soft">{notice}</span>}
-          {lastSync}
-        </>
+    <div className="relative">
+      <SyncButton onClick={sync} isPending={isPending} tight />
+      {message && (
+        <span
+          className={`absolute right-0 top-full z-30 mt-1 w-max max-w-[260px] rounded-md bg-rs-card px-1.5 py-0.5 text-right text-[11px] ${error ? "text-red-500" : "text-rs-text-faint"}`}
+        >
+          {message}
+        </span>
       )}
     </div>
   );
+}
+
+export function SyncPill() {
+  const { model } = useSync();
+  // Shown in the viewer's time zone, which only the browser knows: "—" holds the line until then.
+  const syncedAt = useLocalTime(model.syncedAt);
+  if (!model.syncedAt) return null;
+  return <span className="text-[11px] text-rs-text-faint">{DASHBOARD.lastSync}: {syncedAt ?? "—"}</span>;
 }
 
 export function KpiCards() {
