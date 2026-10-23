@@ -183,7 +183,7 @@ resumo, nunca os cartões do quadro. Quem monta: `src/lib/frontlights/sync.ts`.
   Priority (campos do Project) e Effort (o campo de issue da organização). `pulled`: valores trazidos do GitHub (cada item com algum vira um `modify` com
   os campos trazidos, nas chaves `title`, `description`, `tipo`, `stack`, `prioridade` e `effort`, e `reason`
   `"field follows the issue on GitHub"`); `pushed`: valores escritos no GitHub (com as labels `type:`, `area:` e
-  `priority:high` que eles implicam e o tipo nativo); `failed`: itens em que algo falhou; `error` (texto) quando o
+  `priority:<high|medium|low>` que eles implicam, desde a #38, e o tipo nativo); `failed`: itens em que algo falhou; `error` (texto) quando o
   passo todo falhou. Ausente quando nada mudou. As lacunas das issues (campo vazio, label implicada, tipo nativo)
   passam a ser preenchidas aqui, com um valor editado no RoadS (nunca um padrão): a rotina de lacunas do Frontlights deixa de ser
   necessária.
