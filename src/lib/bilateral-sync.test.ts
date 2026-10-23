@@ -179,7 +179,7 @@ test("a Type, Stack or Priority that changed swaps the labels of its family, and
 });
 
 test("a field that did not change only fills the labels it implies and never removes one someone put there", () => {
-  assert.deepEqual(labelsAfter(["area:frontend"], { tipo: "chore", stack: "Backend", prioridade: "Critical" }, new Set()), [
+  assert.deepEqual(labelsAfter(["area:frontend"], { tipo: "chore", stack: "Backend", prioridade: "High" }, new Set()), [
     "area:frontend",
     "type:chore",
     "area:backend",

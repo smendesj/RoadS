@@ -14,7 +14,7 @@ export const TONE_CLASSES: Record<Tone, string> = {
 };
 
 export function prioridadeTone(p: Prioridade): Tone {
-  return { Critical: "red", High: "brand", Medium: "amber", Low: "neutral" }[p] as Tone;
+  return { High: "brand", Medium: "amber", Low: "neutral" }[p] as Tone;
 }
 
 export function effortTone(e: Effort): Tone {

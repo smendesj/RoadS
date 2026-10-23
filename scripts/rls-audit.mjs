@@ -109,8 +109,8 @@ try {
   await check("dev", "read own profile", "allow", async () => rows(await dev.c.from("profiles").select("id").eq("id", dev.id)));
   await check("dev", "read roadmap_sync_queue", "deny", async () => rows(await dev.c.from("roadmap_sync_queue").select("id").limit(1)));
   await check("dev", "insert roadmap_items", "deny", async () => rows(await dev.c.from("roadmap_items").insert({ lane_id: "zz-test-a", title: "[TESTE] dev", created_by: dev.id }).select("id")));
-  await check("dev", "update seeded item", "deny", async () => rows(await dev.c.from("roadmap_items").update({ prioridade: "Critical" }).eq("id", S).select("id")));
-  await check("dev", "update sm item", "deny", async () => rows(await dev.c.from("roadmap_items").update({ prioridade: "Critical" }).eq("id", M).select("id")));
+  await check("dev", "update seeded item", "deny", async () => rows(await dev.c.from("roadmap_items").update({ prioridade: "High" }).eq("id", S).select("id")));
+  await check("dev", "update sm item", "deny", async () => rows(await dev.c.from("roadmap_items").update({ prioridade: "High" }).eq("id", M).select("id")));
   await check("dev", "delete sm item", "deny", async () => rows(await dev.c.from("roadmap_items").delete().eq("id", M).select("id")));
   await check("dev", "insert note (as dev)", "deny", async () => rows(await dev.c.from("item_notes").insert({ item_id: M, author_id: dev.id, author_role: "dev", body: "[TESTE] nota de dev" }).select("id")));
   await check("dev", "insert note spoofing scrum_master", "deny", async () => rows(await dev.c.from("item_notes").insert({ item_id: M, author_id: dev.id, author_role: "scrum_master", body: "[TESTE] nota forjada" }).select("id")));
