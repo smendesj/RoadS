@@ -1,10 +1,10 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useTransition, type ReactNode } from "react";
-import { SyncButton } from "@/components/SyncButton";
+import { createContext, useContext, useState, useTransition, type ReactNode } from "react";
+import { BarSync } from "@/components/SyncButton";
 import { badgeClass } from "@/lib/tones";
 import { syncDashboard, type DashboardModel } from "@/lib/actions/dashboard";
-import { SYNC_FAILED, SYNC_NOTICE_MS } from "@/lib/sync-message";
+import { SYNC_FAILED } from "@/lib/sync-message";
 import { DASHBOARD, ofTotal } from "@/lib/text/dashboard";
 import { useAutoSync } from "@/lib/use-auto-sync";
 import { useLocalTime } from "@/lib/use-local-time";
@@ -16,6 +16,8 @@ type SyncContextValue = {
   isPending: boolean;
   canSync: boolean;
   sync: () => void;
+  /** Takes the message under the Sync button away (BarSync calls it after SYNC_NOTICE_MS). */
+  clearMessage: () => void;
 };
 
 const SyncContext = createContext<SyncContextValue | null>(null);
@@ -42,15 +44,10 @@ export function DashboardSyncProvider({
   const [notice, setNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // The message under the Sync button clears itself after a while (SYNC_NOTICE_MS).
-  useEffect(() => {
-    if (!error && !notice) return;
-    const timer = setTimeout(() => {
-      setError(null);
-      setNotice(null);
-    }, SYNC_NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [error, notice]);
+  function clearMessage() {
+    setError(null);
+    setNotice(null);
+  }
 
   function sync() {
     setError(null);
@@ -83,7 +80,7 @@ export function DashboardSyncProvider({
   }, canSync);
 
   return (
-    <SyncContext.Provider value={{ model, error, notice, isPending, canSync, sync }}>{children}</SyncContext.Provider>
+    <SyncContext.Provider value={{ model, error, notice, isPending, canSync, sync, clearMessage }}>{children}</SyncContext.Provider>
   );
 }
 
@@ -92,23 +89,12 @@ export function DashboardBranch() {
   return <span className="font-mono">{model.branch}</span>;
 }
 
-// Sync sits in the bar, beside the theme toggle, as on the Roadmap; its message hangs below it without moving the bar.
+// Sync sits in the bar, beside the theme toggle: the same BarSync as on the Roadmap.
 export function NavSync() {
-  const { isPending, error, notice, canSync, sync } = useSync();
+  const { isPending, error, notice, canSync, sync, clearMessage } = useSync();
   if (!canSync) return null;
-  const message = error || notice;
-  return (
-    <div className="relative">
-      <SyncButton onClick={sync} isPending={isPending} tight />
-      {message && (
-        <span
-          className={`absolute right-0 top-full z-30 mt-1 w-max max-w-[260px] rounded-md bg-rs-card px-1.5 py-0.5 text-right text-[11px] ${error ? "text-red-500" : "text-rs-text-faint"}`}
-        >
-          {message}
-        </span>
-      )}
-    </div>
-  );
+  const shown = error ? { text: error, error: true } : notice ? { text: notice, error: false } : null;
+  return <BarSync onSync={sync} isPending={isPending} notice={shown} onClear={clearMessage} />;
 }
 
 export function SyncPill() {

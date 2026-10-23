@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition, type ComponentProps, type HTMLAttributes, type ReactNode } from "react";
 import { NavBar } from "@/components/NavBar";
 import { ItemCard, type EditDraft } from "@/components/ItemCard";
-import { SyncButton } from "@/components/SyncButton";
+import { BarSync, type SyncNotice } from "@/components/SyncButton";
 import { createRoadmapItem, deleteRoadmapItem, getRoadmapBoard, moveRoadmapItemLane, saveRoadmapItemEdit } from "@/lib/actions/roadmap";
 import { syncBoardAsViewer } from "@/lib/actions/sync";
 import { listAssignableProfiles } from "@/lib/actions/assignees";
@@ -17,7 +17,7 @@ import { KANBAN, NEW_ITEM_LANE, unplanLane } from "@/lib/issue-lane";
 import { DONE_WINDOW_DAYS, kanbanColumns, type KanbanIssue } from "@/lib/kanban";
 import { columnClass, KANBAN_TABS, shownTab, type KanbanTab } from "@/lib/kanban-tabs";
 import { moveItem } from "@/lib/roadmap-move";
-import { brakeMessage, roadmapSyncMessage, SYNC_NOTICE_MS, syncFailureMessage } from "@/lib/sync-message";
+import { brakeMessage, roadmapSyncMessage, syncFailureMessage } from "@/lib/sync-message";
 import { badgeClass } from "@/lib/tones";
 import { MAX_ITEMS_PER_SPRINT, type Lane, type RoadmapGroup, type RoadmapItem, type ViewAs } from "@/lib/types";
 import type { Viewer } from "@/lib/viewer";
@@ -76,23 +76,17 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
   }, [viewer]);
 
   // Pulls GitHub again: open issues the Roadmap lacks come in, closed ones leave the Kanban.
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<SyncNotice>(null);
   const [isSyncing, startSync] = useTransition();
-  // The message under the Sync button clears itself after a while (SYNC_NOTICE_MS).
-  useEffect(() => {
-    if (!syncMessage) return;
-    const timer = setTimeout(() => setSyncMessage(null), SYNC_NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [syncMessage]);
   function syncIssues() {
     setSyncMessage(null);
     startSync(async () => {
       const result = await syncBoardAsViewer();
       if (!result.ok) {
-        setSyncMessage(syncFailureMessage(result));
+        setSyncMessage({ text: syncFailureMessage(result), error: true });
         return;
       }
-      setSyncMessage(result.cached ? brakeMessage(result.retryInMs) : roadmapSyncMessage(result.roadmap));
+      setSyncMessage({ text: result.cached ? brakeMessage(result.retryInMs) : roadmapSyncMessage(result.roadmap), error: false });
       reloadBoard();
     });
   }
@@ -123,13 +117,13 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
     syncBoardAsViewer()
       .then((result) => {
         if (!mounted.current) return;
-        if (!result.ok) return setSyncMessage(syncFailureMessage(result));
+        if (!result.ok) return setSyncMessage({ text: syncFailureMessage(result), error: true });
         if (result.cached) {
           if (retryTimer.current) window.clearTimeout(retryTimer.current);
           retryTimer.current = window.setTimeout(syncAfterMove, retryDelay(result.retryInMs));
           return;
         }
-        setSyncMessage(roadmapSyncMessage(result.roadmap));
+        setSyncMessage({ text: roadmapSyncMessage(result.roadmap), error: false });
         reloadBoard();
       })
       .catch((e) => console.error("sync after move failed", e));
@@ -338,14 +332,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
         showConfig={isAdmin}
         actions={
           myRole !== null && (
-            <div className="relative">
-              <SyncButton onClick={syncIssues} isPending={isSyncing} tight />
-              {syncMessage && (
-                <span className="absolute right-0 top-full z-30 mt-1 w-max max-w-[260px] rounded-md bg-rs-card px-1.5 py-0.5 text-right text-[11px] text-rs-text-faint">
-                  {syncMessage}
-                </span>
-              )}
-            </div>
+            <BarSync onSync={syncIssues} isPending={isSyncing} notice={syncMessage} onClear={() => setSyncMessage(null)} />
           )
         }
       />
