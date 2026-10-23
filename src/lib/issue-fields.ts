@@ -67,14 +67,23 @@ export function areaLabels(stack: Stack): string[] {
   return (AREAS[stack] ?? []).map((a) => `area:${a}`);
 }
 
-/** Whether a Priority implies the priority:high label. */
-export function isHighPriority(prioridade: Prioridade): boolean {
-  return prioridade === "High";
+// Each Priority has its own label on the issue (issue #38): priority:high, priority:medium or priority:low, one of
+// them per issue, like the Type's type: family. The three labels exist in the product repository since the triage
+// that dropped Critical, so the rule stays here, next to the board's options, rather than on a list read from GitHub.
+
+/** The priority: label a Priority implies. */
+export function priorityLabel(prioridade: Prioridade): string {
+  return `priority:${prioridade.toLowerCase()}`;
 }
 
-/** The labels an issue is created with: its type, the area its stack implies, and priority:high when it is. */
+/** Whether a label is one of the Priority's family (priority:high, priority:medium or priority:low). */
+export function isPriorityLabel(label: string): boolean {
+  return PRIORIDADES.some((p) => priorityLabel(p) === label);
+}
+
+/** The labels an issue is created with: its type, the area its stack implies, and the label of its Priority. */
 export function issueLabels(tipo: Tipo, stack: Stack, prioridade: Prioridade): string[] {
-  return [`type:${tipo}`, ...areaLabels(stack), ...(isHighPriority(prioridade) ? ["priority:high"] : [])];
+  return [`type:${tipo}`, ...areaLabels(stack), priorityLabel(prioridade)];
 }
 
 export function isTipo(v: unknown): v is Tipo {
