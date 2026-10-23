@@ -16,7 +16,7 @@ export function getLanes(): Lane[] {
           id: "715",
           title: "Gateway de pagamentos — Asaas e Stripe",
           produto: "GeoCloud",
-          prioridade: "Critical",
+          prioridade: "High",
           effort: "High",
           desc: "Billing interno com adaptador por provedor. Provedor já decidido: os dois — cotação e contratação primeiro, depois credenciais e webhook.",
           url: GH + "715",
@@ -124,7 +124,7 @@ export function getRoadmapGroups(): RoadmapGroup[] {
       id: "g4",
       title: "Dívida técnica",
       items: [
-        { id: "r9", title: "Escopo de empresa ao conceder acesso a projeto", produto: "GeoCloud", prioridade: "Critical", effort: "Low", desc: "Hoje dá pra inserir usuário de outra empresa em projeto seu — urgente, mas rápido de corrigir.", url: null, notes: [] },
+        { id: "r9", title: "Escopo de empresa ao conceder acesso a projeto", produto: "GeoCloud", prioridade: "High", effort: "Low", desc: "Hoje dá pra inserir usuário de outra empresa em projeto seu — urgente, mas rápido de corrigir.", url: null, notes: [] },
         { id: "r10", title: "Conversão de unidade de ensaio, hoje adivinhada", produto: "GeoCloud", prioridade: "Medium", effort: "Medium", desc: "Antes de qualquer relatório de teor sair do sistema.", url: null, notes: [] },
       ],
     },

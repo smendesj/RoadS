@@ -2,14 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Effort, Prioridade, Produto, RoadmapItem } from "@/lib/types";
-import { isStack, isTipo, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } from "@/lib/issue-fields";
+import { isStack, isTipo, PRIORIDADES, STACKS, TIPO_LABELS, TIPOS, type Stack, type Tipo } from "@/lib/issue-fields";
 import { badgeClass, effortTone, prioridadeTone, produtoTone } from "@/lib/tones";
 import { assigneeNames } from "@/lib/assignee-sync";
 import { extractResumo, type SelectorStatus } from "@/lib/bilateral-sync";
 import { ACTION, FIELD } from "@/lib/text/common";
 import { deleteItemConfirm, ROADMAP } from "@/lib/text/roadmap";
 
-const PRIORIDADES: Prioridade[] = ["Critical", "High", "Medium", "Low"];
 const EFFORTS: Effort[] = ["High", "Medium", "Low"];
 
 /** content is only present when the viewer may edit title/description/product (admin, or RoadS-created items). */
