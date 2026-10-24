@@ -235,6 +235,8 @@ const FOLLOW_UP_BODY = [
   /^\s*origem\s*:[^\n]{0,200}\b(?:follow-?ups?|achados?|revis[aã]o|revis[oõ]es|campanha|pend[eê]ncias?)\b/i,
 ];
 const CHECKBOX_LINE = /^[ \t]*(?:[-*+]|[0-9]{1,9}[.)])[ \t]+\[[ xX]\](?=[ \t]|$)/;
+// A slice of a delivery, the way Frontlights labels its criteria boxes since it stopped creating sub-issues: "S1.", "**S2.**".
+const SLICE_BOX = /^[*_\s]*S\d+\./;
 /** Five or more issues by one person, each within five minutes of the previous one, is a planning session. */
 const BATCH_MIN = 5;
 const BATCH_GAP_MS = 5 * 60_000;
@@ -502,7 +504,8 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     if (i.state === "closed" && i.stateReason === "not_planned") return "fechada como não planejada";
     // Whatever the team moved to the sprint board is real work, whatever it is called.
     if (atEnd === "Development" || atEnd === "Blocker") return null;
-    // The label and the body tell small stray tickets from real work; an issue already broken into parts is real work.
+    // The label and the body tell small stray tickets from real work; an issue already broken into parts (sub-issues, or
+    // `S<k>.` slices in its criteria) is real work.
     if (!hasParts) {
       const labels = i.labels.map((l) => l.toLowerCase());
       if (labels.some((l) => INTERNAL_LABELS.has(l)) && !labels.some((l) => FEATURE_LABELS.has(l))) return "rótulo de teste/chore/infra";
@@ -558,7 +561,8 @@ export function buildFacts(input: FactsInput): ProgressFacts {
     ];
     const active = activity.some(inWindow);
 
-    const reason = internalReason(issue, atEnd, prs, epics, family.length > 0);
+    const sliced = (parts.boxed?.boxes ?? []).some((b) => SLICE_BOX.test(b.text));
+    const reason = internalReason(issue, atEnd, prs, epics, family.length > 0 || sliced);
     if (reason) {
       if (active) internal.push({ ref: `#${issue.number}`, title: issue.title, reason });
       continue;

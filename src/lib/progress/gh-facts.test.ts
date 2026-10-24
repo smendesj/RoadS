@@ -1074,6 +1074,23 @@ test("a follow-up issue still reads as internal, boxes or not; a delivery whose 
   assert.deepEqual(f.entries.find((x) => x.issue === 16)?.subIssues, { total: 2, done: 1 });
 });
 
+test("an issue cut into slices (an `S<k>.` box in its criteria) is real work, even if its body names findings or it carries a chore label", () => {
+  const done = { bodyHistory: { versions: [], complete: true } };
+  const origin = "Origem: lote de achados da issue #4.\n\n";
+  const f = facts({
+    issues: [
+      issue(18, { body: origin + criteria("- [x] S1. Botão só onde cabe.", "- [x] **S2.** Ordem do TAB.", "- [x] P1. Pendência"), ...done }),
+      issue(19, { labels: ["type:chore", "type:test"], body: criteria("- [x] S1. Script novo.", "- [ ] S2. Outro."), ...done }),
+      // Boxes without a slice label are no slices: the same texts stay internal.
+      issue(20, { body: origin + criteria("- [x] Corrigir o nome do campo"), ...done }),
+      issue(21, { labels: ["type:chore"], body: criteria("- [x] Atualizar a dependência"), ...done }),
+    ],
+    prs: [18, 19, 20, 21].map((n) => pr(1000 + n, { title: `Entrega (#${n})` })),
+  });
+  assert.deepEqual(f.entries.map((x) => x.issue), [18, 19]);
+  assert.deepEqual(f.internal.items.map((i) => [i.ref, i.reason]), [["#20", "pendência de revisão"], ["#21", "rótulo de teste/chore/infra"]]);
+});
+
 test("a delivery concluded with boxes still open says so in its evidence, and counts only the ticked ones", () => {
   const body = criteria("- [x] S1. a", "- [ ] S2. b", "- [ ] S3. c");
   const f = facts({

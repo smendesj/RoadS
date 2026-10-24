@@ -320,7 +320,9 @@ ignora. `scope`, `window`, `entries`, `internal`, `gitWork` e o resto de cada en
   (um pedido cada, para achar as entregas) e só desce até as partes nas entregas com novidade (tocadas no período, na
   coluna Development/Blocker ou com parte tocada); as demais ficam só com nome e estado, o bastante para o epic contá-las.
   As regras de rótulo (`chore`, `infra`, teste) e de corpo ("pendência de revisão") são para tickets avulsos: uma issue
-  já decomposta em sub-issues é trabalho de verdade e não é tratada como interna por elas.
+  já decomposta em partes é trabalho de verdade e não é tratada como interna por elas: em sub-issues, ou (desde
+  2026-10-24) em fatias, ao menos uma caixa `S<k>.` (`S1.`, `**S2.**`) nos critérios de aceitação. Caixas sem esse
+  rótulo não bastam: um ticket de pendência com uma caixa solta segue interno.
 - **`entries[].subIssues`** `{ total, done }` (ou `null` quando a entrega não tem partes) conta as **partes** da
   entrega pela regra de `src/lib/parts.ts`, a mesma do quadro Sprint do Dashboard (desde 2026-10-16): as **caixas da
   seção de critérios de aceitação** do corpo, sempre, mais as **sub-issues diretas ainda abertas**. `done` são as
