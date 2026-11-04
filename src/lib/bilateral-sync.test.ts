@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   decideField,
+  gapRule,
   deletionComment,
   descriptionPull,
   effortSides,
@@ -272,6 +273,23 @@ test("the issue's Week reads as the Monday of the date on the card, a weekend as
   assert.equal(weekOfIssue("2026-10-19"), "2026-10-19");
   assert.equal(weekOfIssue("2026-10-25"), "2026-10-26");
   assert.equal(weekOfIssue(null), "");
+});
+
+test("an empty Week on the board takes the item out of its RoadS week unless someone put it there in RoadS", () => {
+  const week = { ...gapRule("week"), githubAt: null };
+  // Planned in RoadS by a lane move nobody timed (base "", no roadsAt): the board's empty Week wins and the item leaves.
+  assert.equal(decideField({ ...week, roads: "2027-01-18", base: "", github: "", roadsAt: null }), "pull");
+  assert.equal(decideField({ ...week, roads: "2027-01-18", base: null, github: "", roadsAt: null }), "pull");
+  // Someone dragged it into the week in RoadS and the board never had a Week: RoadS writes it there.
+  assert.equal(decideField({ ...week, roads: "2027-01-18", base: "", github: "", roadsAt: "2026-11-04T10:00:00Z" }), "push");
+  // The board had the week and someone emptied it there: the item leaves, even if RoadS moved it long ago.
+  assert.equal(decideField({ ...week, roads: "2027-01-18", base: "2027-01-18", github: "", roadsAt: "2026-10-01T10:00:00Z" }), "pull");
+  // A Week the board brings to an item still in a block (first look) comes in.
+  assert.equal(decideField({ ...week, roads: "", base: null, github: "2026-11-09", roadsAt: null }), "pull");
+  // The other card fields keep the gap rule: an empty one is filled by RoadS or waits.
+  assert.deepEqual(gapRule("stack"), { fillGap: true, emptyIsAnswer: false });
+  assert.deepEqual(gapRule("title"), { fillGap: false, emptyIsAnswer: false });
+  assert.deepEqual(gapRule("status"), { fillGap: false, emptyIsAnswer: false });
 });
 
 test("a Week brought from GitHub moves the item into that week, an empty one back to its block, and a week gone by nowhere", () => {

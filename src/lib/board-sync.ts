@@ -32,7 +32,7 @@ import "server-only";
 
 import { createGeoCloudIssue, GEOCLOUD_REPO, PRIORIDADE_FIELD_ID, clearProjectField, readBoardFields, readIssueChangeTimes, readIssue, readIssueEfforts, setIssueEffort, setProjectDate, setProjectOption, setProjectStatus, STACK_FIELD_ID, updateIssue, type IssueChange, type IssueChangeTimes } from "@/lib/github";
 import { importableIssues, isTestData, mayGetIssue } from "@/lib/test-data";
-import { decideField, descriptionPull, followClosedIssue, effortSides, extractResumo, labelsAfter, sameBase, nativeTypeOf, pushesToGitHub, statusOfIssue, statusWrites, tipoOfLabels, weekOfIssue, weekOfLane, weekPull, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
+import { decideField, descriptionPull, gapRule, followClosedIssue, effortSides, extractResumo, labelsAfter, sameBase, nativeTypeOf, pushesToGitHub, statusOfIssue, statusWrites, tipoOfLabels, weekOfIssue, weekOfLane, weekPull, type ItemStatus, type LabelledField } from "@/lib/bilateral-sync";
 import { syncItemComments, type CommentsSummary } from "@/lib/comments-sync";
 import { syncItemAssignees, type AssigneesSummary } from "@/lib/assignees-sync";
 import { BOARD_REPO, boardCard, kanbanSort, otherRepoCounts, projectCard, sortCards, withStatusWrites, type BoardCard, type BoardStatus, type ProjectCard, type SortableCard, type SortKey } from "@/lib/board";
@@ -596,7 +596,7 @@ async function syncIssueFields(
           github,
           roadsAt: row.changedAt[field] ?? null,
           githubAt: githubAtOf(field, side, times.get(row.number)) ?? null,
-          fillGap: field !== "title" && field !== "status",
+          ...gapRule(field),
         });
         if (decision === "pull" && field === "week") {
           // A Week brought in moves the item; a week gone by moves nothing and is looked at again next time.

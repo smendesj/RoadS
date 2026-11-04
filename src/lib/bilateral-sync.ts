@@ -29,13 +29,27 @@ export type FieldSides = {
    * with a value someone edited in RoadS (`roadsAt`), never with a default nobody chose, which waits for that edit.
    */
   fillGap?: boolean;
+  /**
+   * With `fillGap`: an empty value on GitHub is an answer, not a default (the Week). It is filled only with a value
+   * someone edited in RoadS while the board never had one; otherwise RoadS takes the empty value (the item leaves its
+   * week). A board that had a value and lost it emptied it on purpose, and the usual rule decides.
+   */
+  emptyIsAnswer?: boolean;
 };
 
 export type FieldDecision = "pull" | "push" | "none";
 
+/** How a field reads an empty value on GitHub: Title and Status have no gap; the Week's empty value is an answer. */
+export function gapRule(field: string): { fillGap: boolean; emptyIsAnswer: boolean } {
+  return { fillGap: field !== "title" && field !== "status", emptyIsAnswer: field === "week" };
+}
+
 export function decideField(f: FieldSides): FieldDecision {
   if (f.roads === f.github) return "none";
-  if (f.fillGap && f.github === "") return f.roadsAt ? "push" : "none";
+  if (f.fillGap && f.github === "") {
+    if (!f.emptyIsAnswer) return f.roadsAt ? "push" : "none";
+    if (!f.base) return f.roadsAt ? "push" : "pull";
+  }
   if (f.base === null) return "pull";
   const roadsMoved = f.roads !== f.base;
   const githubMoved = f.github !== f.base;
