@@ -1,7 +1,7 @@
 import { NavBar } from "@/components/NavBar";
 import { DashboardBranch, DashboardSyncProvider, KpiCards, NavSync, SprintPanels, SyncPill } from "@/components/DashboardSync";
 import { getDashboard } from "@/lib/actions/dashboard";
-import { getViewerOrReset } from "@/lib/get-viewer";
+import { getViewerOrReset, isControlsMember } from "@/lib/get-viewer";
 import { dashboardData } from "@/lib/mock-data";
 import { DASHBOARD } from "@/lib/text/dashboard";
 import type { Metadata } from "next";
@@ -17,12 +17,12 @@ export default async function DashboardPage() {
 
   // Everything comes from the Roadmap + the last GitHub sync; the mock columns (only the KPIs read them) fill in
   // before the very first sync ever ran.
-  const model = await getDashboard(dashboardData.columns);
+  const [model, showControls] = await Promise.all([getDashboard(dashboardData.columns), isControlsMember()]);
 
   return (
     <DashboardSyncProvider initialModel={model} canSync={viewer?.role != null}>
     <div className="min-h-screen">
-      <NavBar active="dashboard" role={viewer?.role ?? null} avatar={viewer?.avatar ?? null} showConfig={isAdmin} actions={<NavSync />} />
+      <NavBar active="dashboard" role={viewer?.role ?? null} avatar={viewer?.avatar ?? null} showConfig={isAdmin} showControls={showControls} actions={<NavSync />} />
 
       <div className="flex flex-col gap-6 p-4 sm:p-6 lg:gap-8 lg:p-10">
           <div className="flex flex-wrap items-end justify-between gap-3">

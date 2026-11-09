@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { RESUMO } from "@/lib/text/resumo";
+import { isControlsMember } from "@/lib/get-viewer";
 import { loadCurrentReport, loadSentList, requireReportViewer } from "./data";
 import { ResumoScreen } from "./screen";
 
@@ -10,6 +11,6 @@ export const metadata: Metadata = { title: RESUMO.pageTitle };
 // Level Security says no on its own; the server actions the screen calls check the role again.
 export default async function ResumoPage() {
   const viewer = await requireReportViewer();
-  const [load, sent] = await Promise.all([loadCurrentReport(viewer.role), loadSentList()]);
-  return <ResumoScreen viewer={viewer} load={load} sent={sent} isCurrentView />;
+  const [load, sent, showControls] = await Promise.all([loadCurrentReport(viewer.role), loadSentList(), isControlsMember()]);
+  return <ResumoScreen viewer={viewer} load={load} sent={sent} isCurrentView showControls={showControls} />;
 }

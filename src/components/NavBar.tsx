@@ -7,6 +7,7 @@ import { SessionGuard } from "@/components/SessionGuard";
 import { UserMenu } from "@/components/UserMenu";
 import { useTheme } from "@/lib/theme-provider";
 import { AUTH, NAV } from "@/lib/text/account";
+import { CONTROLS_NAME } from "@/lib/text/controls";
 import { RESUMO_NAME } from "@/lib/text/resumo";
 import type { Role } from "@/lib/types";
 import { roleLabel } from "@/lib/viewer";
@@ -23,7 +24,7 @@ function SunMoonIcon({ theme }: { theme: "light" | "dark" }) {
   );
 }
 
-type Tab = "dashboard" | "roadmap" | "resumo" | "config";
+type Tab = "dashboard" | "roadmap" | "controls" | "resumo" | "config";
 
 // showConfig is only ever true for admin — the Config tab doesn't render for anyone else. The Resumo
 // tab follows the role (admin and scrum master only). `role` is null for a visitor; what is shown is decided on the
@@ -34,19 +35,21 @@ export function NavBar({
   role,
   avatar = null,
   showConfig = false,
+  showControls = false,
   actions = null,
 }: {
   active: Tab;
   role: Role | null;
   avatar?: string | null;
   showConfig?: boolean;
+  showControls?: boolean;
   actions?: ReactNode;
 }) {
   const { theme, toggle } = useTheme();
   const showResumo = role === "admin" || role === "scrum_master";
-  // Four tabs (admin) do not fit a 320px phone at the usual size: tighter below sm, and the bar scrolls
-  // inside itself rather than ever widening the page.
-  const crowded = showResumo && showConfig;
+  // The tabs do not all fit a 320px phone at the usual size: tighter below sm, and the bar scrolls
+  // inside itself rather than ever widening the page, once a member sees more than the two base tabs.
+  const crowded = (showResumo && showConfig) || showControls;
 
   // Below md the tabs share the bar's width, each label centered in its tab on one line.
   const tabClass = (tab: Tab) =>
@@ -69,6 +72,11 @@ export function NavBar({
         <Link href="/roadmap" className={tabClass("roadmap")}>
           Roadmap
         </Link>
+        {showControls && (
+          <Link href="/controls" className={tabClass("controls")}>
+            {CONTROLS_NAME}
+          </Link>
+        )}
         {showResumo && (
           <Link href="/resumo" className={tabClass("resumo")}>
             {RESUMO_NAME}

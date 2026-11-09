@@ -14,6 +14,7 @@ const PUBLIC_ACTIONS: Record<string, string[]> = {
   "dashboard.ts": ["getDashboard", "syncDashboard"],
   "progress.ts": ["markProgressReportSent", "saveProgressEdit", "setProgressChecked"],
   "roadmap.ts": ["createRoadmapItem", "deleteRoadmapItem", "getRoadmapBoard", "moveRoadmapItemLane", "saveRoadmapItemEdit"],
+  "subscriptions.ts": ["createSubscription", "deleteSubscription", "listSubscriptions", "revealSubscriptionSecret", "updateSubscription"],
   "sync.ts": ["getLatestBoardSnapshot", "syncBoardAsViewer"],
 };
 

@@ -76,12 +76,14 @@ export function ResumoScreen({
   load,
   sent,
   isCurrentView,
+  showControls = false,
 }: {
   viewer: Viewer;
   load: ReportLoad;
   sent: { list: SentSummary[]; failed: boolean };
   /** True on /resumo: when the report on show was already sent, say that no newer draft exists. */
   isCurrentView: boolean;
+  showControls?: boolean;
 }) {
   const { failed } = load;
   const reviewer = canReview(viewer.role);
@@ -90,7 +92,7 @@ export function ResumoScreen({
 
   return (
     <div className="min-h-screen">
-      <NavBar active="resumo" role={viewer.role} avatar={viewer.avatar} showConfig={viewer.role === "admin"} />
+      <NavBar active="resumo" role={viewer.role} avatar={viewer.avatar} showConfig={viewer.role === "admin"} showControls={showControls} />
 
       <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-10">
         <div className="flex flex-col gap-1.5">

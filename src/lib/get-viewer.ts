@@ -1,6 +1,7 @@
 import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
+import { isControlsEmail } from "@/lib/controls/access";
 import { createClient } from "@/lib/supabase/server";
 import { loadViewer } from "@/lib/viewer";
 
@@ -21,3 +22,13 @@ export async function getViewerOrReset() {
   if (viewer?.mustResetPassword) redirect("/redefinir-senha");
   return viewer;
 }
+
+// Whether the signed-in user is a ControlS member (the e-mail allowlist, same boundary the database enforces).
+// Looked up once per request; drives the ControlS nav tab and gates its page. Not tied to a role.
+export const isControlsMember = cache(async (): Promise<boolean> => {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return isControlsEmail(user?.email);
+});

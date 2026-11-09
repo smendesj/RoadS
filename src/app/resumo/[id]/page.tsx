@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { RESUMO } from "@/lib/text/resumo";
 import { notFound } from "next/navigation";
 import { isUuid } from "@/lib/progress/report-view";
+import { isControlsMember } from "@/lib/get-viewer";
 import { loadReportById, loadSentList, requireReportViewer } from "../data";
 import { ResumoScreen } from "../screen";
 
@@ -14,7 +15,7 @@ export default async function ResumoByIdPage({ params }: { params: Promise<{ id:
   const { id } = await params;
   if (!isUuid(id)) notFound();
 
-  const [load, sent] = await Promise.all([loadReportById(id, viewer.role), loadSentList()]);
+  const [load, sent, showControls] = await Promise.all([loadReportById(id, viewer.role), loadSentList(), isControlsMember()]);
   if (!load.failed && !load.row) notFound();
-  return <ResumoScreen viewer={viewer} load={load} sent={sent} isCurrentView={false} />;
+  return <ResumoScreen viewer={viewer} load={load} sent={sent} isCurrentView={false} showControls={showControls} />;
 }

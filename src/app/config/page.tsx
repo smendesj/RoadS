@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { NavBar } from "@/components/NavBar";
 import { ConfigPanel } from "@/components/ConfigPanel";
-import { getViewerOrReset } from "@/lib/get-viewer";
+import { getViewerOrReset, isControlsMember } from "@/lib/get-viewer";
 
 export const metadata: Metadata = { title: "RoadS — Config" };
 
@@ -12,10 +12,11 @@ export default async function ConfigPage() {
   const viewer = await getViewerOrReset();
   if (!viewer) redirect("/login");
   if (viewer.role !== "admin") redirect("/dashboard");
+  const showControls = await isControlsMember();
 
   return (
     <div className="min-h-screen">
-      <NavBar active="config" role="admin" avatar={viewer.avatar} showConfig />
+      <NavBar active="config" role="admin" avatar={viewer.avatar} showConfig showControls={showControls} />
 
       <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-10">
         <h1 className="text-2xl font-extrabold text-rs-text sm:text-3xl">Config</h1>

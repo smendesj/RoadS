@@ -29,7 +29,7 @@ type Place = "week" | "open";
 
 // The viewer comes from the server with the page, so the real session and role are known from the
 // first render (null only when nobody is signed in, which gets the least-privileged view: no edit).
-export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
+export function RoadmapView({ viewer, showControls = false }: { viewer: Viewer | null; showControls?: boolean }) {
   const myRole = viewer?.role ?? null;
   const myId = viewer?.id ?? null;
 
@@ -330,6 +330,7 @@ export function RoadmapView({ viewer }: { viewer: Viewer | null }) {
         role={myRole}
         avatar={viewer?.avatar ?? null}
         showConfig={isAdmin}
+        showControls={showControls}
         actions={
           myRole !== null && (
             <BarSync onSync={syncIssues} isPending={isSyncing} notice={syncMessage} onClear={() => setSyncMessage(null)} />
