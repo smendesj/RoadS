@@ -22,20 +22,21 @@ const blockedStorage = {
   },
 };
 
-test("the theme is light when nothing is stored", () => {
-  assert.equal(createThemeStore(() => fakeStorage()).getSnapshot(), "light");
+test("the theme is dark when nothing is stored", () => {
+  assert.equal(createThemeStore(() => fakeStorage()).getSnapshot(), "dark");
 });
 
 test("the stored theme is the starting point", () => {
+  assert.equal(createThemeStore(() => fakeStorage({ "roads-theme": "light" })).getSnapshot(), "light");
   assert.equal(createThemeStore(() => fakeStorage({ "roads-theme": "dark" })).getSnapshot(), "dark");
 });
 
 test("a stored value that is not a theme is ignored", () => {
-  assert.equal(createThemeStore(() => fakeStorage({ "roads-theme": "purple" })).getSnapshot(), "light");
+  assert.equal(createThemeStore(() => fakeStorage({ "roads-theme": "purple" })).getSnapshot(), "dark");
 });
 
-test("the server render and hydration always start on light", () => {
-  assert.equal(createThemeStore(() => fakeStorage({ "roads-theme": "dark" })).getServerSnapshot(), "light");
+test("the server render and hydration always start on the dark default", () => {
+  assert.equal(createThemeStore(() => fakeStorage({ "roads-theme": "light" })).getServerSnapshot(), "dark");
 });
 
 test("choosing a theme persists it and tells subscribers", () => {
@@ -43,9 +44,9 @@ test("choosing a theme persists it and tells subscribers", () => {
   const store = createThemeStore(() => storage);
   let notified = 0;
   store.subscribe(() => notified++);
-  store.set("dark");
-  assert.equal(store.getSnapshot(), "dark");
-  assert.equal(storage.data["roads-theme"], "dark");
+  store.set("light");
+  assert.equal(store.getSnapshot(), "light");
+  assert.equal(storage.data["roads-theme"], "light");
   assert.equal(notified, 1);
 });
 
@@ -58,22 +59,22 @@ test("an unsubscribed listener is no longer told", () => {
   assert.equal(notified, 0);
 });
 
-test("toggling flips between light and dark", () => {
+test("toggling flips between dark and light", () => {
   const store = createThemeStore(() => fakeStorage());
   store.toggle();
-  assert.equal(store.getSnapshot(), "dark");
-  store.toggle();
   assert.equal(store.getSnapshot(), "light");
+  store.toggle();
+  assert.equal(store.getSnapshot(), "dark");
 });
 
 test("with storage blocked, the theme still toggles for the session", () => {
   const store = createThemeStore(() => blockedStorage);
-  assert.equal(store.getSnapshot(), "light");
-  store.toggle();
   assert.equal(store.getSnapshot(), "dark");
+  store.toggle();
+  assert.equal(store.getSnapshot(), "light");
 });
 
-// The head script runs before first paint, so a stored dark theme never flashes light.
+// The head script runs before first paint, so the dark default never flashes light.
 function runHeadScript(stored: string | null | "blocked") {
   const added: string[] = [];
   const win = {
@@ -89,16 +90,16 @@ function runHeadScript(stored: string | null | "blocked") {
   return added;
 }
 
-test("the head script paints dark straight away when dark is stored", () => {
+test("the head script paints dark straight away by default", () => {
   assert.deepEqual(runHeadScript("dark"), ["dark"]);
+  assert.deepEqual(runHeadScript(null), ["dark"]);
+  assert.deepEqual(runHeadScript("purple"), ["dark"]);
 });
 
-test("the head script leaves light, missing and garbage values alone", () => {
+test("the head script keeps light only when light was chosen", () => {
   assert.deepEqual(runHeadScript("light"), []);
-  assert.deepEqual(runHeadScript(null), []);
-  assert.deepEqual(runHeadScript("purple"), []);
 });
 
-test("the head script never throws when storage is blocked", () => {
-  assert.deepEqual(runHeadScript("blocked"), []);
+test("the head script never throws when storage is blocked, and stays dark", () => {
+  assert.deepEqual(runHeadScript("blocked"), ["dark"]);
 });
